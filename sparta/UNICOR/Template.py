@@ -105,12 +105,16 @@ class Template:
             # which has to be downloaded an extracted manually,
             # the medium res wv vector is computed in the following way:
 
-            w = s.copy()
-            w[0] = np.e ** hdul_spec[0].header["CRVAL1"]
-            beta = hdul_spec[0].header["CDELT1"]
+            # ----- START of low-res insertion -------
 
-            for i in range(len(w) - 1):
-                w[i + 1] = w[0] * (1 + beta) ** i
+            # w = s.copy()
+            # w[0] = np.e ** hdul_spec[0].header["CRVAL1"]
+            # beta = hdul_spec[0].header["CDELT1"]
+
+            # for i in range(len(w) - 1):
+            #     w[i + 1] = w[0] * (1 + beta) ** i
+
+            # ------- END of low-res insertion ---------
 
             # star mass g
             self.PHXMASS = hdul_spec[0].header['PHXMASS']
