@@ -1,13 +1,13 @@
 # SPARTA
 
 <p>
-<a href="https://github.com/saharsh1/SPARTA/">
+<a href="https://github.com/SPARTA-dev/SPARTA">
     <img src="https://img.shields.io/badge/GitHub-SPARTA--dev%2FSPARTA-blue?style=flat"></a>
-<a href="https://github.com/saharsh1/SPARTA/blob/master/LICENSE">
+<a href="https://github.com/SPARTA-dev/SPARTA/blob/master/LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-blue?style=flat"></a>
-<a href="https://github.com/saharsh1/SPARTA/Docs">
+<a href="https://github.com/SPARTA-dev/SPARTA">
     <img src="https://img.shields.io/badge/read-USuRPER_paper_draft-yellowgreen?style=flat"></a>
-<a href="https://github.com/saharsh1/SPARTA/blob/master/examples">
+<a href="https://github.com/SPARTA-dev/SPARTA/tree/master/examples">
     <img src="https://img.shields.io/badge/tutorials-notebooks-yellowgreen?style=flat"></a>
 </p>
 
