@@ -55,7 +55,7 @@ class TimeSeries:
     # =============================================================================
     # =============================================================================
     def calc_rv_against_template(self, spec_list, template, dv=0.1, VelBound=150,
-                                 err_per_ord=False, combine_ccfs=True):
+                                 err_per_ord=False, combine_ccfs=True, fastccf=False):
         '''
         This function calculates radial velocity for the entire spectrum time series, using CCF against resting template.
         :param: spec_list - a list of Spectrum objects, with the observed data.
@@ -80,7 +80,8 @@ class TimeSeries:
                                                  spec=spec,
                                                  dv=dv,
                                                  VelBound=VelBound,
-                                                 err_per_ord=err_per_ord)
+                                                 err_per_ord=err_per_ord,
+                                                 fastccf=fastccf)
                 if combine_ccfs:
                     ccf.CombineCCFs()
 

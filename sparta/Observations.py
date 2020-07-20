@@ -158,7 +158,7 @@ class Observations:
 # =============================================================================
 # =============================================================================
     def calc_rv_against_template(self, template, dv=0.1, VelBound=150,
-                                 err_per_ord=False, combine_ccfs=True):
+                                 err_per_ord=False, combine_ccfs=True, fastccf=False):
         '''
         TBD tbd finish documentation
         :param template:
@@ -175,7 +175,8 @@ class Observations:
                                          dv=dv,
                                          VelBound=VelBound,
                                          err_per_ord=err_per_ord,
-                                         combine_ccfs=combine_ccfs)
+                                         combine_ccfs=combine_ccfs,
+                                         fastccf=fastccf)
                 )
 
         vels = np.zeros(self.sample_size)

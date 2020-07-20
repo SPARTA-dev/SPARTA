@@ -117,6 +117,15 @@ class Template:
             # ------- END of low-res insertion ---------
 
             # star mass g
+
+            # Change to air wavelengths, if required
+            # The following transformation is taken from Morton (2000, ApJ. Suppl., 130, 403)
+            if 'air' in kwargs:
+                if kwargs['air']:
+                    s2 = 10**8 * w**(-2)
+                    f = 1 + 0.0000834254 + 0.02406147 / (130 - s2) + 0.00015998 / (38.9 - s2)
+                    w = w/f
+
             self.PHXMASS = hdul_spec[0].header['PHXMASS']
 
             # Effective stellar radius cm

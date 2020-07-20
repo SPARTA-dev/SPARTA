@@ -13,10 +13,11 @@
 # Dependencies: Spectrum and Template class (of UNICOR).
 #               scipy and numpy.
 #
-# Last update: Avraham Binnenfeld, 20200607.
+# Last update: Sahar Shahaf, 20200718.
 
 
 from scipy import interpolate
+from scipy.signal import correlate
 import numpy as np
 from astropy import constants as consts, units as u
 from numba import njit
@@ -36,7 +37,8 @@ class CCF1d:
 
     # =============================================================================
     # =============================================================================
-    def CrossCorrelateSpec(self, spec, template, dv=None, VelBound=100, err_per_ord=False):
+    def CrossCorrelateSpec(self, spec, template,
+                           dv=None, VelBound=100, err_per_ord=False, fastccf=False):
         '''
         All input is optional, and needs to be called along
         with its keyword. Below appears a list of the possible input
@@ -141,7 +143,7 @@ class CCF1d:
 
             # The data and the template are cross-correlated.
             # We assume that the wavelengths are logarithmically-evenly spaced
-            C = self.correlate1d(spT, s, Nlags+1)
+            C = self.correlate1d(spT, s, Nlags+1, fastccf=fastccf)
 
             # Find the radial velocity by fitting a parabola to the CCF peaks
             try:
@@ -343,7 +345,7 @@ class CCF1d:
 
     # =============================================================================
     # =============================================================================
-    def correlate1d(self, template, signal, maxlag=None):
+    def correlate1d(self, template, signal, maxlag=None, fastccf=False):
         '''
         This is a wrapper of the jitted one-dimensional correlation
         :param template: template (model) that will be compared to the signal.
@@ -356,8 +358,10 @@ class CCF1d:
             maxlag = 1
         maxlag = np.int(np.minimum(signal.shape[0], maxlag))
         # maxlag = np.int(np.minimum(t.shape[0], maxlag))
-
-        C = __correlate1d__(template, signal, maxlag)
+        if not fastccf:
+            C = __correlate1d__(template, signal, maxlag)
+        else:
+            C = __correlate1d_fast__(template, signal, maxlag)
         return C
 
     # =============================================================================
@@ -426,3 +430,19 @@ def __correlate1d__(template, signal, maxlag):
     normFac = np.sqrt((template**2).sum() * (signal**2).sum())
 
     return C/normFac
+
+
+def __correlate1d_fast__(template, signal, maxlag):
+	pass
+	#"""
+    #:param template: the template (model) that is compared to the observed signal
+    #:param signal: the observed signal
+    #:param maxlag: maximum number of lags to calculate
+    #:return: an array of Pearsons correlation for each lag
+    #"""
+    # FC = correlate(signal, template, mode='same', method='fft')
+    #N = len(signal)
+    #C = FC[:maxlag]
+	#return C
+
+
