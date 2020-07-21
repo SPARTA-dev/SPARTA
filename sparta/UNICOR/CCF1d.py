@@ -428,21 +428,24 @@ def __correlate1d__(template, signal, maxlag):
 
     # Calculate the normalization factor
     normFac = np.sqrt((template**2).sum() * (signal**2).sum())
-
     return C/normFac
 
 
 def __correlate1d_fast__(template, signal, maxlag):
-	pass
-	#"""
-    #:param template: the template (model) that is compared to the observed signal
-    #:param signal: the observed signal
-    #:param maxlag: maximum number of lags to calculate
-    #:return: an array of Pearsons correlation for each lag
-    #"""
-    # FC = correlate(signal, template, mode='same', method='fft')
-    #N = len(signal)
-    #C = FC[:maxlag]
-	#return C
+    """
+    :param template: the template (model) that is compared to the observed signal
+    :param signal: the observed signal
+    :param maxlag: maximum number of lags to calculate
+    :return: an array of Pearsons correlation for each lag
+    """
+    FC = correlate(signal, template, mode='full', method='fft')
+    normFac = np.sqrt((template**2).sum() * (signal**2).sum())
+    N = len(template) - 1
+    C = FC[N: N+maxlag]
+    return C/normFac
+
+
+
+
 
 
