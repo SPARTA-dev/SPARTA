@@ -20,6 +20,9 @@ from sparta.UNICOR.CCF1d import CCF1d
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from sparta.UNICOR.Template import Template
+from numpy import linalg as LA
+from copy import deepcopy
 
 
 class TimeSeries:
@@ -156,3 +159,84 @@ class TimeSeries:
 
         plt.show()
 
+    # =============================================================================
+    # =============================================================================
+    def TIRAVEL_vel_test(self, velocities=[]):
+        '''
+        888888
+        This function calculates radial velocity for the entire spectrum time series, using CCF against resting template.
+        :param: spec_list - a list of Spectrum objects, with the observed data.
+        :param: template  - a Template object, with which the observaations are correlated.
+        :param: dv, VelBound, err_per_ord - parameters for the CCF1d CrossCorrelateSpec routine
+                                            see documentation therein.
+
+        :return: ccfs - A list of CCF1d objects, one for each observation.
+
+        '''
+
+        a = [[None for _ in range(self.size)] for _ in
+             range(self.size)]
+
+        vals_cpy = deepcopy(self.vals)
+
+        for i, s in enumerate(vals_cpy):
+            vals_cpy[i].wv[0] = Template().doppler(-velocities[i], deepcopy(s.wv[0]))
+
+        for i, i_val in enumerate(vals_cpy):
+            for j, j_val in enumerate(vals_cpy):
+                ccf = CCF1d().CrossCorrelateSpec(spec=j_val, template=Template(template=i_val), dv=0.01,
+                                                 VelBound=[-1, 1], fastccf=True)
+                ccf_val = ccf.subpixel_CCF(ccf.Corr['vel'], ccf.Corr['corr'][0], 0)
+
+                a[i][j] = ccf_val
+
+        # max eigen value, eigen vector
+        e_w, e_v = LA.eig(a)
+
+        lambda_m = max(e_w)
+
+        rho = (lambda_m - 1) / (self.size - 1)
+
+        return e_w, e_v, rho, vals_cpy
+
+    # =============================================================================
+    # =============================================================================
+    def TIRAVEL(self, velocities=[[]]):
+        '''
+        888888
+        This function calculates radial velocity for the entire spectrum time series, using CCF against resting template.
+        :param: spec_list - a list of Spectrum objects, with the observed data.
+        :param: template  - a Template object, with which the observaations are correlated.
+        :param: dv, VelBound, err_per_ord - parameters for the CCF1d CrossCorrelateSpec routine
+                                            see documentation therein.
+
+        :return: ccfs - A list of CCF1d objects, one for each observation.
+
+        '''
+
+        e_w_list = []
+        e_v_list = []
+        rho_list = []
+        vals_cpy_list = []
+
+        for v_list in velocities:
+            e_w, e_v, rho, vals_cpy = self.TIRAVEL_vel_test(v_list)
+            e_w_list.append(e_w)
+            e_v_list.append(e_v)
+            rho_list.append(rho)
+            vals_cpy_list.append(vals_cpy)
+
+        index_max = rho_list.index(max(rho_list))
+
+        template_wv = vals_cpy_list[index_max][0].wv[0]
+        template_sp = vals_cpy_list[index_max][0].sp[0]
+
+        for i, w in enumerate(e_v_list[index_max].transpose()[0]):
+            if i == 0:
+                template_sp = template_sp * w.real ** 2
+            else:
+                template_sp = template_sp + vals_cpy_list[index_max][i].sp[0] * w.real ** 2
+
+        tiravel_res = Template(wavelengths=[template_wv], spectrum=[template_sp])
+
+        return tiravel_res

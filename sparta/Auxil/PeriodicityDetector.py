@@ -235,7 +235,7 @@ class PeriodicityDetector:
 
         if velocities_flag:
             if self.period == None:
-                self.period = 9_999
+                self.period = [9_999]
 
             times_folded = [t % self.period[0] for t in self.time_series.times]
 

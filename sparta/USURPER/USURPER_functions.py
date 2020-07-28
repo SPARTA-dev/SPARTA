@@ -222,7 +222,7 @@ def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbias
 
                 elif periodicity_detector.method == 'USURPER':
                     ccf = CCF1d().CrossCorrelateSpec(spec=j_val, template=Template(template=i_val), dv=0.01,
-                                                     VelBound=[-0.09, 0.09])
+                                                     VelBound=[-0.09, 0.09], fastccf=True)
                     ccf_val = ccf.subpixel_CCF(ccf.Corr['vel'], ccf.Corr['corr'][0], 0)
                     a[i][j] = np.sqrt(1 - abs(min(ccf_val, 1))) * np.sqrt(2)
 
@@ -254,7 +254,7 @@ def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbias
 
 
                     ccf = CCF1d().CrossCorrelateSpec(spec=s, template=t, dv=0.01,
-                                                     VelBound=[-0.2, 0.2])
+                                                     VelBound=[-10, 10], fastccf=True)
                     # ccf_val = ccf.subpixel_CCF(ccf.Corr['vel'], ccf.Corr['corr'][0], 0)
                     ccf_val = ccf.subpixel_CCF(ccf.Corr['vel'], ccf.Corr['corr'][0])[1]
                     c[i][j] = np.sqrt(1 - abs(min(ccf_val, 1))) * np.sqrt(2)

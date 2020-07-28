@@ -31,7 +31,7 @@ from tqdm import tqdm
 class Observations:
     # =============================================================================
     # =============================================================================
-    def __init__(self, survey="APOGEE", min_snr=-1, target_visits_lib=None, time_series=[]):
+    def __init__(self, survey="APOGEE", min_snr=-1, target_visits_lib=None, time_series=[], min_avg_flux_val=-1):
         '''
         Input: All input is optional, and needs to be called along
                with its keyword. Below appears a list of the possible input
@@ -65,7 +65,7 @@ class Observations:
 
             for root, dirs, files in os.walk(path):
                 for file in files:
-                    if file.endswith(".fits") or file.endswith(".fits.gz"):
+                    if file.endswith(".fits") or file.endswith(".fits.gz") or file.endswith(".fits.Z"):
                         self.file_list.append(os.path.join(root, file))
                     else:
                         pass
@@ -78,7 +78,7 @@ class Observations:
                 visit.load_spectrum_from_fits(path=visit_path)
                 w, s, bool_mask_s, date_obs, vrad, bcv, snr = visit.retrieve_all_spectrum_parameters()
 
-                if snr >= min_snr or snr == -1 or min_snr == -1:
+                if (snr >= min_snr or snr == -1 or min_snr == -1) and (min_avg_flux_val == -1 or min_avg_flux_val <= np.mean(s)):
                     if visit.bcv==[]:
                         bcv = 0.0
                     sp = Spectrum(wv=w, sp=s, bjd=date_obs, bcv=bcv, name=survey)
@@ -248,6 +248,49 @@ class Observations:
             float_times[i] = (t - start_time)
         self.time_list = float_times
 
+# =============================================================================
+# =============================================================================
+    def create_avg_template(self):
+        """
+        This function converts the observation dates to float values,
+        marking the days past the first visit.
+        """
+        float_times = [0 for _ in range(self.sample_size)]
+        start_time = int(min(self.time_list))
+        self.first_time = start_time
+        for i, t in enumerate(self.time_list):
+            float_times[i] = (t - start_time)
+        self.time_list = float_times
+
+# =============================================================================
+# =============================================================================
+    def clean_time_series(self, max_vel=[], min_vel=[], nan_flag=True):
+        """
+
+        """
+        if nan_flag:
+
+            ok_index = np.where(~np.isnan(self.observation_TimeSeries.calculated_vrad_list))[0]
+            self.observation_TimeSeries.times = [self.observation_TimeSeries.times[i] for i in ok_index]
+            self.observation_TimeSeries.vals = [self.observation_TimeSeries.vals[i] for i in ok_index]
+            self.observation_TimeSeries.calculated_vrad_list = [self.observation_TimeSeries.calculated_vrad_list[i] for i in ok_index]
+
+        if max_vel:
+
+            ok_index = [i for i, x in enumerate(self.observation_TimeSeries.calculated_vrad_list) if x <= max_vel]
+            self.observation_TimeSeries.times = [self.observation_TimeSeries.times[i] for i in ok_index]
+            self.observation_TimeSeries.vals = [self.observation_TimeSeries.vals[i] for i in ok_index]
+            self.observation_TimeSeries.calculated_vrad_list = [self.observation_TimeSeries.calculated_vrad_list[i] for i in ok_index]
+
+        if min_vel:
+
+            ok_index = [i for i, x in enumerate(self.observation_TimeSeries.calculated_vrad_list) if x >= min_vel]
+            self.observation_TimeSeries.times = [self.observation_TimeSeries.times[i] for i in ok_index]
+            self.observation_TimeSeries.vals = [self.observation_TimeSeries.vals[i] for i in ok_index]
+            self.observation_TimeSeries.calculated_vrad_list = [self.observation_TimeSeries.calculated_vrad_list[i] for i in ok_index]
+
+        self.sample_size = len(self.observation_TimeSeries.calculated_vrad_list)
+        self.observation_TimeSeries.size = self.sample_size
 
 if __name__ == '__main__':
     '''

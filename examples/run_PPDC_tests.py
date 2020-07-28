@@ -278,7 +278,7 @@ def run_ppdc_tests(N, v_sin_i, spec_power_ratio, planet_k, snr, template_star, t
                         obs.initialize_periodicity_detector(freq_range=(1 / 1000, 0.5), periodogram_grid_resolution=1000)
 
                         calculated_vrad_list = obs.calc_rv_against_template(template_star_broadend, dv=0.01,
-                                                     VelBound=[-0.5, 0.5]).vels
+                                                     VelBound=[-0.5, 0.5], fastccf=True).vels
 
                         calculated_ccf_peaks = obs.ccf_peaks
 
@@ -360,26 +360,221 @@ if __name__ == '__main__':
     Starting simulation. .\n\n
     """)
 
-    # Assigning sun-like stellar parameters to the simulated spectra
-    temp_star = 5800
-    temp_spot = 5800 # 2300
+    test = "real"
+    # test = "simulation"
+    test = "TIR"
 
-    log_g = 4.5
-    metal = 0
-    alpha = 0
+    if test == "real":
+        obs_data = Observations(survey="HARPS", min_avg_flux_val=500)
 
-    # Choosing wavelength range (Angstrom units)
-    min_val = 5920 # 5500 5880
-    max_val = 6000 # 6700 5920
+        for i in obs_data.observation_TimeSeries.vals:
+            i = i.SpecPreProccess()
 
-    # Loading a Phoenix synthetic spectrum
-    template_star = Template(temp=temp_star, log_g=log_g, metal=metal, alpha=alpha, min_val=min_val, max_val=max_val)
-    template_spot = Template(temp=temp_spot, log_g=log_g, metal=metal, alpha=alpha, min_val=min_val, max_val=max_val)
+        obs_data.initialize_periodicity_detector(freq_range=(1 / 1000, 1.5), periodogram_grid_resolution=1000)
 
-    v_sin_i = [6]
-    spec_power_ratio = [-0.020] # -0.005
-    planet_k = [0.005] # 50!!!!!
-    snr = [-1]
-    N = [23, 24, 25, 26]
+        template_star_broadend = Template(template=Spectrum(wv=obs_data.observation_TimeSeries.vals[3].wv, sp=
+            obs_data.observation_TimeSeries.vals[3].sp))
 
-    run_ppdc_tests(N, v_sin_i, spec_power_ratio, planet_k, snr, template_star, template_spot, min_val, max_val)
+        # template_star_broadend = Template(temp=3700, log_g=4.5, metal=0, alpha=0, min_val=5000, max_val=6000, air=True)
+        # v_sin_i = 8.7
+
+        # template_star_broadend = Template(temp=5200, log_g=4.5, metal=0, alpha=0, min_val=5920, max_val=6000, air=True)
+        # v_sin_i = 3
+
+        template_star_broadend = Template(template=Spectrum(wv=template_star_broadend.model.wv, sp=template_star_broadend.model.sp)) # .SpecPreProccess()
+
+        # template_star_broadend.RotationalBroadening(epsilon=0.5, vsini=v_sin_i)
+
+        calculated_vrad_list = obs_data.calc_rv_against_template(template_star_broadend, dv=0.01,
+                                                            VelBound=[-150, 150], combine_ccfs=False, fastccf=True).vels
+        # calculated_vrad_list = obs_data.calc_rv_against_template(template_star_broadend, dv=0.01,
+        #                                                     VelBound=[-1, 1], combine_ccfs=False, fastccf=True).vels
+        # COROT-7
+        # import pandas as pd
+        # c = pd.read_excel(r"C:\Users\AbrahamBini\Downloads\CORO7.xlsx")
+
+        calculated_ccf_peaks = obs_data.ccf_peaks
+
+        obs_data.observation_TimeSeries.calculated_vrad_list = calculated_vrad_list
+        obs_data.observation_TimeSeries.calculated_ccf_peaks = calculated_ccf_peaks
+
+        # obs_data.clean_time_series(max_vel=0.08, nan_flag=True)
+        # obs_data.clean_time_series(max_vel=33, min_vel=30, nan_flag=True)
+        print(obs_data.sample_size)
+        print(calculated_vrad_list)
+
+
+        # obs_data.periodicity_detector.run_PDC_process(calc_biased_flag=False, calc_unbiased_flag=True)
+        # print("done run_PDC_process")
+        # obs_data.periodicity_detector.run_USURPER_process(calc_biased_flag=False, calc_unbiased_flag=True)
+        # print("done run_USURPER_process")
+        # obs_data.periodicity_detector.run_Partial_USURPER_process(reversed_flag=True)
+        # print("done run_Partial_USURPER_process")
+        #
+        # obs_data.periodicity_detector.run_Partial_USURPER_process(reversed_flag=False)
+        # print("done run_Partial_USURPER_process")
+
+
+        obs_data.periodicity_detector.run_GLS_process()
+
+        obs_data.periodicity_detector.period = [8.46, 4.86]
+
+        obs_data.periodicity_detector.periodogram_plots(velocities_flag=True)
+
+        # plt.show()
+
+        frequency = 2500  # Set Frequency To 2500 Hertz
+        duration = 500  # Set Duration To 1000 ms == 1 second
+        winsound.Beep(frequency, duration)
+
+        plt.savefig("res/" + "5" + '_plot.png', dpi=100)
+
+        x = 9
+
+        # N, times, visit_spec_list, template_star_broadend = \
+        #     simulate_planet_around_active_star(v_sin_i=v,
+        #                                        epsilon=0.5,
+        #                                        integration_ratio=[],
+        #                                        star_template=template_star,
+        #                                        template_spot=template_spot,
+        #                                        p_spot=19,
+        #                                        p_planet=7,
+        #                                        spec_power_ratio=r,
+        #                                        planet_k=k_p,
+        #                                        star_k=v,
+        #                                        planet_param=[],
+        #                                        N=n,
+        #                                        snr=noise,
+        #                                        min_val=min_val,
+        #                                        max_val=max_val)
+        #
+        # ts = TimeSeries(size=N, times=times, vals=visit_spec_list,
+        #                 calculated_vrad_list=[])
+        # obs = Observations(time_series=ts)
+        # obs.initialize_periodicity_detector(freq_range=(1 / 1000, 0.5), periodogram_grid_resolution=1000)
+        #
+        # calculated_vrad_list = obs.calc_rv_against_template(template_star_broadend, dv=0.01,
+        #                                                     VelBound=[-0.5, 0.5]).vels
+        #
+        # calculated_ccf_peaks = obs.ccf_peaks
+        #
+        # # # 88888
+        # # calculated_vrad_list = [0.005 * np.sin(2 * t * np.pi / 7) for t in times]
+        # # calculated_ccf_peaks = [0.7 + 0.1 * np.sin(2 * t * np.pi / 3) for t in times]
+        # # # calculated_ccf_peaks = [(0.6 + random.random() * 0.1) for t in times]
+        # #
+        # # spot_factor = 0.005
+        # #
+        # # for i, _ in enumerate(times):
+        # #     calculated_vrad_list[i] = calculated_vrad_list[i] + spot_factor * calculated_ccf_peaks[i]
+        #
+        # # NormFac = np.quantile(calculated_vrad_list, 0.98)
+        # #
+        # # noise = np.random.normal(0, 1, len(calculated_vrad_list)) * NormFac / 25
+        # #
+        # # calculated_vrad_list = calculated_vrad_list + noise
+        #
+        # obs.observation_TimeSeries.calculated_vrad_list = calculated_vrad_list
+        # obs.observation_TimeSeries.calculated_ccf_peaks = calculated_ccf_peaks
+        #
+        # obs.periodicity_detector.run_PDC_process(calc_biased_flag=False, calc_unbiased_flag=True)
+        # # obs.periodicity_detector.run_PDC_process(calc_biased_flag=True, calc_unbiased_flag=False)
+        # obs.periodicity_detector.run_USURPER_process(calc_biased_flag=False, calc_unbiased_flag=True)
+        # obs.periodicity_detector.run_Partial_USURPER_process(reversed_flag=True)
+        # obs.periodicity_detector.run_Partial_USURPER_process(reversed_flag=False)
+        #
+        # # obs.periodicity_detector.run_PDC_process(calc_biased_flag=False, calc_unbiased_flag=True)
+        # # obs.periodicity_detector.run_USURPER_process(calc_biased_flag=False, calc_unbiased_flag=True)
+        #
+        # obs.periodicity_detector.run_GLS_process()
+        #
+        # obs.periodicity_detector.period = [7, 19]  # 88888
+        # obs.periodicity_detector.periodogram_plots(velocities_flag=True)
+        #
+        # plt.savefig("res/" + Details + '_plot.png', dpi=100)
+        #
+        # array = np.asarray(obs.periodicity_detector.pdc_res_power_unbiased)
+        # p_planet_index = (np.abs(array - 1 / 7)).argmin()
+        # p_spot_index = (np.abs(array - 1 / 19)).argmin()
+        #
+        # std = np.std(array)
+        #
+        # sde_planet = array[p_planet_index] / std
+        # sde_spot = array[p_spot_index] / std
+        #
+        # sde_planet_list.append(sde_planet)
+        # sde_spot_list.append(sde_spot)
+        #
+        # gls_sde_planet_list = []
+        # gls_sde_spot_list = []
+        #
+        # plt.close()
+        #
+        # frequency = 2500  # Set Frequency To 2500 Hertz
+        # duration = 500  # Set Duration To 1000 ms == 1 second
+        # winsound.Beep(frequency, duration)
+
+    elif test == "simulation":
+        # Assigning sun-like stellar parameters to the simulated spectra
+        temp_star = 5800
+        temp_spot = 5800 # 2300
+
+        log_g = 4.5
+        metal = 0
+        alpha = 0
+
+        # Choosing wavelength range (Angstrom units)
+        min_val = 5900 # 5500 5880
+        max_val = 6050 # 6700 5920
+
+        # Loading a Phoenix synthetic spectrum
+        template_star = Template(temp=temp_star, log_g=log_g, metal=metal, alpha=alpha, min_val=min_val, max_val=max_val)
+        template_spot = Template(temp=temp_spot, log_g=log_g, metal=metal, alpha=alpha, min_val=min_val, max_val=max_val)
+
+        v_sin_i = [6]
+        spec_power_ratio = [0] # -0.005
+        planet_k = [0.005] # 50!!!!!
+        snr = [-1]
+        N = [23, 24, 25, 26]
+
+        run_ppdc_tests(N, v_sin_i, spec_power_ratio, planet_k, snr, template_star, template_spot, min_val, max_val)
+    elif test == "TIR":
+
+        temp = 5000  # 4900 88888888888 TBD
+        log_g = 4.5
+        metal = 0
+        alpha = 0
+
+        # Choosing wavelength range (Angstrom units)
+        min_val = 4900# 4900
+        max_val = 5100
+
+        # Loading a Phoenix synthetic spectrum
+        template = Template(temp=temp, log_g=log_g, metal=metal, alpha=alpha, min_val=min_val, max_val=max_val)
+
+        random.seed(997)
+        times = [(random.random() * 100) for _ in range(10)]
+        vals = [10 * np.sin(2 * t * np.pi / 7) for t in times]
+
+        visit_spec_list = []
+        calculated_vrad_list = []
+
+        # original_template = Spectrum(wv=template.model.wv, sp=template.model.sp).SpecPreProccess()
+
+        # adding the template as-is: useful for debugging
+        # visit_spec_list.append(original_template)
+
+        # if system_type == "sb1":
+        for i, v in enumerate(vals):
+            new_wl = template.doppler(v)
+
+            new_temp = Spectrum(wv=new_wl, sp=template.add_noise(100)).SpecPreProccess()
+            visit_spec_list.append(deepcopy(new_temp))
+
+        ts = TimeSeries(size=10, times=times, vals=visit_spec_list,
+                        calculated_vrad_list=calculated_vrad_list)
+
+        ts.TIRAVEL([vals])
+
+        # obs = Observations(time_series=ts)
+

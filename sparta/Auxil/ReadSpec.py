@@ -64,8 +64,8 @@ class ReadSpec:
 
 # =============================================================================
 # =============================================================================
-    def load_spectrum_from_fits(self, path=None, APOGEE_segment=1, min_wv=4900, max_wv=5150):
-        '''
+    def load_spectrum_from_fits(self, path=None, APOGEE_segment=1, min_wv=5900, max_wv=6050): #  min_wv=4900, max_wv=5150 888888888
+        '''### min_wv=5920, max_wv=6000
         This function loads visit FITS file and parses it to fit the UNICOR Spectrum class.
 
         INPUT:
@@ -133,7 +133,7 @@ class ReadSpec:
             self.s = np.reshape(self.s, (1, -1))
             self.w = np.reshape(self.w, (1, -1))
 
-            self.bcv = bcv
+            self.bcv = 0 # bcv 888888888888
 
             self.snr = hdul_sp[0].header["SNR"]
 
