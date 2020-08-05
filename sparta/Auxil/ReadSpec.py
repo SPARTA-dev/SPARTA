@@ -26,7 +26,7 @@ class ReadSpec:
 
     # =============================================================================
     # =============================================================================
-    def __init__(self, survey, **kwargs):
+    def __init__(self, **kwargs):
         '''
         Input: All input is optional, and needs to be called along
                with its keyword. Below appears a list of the possible input
@@ -40,7 +40,13 @@ class ReadSpec:
               segment: int. 0, 1 or 2 (choosing 1 APOGEE "color" data band)
         '''
 
-        self.survey = survey
+        if 'survey' in kwargs:
+            self.survey = kwargs['survey']
+            self.read_function = None
+
+        if 'read_function' in kwargs:
+            self.survey = None
+            self.read_function = kwargs['read_function']
 
         if 's' and 'w' and 'bool_mask' and 'DATE-OBS' and 'vrad' and 'segment' in kwargs:
             self.s = kwargs['s']
@@ -61,6 +67,8 @@ class ReadSpec:
         self.bcv = []
 
         self.n_orders = []
+
+        self.metadata = None
 
 # =============================================================================
 # =============================================================================
@@ -83,7 +91,11 @@ class ReadSpec:
 
         hdul_sp = fits.open(fits_fname)
 
-        if self.survey == "APOGEE":
+        if self.read_function is not None:
+            self.DATE_OBS, self.s, self.w, \
+                self.n_orders, self.bcv, self.metadata = self.read_function(hdul_sp)
+
+        elif self.survey == "APOGEE":
             self.n_orders = 1
             s = hdul_sp[1].data[self.APOGEE_segment]
             w = hdul_sp[4].data[self.APOGEE_segment]
@@ -117,7 +129,7 @@ class ReadSpec:
 
             bcv = hdul_sp[0].header["HIERARCH ESO DRS BERV"]
 
-            self.s = s - s.min() + 1
+            self.s = s
             self.w = w
 
             # self.DATE_OBS = hdul_sp[0].header['DATE-OBS']
@@ -153,7 +165,7 @@ class ReadSpec:
 
             HELIO_RV = hdul_sp[0].header["HELIO_RV"]
 
-            self.s = s # - s.min() + 1
+            self.s = s
             self.w = w
 
             self.DATE_OBS = hdul_sp[0].header["DATE-OBS"]
@@ -183,7 +195,7 @@ class ReadSpec:
                 w[i + 1] = w[i] + beta
 
 
-            self.s = s # - s.min() + 1
+            self.s = s
             self.w = w
 
             self.DATE_OBS = hdul_sp[0].header["DATE-OBS"]
@@ -208,38 +220,13 @@ class ReadSpec:
 
             self.DATE_OBS = hdul_sp[0].header["BJD"]
 
-            # self.DATE_OBS = hdul_sp[0].header["DATE-OBS"]
-            # self.DATE_OBS = datetime.strptime(self.DATE_OBS, '%Y-%m-%dT%H:%M:%S')
-            # try:
-            #     self.DATE_OBS = datetime.strptime(self.DATE_OBS, '%Y-%m-%dT%H:%M:%S.%f')
-            # except ValueError:
-            #     self.DATE_OBS = datetime.strptime(self.DATE_OBS, '%Y-%m-%dT%H:%M:%S')
 
         elif self.survey == "TRES":
             self.n_orders = 1
 
-            import matplotlib.pyplot as plt
-
-            # for i in range(50):
-            #     s = hdul_sp[0].data[i]
-            #     w = [i for i in range(len(s))]
-            #
-            #     plt.plot(w,
-            #              s, alpha=0.3)
-            #     plt.title(str(i))
-            #     plt.show()
-
             s = hdul_sp[0].data[36]
             w = [i for i in range(len(s))]
-
-            # w = s.copy()
-            # w[0] = 10 ** hdul_sp[0].header["COEFF0"]
-            # beta = hdul_sp[0].header["COEFF1"]
-            #
-            # for i in range(len(w) - 1):
-            #     w[i + 1] = w[0] * (1 + beta) ** i
-            #
-            self.s = s # - s.min() + 1
+            self.s = s
             self.w = w
 
             self.DATE_OBS = hdul_sp[0].header["WS_BJD"]
@@ -281,7 +268,7 @@ class ReadSpec:
             self.w = np.reshape(self.w, (1, -1))
 
 
-    # =============================================================================
+# =============================================================================
 # =============================================================================
     def retrieve_all_spectrum_parameters(self):
         """

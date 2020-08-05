@@ -31,7 +31,7 @@ from tqdm import tqdm
 class Observations:
     # =============================================================================
     # =============================================================================
-    def __init__(self, survey="APOGEE", min_snr=-1, target_visits_lib=None, time_series=[]):
+    def __init__(self, read_function=None, survey=None, min_snr=-1, target_visits_lib=None, time_series=[]):
         '''
         Input: All input is optional, and needs to be called along
                with its keyword. Below appears a list of the possible input
@@ -43,6 +43,9 @@ class Observations:
               target_visits_lib: str, observation visit directory path
               time_series: TimeSeries object, in case a direct load of TimeSeries (instead of file reading)
         '''
+
+        assert ((read_function is not None) or (survey is not None)), "Provide read_function or survey"
+
         if time_series == []:
             self.file_list = []
             self.spec_list = []
@@ -74,7 +77,11 @@ class Observations:
 
             for visit_path in self.file_list:
 
-                visit = ReadSpec(survey)
+                if read_function is None:
+                    visit = ReadSpec(survey=survey)
+                else:
+                    visit = ReadSpec(read_function=read_function)
+
                 visit.load_spectrum_from_fits(path=visit_path)
                 w, s, bool_mask_s, date_obs, vrad, bcv, snr = visit.retrieve_all_spectrum_parameters()
 
