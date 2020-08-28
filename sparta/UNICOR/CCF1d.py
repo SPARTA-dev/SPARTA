@@ -22,6 +22,7 @@ import numpy as np
 from astropy import constants as consts, units as u
 from numba import njit
 import matplotlib.pyplot as plt
+import copy
 
 
 class CCF1d:
@@ -37,7 +38,7 @@ class CCF1d:
 
     # =============================================================================
     # =============================================================================
-    def CrossCorrelateSpec(self, spec, template,
+    def CrossCorrelateSpec(self, spec_in, template_in,
                            dv=None, VelBound=100, err_per_ord=False, fastccf=False):
         '''
         All input is optional, and needs to be called along
@@ -67,6 +68,9 @@ class CCF1d:
 
         # Initialize:
         # ----------
+        spec = copy.deepcopy(spec_in)
+        template = copy.deepcopy(template_in)
+
         if dv is None:
             try:
                 dv = self.Info['GridDelta']

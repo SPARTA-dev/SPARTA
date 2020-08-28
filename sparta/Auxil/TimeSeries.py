@@ -76,8 +76,8 @@ class TimeSeries:
         ccfs = []
         with tqdm(total=sample_size) as pbar:
             for spec in spec_list:
-                ccf = CCF1d().CrossCorrelateSpec(template=template,
-                                                 spec=spec,
+                ccf = CCF1d().CrossCorrelateSpec(template_in=template,
+                                                 spec_in=spec,
                                                  dv=dv,
                                                  VelBound=VelBound,
                                                  err_per_ord=err_per_ord,
