@@ -297,8 +297,8 @@ class CCF1d:
 
 # =============================================================================
 # =============================================================================
-    def subpixel_CCF(self, vels, ccf, v=None):
-        '''
+    def subpixel_CCF(self, vels, ccf, v=None, Npts=5):
+        """
         This function is using a second order approximation to estimate the ccf
         at a given velocity, v. If no velocity was provided, the CCFs peak velocity
         is returned.
@@ -306,46 +306,48 @@ class CCF1d:
         :param vels: velocity array for a CCF at a given order.
         :param ccf: CCF values that correspond with the velocities in x.
         :return: Tuple containing parameters:x_max, y_max
-        '''
+        """
 
         if type(vels) is u.quantity.Quantity:
             vels = vels.value
 
         if v is None:
+            assert Npts >= 3, "Must have at least 3 points."
+            assert Npts % 2 == 1, "Provide an odd number of points to fit around the peak."
+
             x_n = np.argmax(ccf)
+            indlist =[int(x_n - Npts//2 + k) for k in np.arange(Npts)]
+            x = np.array(vels[indlist])
+            y = np.array(ccf[indlist])
+
+            # Define the design matrix at the given phases.
+            DesignMatrix = np.array(
+                [[1, x, x**2]
+                 for x in x])
+
+            # Solve to obtain the parameters and uncertainties
+            C = (np.linalg.inv(
+                np.dot(DesignMatrix.transpose(), DesignMatrix)))
+
+            # Derive the parameters:
+            pars = C.dot(np.dot(DesignMatrix.transpose(), y))
+            y_max = pars[0] - pars[1] * pars[1] / (4 * pars[2])  # maximal CCF result value
+            x_max = -pars[1] / (2 * pars[2])  # velocity in maximal value
+            return x_max, y_max
+
         else:
             vels_diff = [i - v for i in vels]
             x_n = np.amin(np.abs(vels_diff))
 
-        indlist =[int(x_n - 1), int(x_n), int(x_n + 1)]
-        x = np.array(vels[indlist])
-        y = np.array(ccf[indlist])
+            indlist =[int(x_n - 1), int(x_n), int(x_n + 1)]
+            x = np.array(vels[indlist])
+            y = np.array(ccf[indlist])
 
-        d = (x[0] - x[1]) * (x[0] - x[2]) * (x[1] - x[2])  # denominator
-
-        if d != 0:
-            a = (x[2] * (y[1] - y[0]) +
-                 x[1] * (y[0] - y[2]) +
-                 x[0] * (y[2] - y[1])) / d
-
-            b = (x[2] * x[2] * (y[0] - y[1]) +
-                 x[1] * x[1] * (y[2] - y[0]) +
-                 x[0] * x[0] * (y[1] - y[2])) / d
-
-            c = (x[1] * x[2] * (x[1] - x[2]) * y[0] +
-                 x[2] * x[0] * (x[2] - x[0]) * y[1] +
-                 x[0] * x[1] * (x[0] - x[1]) * y[2]) / d
-        else:
-            a = 0
-            b = (np.mean(x*y)-np.mean(x)*np.mean(y)) / (np.mean(x*x)-np.mean(x)**2)
-            c = np.mean(y) - b*np.mean(x)
-
-        if v is None:
-            y_max = c - b * b / (4 * a)  # maximal CCF result value
-            x_max = -b / (2 * a)  # velocity in maximal value
-            return x_max, y_max
-        else:
-            return a*v**2 + b*v + c
+            y_interp = (y[0]*(v-x[1])*(v-x[2])/(x[0]-x[1])/(x[0]-x[2]) +
+                        y[1]*(v-x[0])*(v-x[2])/(x[1]-x[0])/(x[1]-x[2]) +
+                        y[2]*(v-x[0])*(v-x[1])/(x[2]-x[0])/(x[2]-x[1])
+                        )
+            return y_interp
 
     # =============================================================================
     # =============================================================================
@@ -447,9 +449,3 @@ def __correlate1d_fast__(template, signal, maxlag):
     N = len(template) - 1
     C = FC[N: N+maxlag]
     return C/normFac
-
-
-
-
-
-
