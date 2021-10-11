@@ -10,18 +10,19 @@
 #                      using USuRPer_functions.py functions.
 # 2) run_USURPER_process - an 'overall' procedure runs the entire Zucker USuRPer calculation process
 #                      using USuRPer_functions.py functions.
-# 3) run_Partial_USURPER_process - an 'overall' procedure runs the partial PDC. Currently under development.
+# 3) run_Partial_USURPER_process - an 'overall' procedure runs the partial PDC.
 # 4) run_GLS_process - runs the GLS calculation process.
 # 5) periodogram_plots - plots the calculated periodograms.
 #
-# Dependencies: numpy, astropy and matplotlib.
-# Last update: Avraham Binnenfeld, 20200316.
+# Dependencies: numpy, astropy, matplotlib, copy and random.
+# Last update: Avraham Binnenfeld, 20210510.
 
 import numpy as np
 import matplotlib.pyplot as plt
 from astropy.timeseries import LombScargle
 from sparta.USURPER.USURPER_functions import calc_PDC, calc_PDC_unbiased, calc_pdc_distance_matrix
-
+from copy import deepcopy
+import random
 
 class PeriodicityDetector:
 
@@ -71,6 +72,8 @@ class PeriodicityDetector:
         self.GLS_power = grid_template.copy()
         self.GLS_frequency = grid_template.copy()
 
+        self.fap_dict = {}
+
     # =============================================================================
     # =============================================================================
     def run_PDC_process(self, calc_biased_flag=True, calc_unbiased_flag=False):
@@ -83,7 +86,7 @@ class PeriodicityDetector:
 
         temp = []
 
-        if isinstance(self.time_series.vals[0], float):
+        if isinstance(self.time_series.vals[0], float) or isinstance(self.time_series.vals[0], tuple) or isinstance(self.time_series.vals[0], list):
             self.method = "PDC"
         elif self.time_series.calculated_vrad_list != []:
             self.method = "PDC"
@@ -154,7 +157,7 @@ class PeriodicityDetector:
 
     # =============================================================================
     # =============================================================================
-    def run_Partial_USURPER_process(self, reversed_flag=False):
+    def run_Partial_USURPER_process(self, reversed_flag=False, reverse_existing=False):
         '''
         Currently under development.
         Input:
@@ -170,7 +173,7 @@ class PeriodicityDetector:
             assert 'Partial_USURPER is available for spectrum time-series only'
             return
 
-        calc_pdc_distance_matrix(self, calc_biased_flag=False, calc_unbiased_flag=True)
+        calc_pdc_distance_matrix(self, calc_biased_flag=False, calc_unbiased_flag=True, reverse_existing=reverse_existing)
 
         for index, f in enumerate(self.pdc_res_freqs):
             self.pdc_res_power_unbiased[index] = calc_PDC_unbiased(self, f)
@@ -188,8 +191,6 @@ class PeriodicityDetector:
         '''
         This function runs the GLS calculation process.
         '''
-
-        # , normalization='psd'
 
         if isinstance(self.time_series.vals[0], float):
             self.GLS_power = LombScargle(self.time_series.times, self.time_series.vals).power(self.GLS_frequency)
@@ -219,23 +220,32 @@ class PeriodicityDetector:
 
         index = 0
 
-        fig, axs = plt.subplots(periodograms_count, squeeze=False, figsize=(11, 16))
+        fig, axs = plt.subplots(periodograms_count, squeeze=False, figsize=(11, periodograms_count * 4))
 
         for method in self.results_frequency:
             axs[index, 0].plot(self.results_frequency[method], self.results_power[method], 'k')
-            axs[index, 0].set_title(method)
+            if method == "USURPER":
+                axs[index, 0].legend(["USURPER", 0.001, 0.01, 0.05, 0.1])
+            if method == "Partial_USURPER":
+                axs[index, 0].set_title("Partial_PDC")
+            elif method == "Partial_USURPER_reversed":
+                axs[index, 0].set_title("Partial_USURPER")
+            else:
+                axs[index, 0].set_title(method)
             if self.period != None:
                 for p in self.period:
-                    axs[index, 0].axvline(x=1/p, alpha=0.5, ls='--') # , c='r'
+                    axs[index, 0].axvline(x=1/p, alpha=0.5, ls='--')
 
                 pass
             index = index + 1
-
-        axs[index-1, 0].set(xlabel="Frequency [1/day]")
+        if index == 0:
+            axs[index, 0].set(xlabel="Frequency [1/day]")
+        else:
+            axs[index-1, 0].set(xlabel="Frequency [1/day]")
 
         if velocities_flag:
             if self.period == None:
-                self.period = 9_999
+                self.period = [9_999]
 
             times_folded = [t % self.period[0] for t in self.time_series.times]
 

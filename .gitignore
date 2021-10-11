@@ -17,6 +17,6 @@ Thumbs.db
 .idea
 *SPARTA.egg-info
 *.ipynb_checkpoints
-/examples/.ipynb_checkpoints/
-/sparta/UNICOR/template_files/lte05800-3.50+0.5.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits
-/sparta/UNICOR/template_files/WAVE_PHOENIX-ACES-AGSS-COND-2011.fits
+examples/Binni/
+examples/res/
+sparta/UNICOR/template_files/

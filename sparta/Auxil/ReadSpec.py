@@ -14,7 +14,7 @@
 # 3) APOGEE_masking - removes bad pixels from an APOGEE spectra.
 #
 # Dependencies: numpy, astropy, easygui, pandas and datetime.
-# Last update: Avraham Binnenfeld, 20200316.
+# Last update: Avraham Binnenfeld, 20210510.
 
 import numpy as np
 import easygui
@@ -22,11 +22,11 @@ from astropy.io import fits
 from datetime import datetime
 import pandas as pd
 
-class ReadSpec:
 
+class ReadSpec:
     # =============================================================================
     # =============================================================================
-    def __init__(self, **kwargs):
+    def __init__(self, survey, **kwargs):
         '''
         Input: All input is optional, and needs to be called along
                with its keyword. Below appears a list of the possible input
@@ -40,13 +40,7 @@ class ReadSpec:
               segment: int. 0, 1 or 2 (choosing 1 APOGEE "color" data band)
         '''
 
-        if 'survey' in kwargs:
-            self.survey = kwargs['survey']
-            self.read_function = None
-
-        if 'read_function' in kwargs:
-            self.survey = None
-            self.read_function = kwargs['read_function']
+        self.survey = survey
 
         if 's' and 'w' and 'bool_mask' and 'DATE-OBS' and 'vrad' and 'segment' in kwargs:
             self.s = kwargs['s']
@@ -61,6 +55,7 @@ class ReadSpec:
             self.bool_mask = []
             self.vrad = []
             self.segment = []
+            self.air_mass = []
 
         self.snr = -1
 
@@ -68,11 +63,9 @@ class ReadSpec:
 
         self.n_orders = []
 
-        self.metadata = None
-
 # =============================================================================
 # =============================================================================
-    def load_spectrum_from_fits(self, path=None, APOGEE_segment=1, min_wv=4900, max_wv=5150):
+    def load_spectrum_from_fits(self, path=None, APOGEE_segment=1, min_wv=4900, max_wv=5150, output=False):
         '''
         This function loads visit FITS file and parses it to fit the UNICOR Spectrum class.
 
@@ -89,13 +82,12 @@ class ReadSpec:
 
         self.APOGEE_segment = APOGEE_segment
 
+        if output:
+            print(fits_fname)
+
         hdul_sp = fits.open(fits_fname)
 
-        if self.read_function is not None:
-            self.DATE_OBS, self.s, self.w, \
-                self.n_orders, self.bcv, self.metadata = self.read_function(hdul_sp)
-
-        elif self.survey == "APOGEE":
+        if self.survey == "APOGEE":
             self.n_orders = 1
             s = hdul_sp[1].data[self.APOGEE_segment]
             w = hdul_sp[4].data[self.APOGEE_segment]
@@ -128,8 +120,12 @@ class ReadSpec:
             w = hdul_sp[1].data['WAVE']
 
             bcv = hdul_sp[0].header["HIERARCH ESO DRS BERV"]
+            try:
+                self.air_mass = (hdul_sp[0].header["HIERARCH ESO TEL AIRM START"] + hdul_sp[0].header["HIERARCH ESO TEL AIRM END"]) / 2
+            except:
+                self.air_mass = 0
 
-            self.s = s
+            self.s = s - s.min() + 1
             self.w = w
 
             # self.DATE_OBS = hdul_sp[0].header['DATE-OBS']
@@ -145,9 +141,11 @@ class ReadSpec:
             self.s = np.reshape(self.s, (1, -1))
             self.w = np.reshape(self.w, (1, -1))
 
-            self.bcv = bcv
+            # self.bcv = hdul_sp[0].header["HIERARCH ESO DRS BERV"] # 0
 
             self.snr = hdul_sp[0].header["SNR"]
+
+            # self.vrad = hdul_sp[0].header["HIERARCH ESO TEL TARG RADVEL"]
 
         elif self.survey == "LAMOST":
             self.n_orders = 1
@@ -165,7 +163,7 @@ class ReadSpec:
 
             HELIO_RV = hdul_sp[0].header["HELIO_RV"]
 
-            self.s = s
+            self.s = s # - s.min() + 1
             self.w = w
 
             self.DATE_OBS = hdul_sp[0].header["DATE-OBS"]
@@ -220,18 +218,17 @@ class ReadSpec:
 
             self.DATE_OBS = hdul_sp[0].header["BJD"]
 
-
         elif self.survey == "TRES":
             self.n_orders = 1
 
             s = hdul_sp[0].data[36]
             w = [i for i in range(len(s))]
+
             self.s = s
             self.w = w
 
             self.DATE_OBS = hdul_sp[0].header["WS_BJD"]
             self.bcv = hdul_sp[0].header["BCV"]
-            # self.DATE_OBS = datetime.strptime(self.DATE_OBS, '%Y-%m-%dT%H:%M:%S')
 
             min_index = np.where(np.array(w) > 500)[0][0]
             max_index = np.where(np.array(w) > 1000)[0][0]
@@ -252,14 +249,13 @@ class ReadSpec:
 
             self.snr = hdul_sp[0].header["SNR"]
 
-            self.s = s # - s.min() + 1
+            self.s = s
             self.w = w
 
             self.DATE_OBS = hdul_sp[0].header["MJD-OBS"]
-            # self.DATE_OBS = datetime.strptime(self.DATE_OBS, '%Y-%m-%dT%H:%M:%S.%f')
 
-            min_index = np.where(np.array(w) > 6500)[0][0]
-            max_index = np.where(np.array(w) > 6600)[0][0]
+            min_index = np.where(np.array(w) > min_wv)[0][0]
+            max_index = np.where(np.array(w) > max_wv)[0][0]
 
             self.s = s[min_index:max_index]
             self.w = w[min_index:max_index]
@@ -267,6 +263,195 @@ class ReadSpec:
             self.s = np.reshape(self.s, (1, -1))
             self.w = np.reshape(self.w, (1, -1))
 
+        elif self.survey == "FEROS":
+            self.n_orders = 1
+
+            s = hdul_sp[1].data['FLUX']
+            w = hdul_sp[1].data['WAVE']
+
+            bcv = hdul_sp[0].header["HIERARCH ESO DRS BARYCORR"]
+
+            self.DATE_OBS = (hdul_sp[0].header["MJD-OBS"] + hdul_sp[0].header["MJD-END"])/ 2
+
+            min_index = np.where(w[0] > min_wv)[0][0]
+            max_index = np.where(w[0] > max_wv)[0][0]
+
+            self.s = s[0, min_index:max_index]
+            self.w = w[0, min_index:max_index]
+
+            self.s = np.reshape(self.s, (1, -1))
+            self.w = np.reshape(self.w, (1, -1))
+
+            self.bcv = bcv
+
+            self.snr = hdul_sp[0].header["SNR"]
+
+        elif self.survey == "HARPS_15":
+
+            self.n_orders = 1
+
+            s = np.array([hdul_sp[0].data[3][28]])
+            w = np.array([hdul_sp[0].data[0][28]])
+
+            bcv = hdul_sp[0].header["HIERARCH BARYCENTRIC CORRECTION (KM/S)"]
+
+            self.DATE_OBS = hdul_sp[0].header['HIERARCH MBJD']
+
+            min_index = np.where(w[0] > 5160)[0][0]
+            max_index = np.where(w[0] > 5210)[0][0]
+
+            self.s = s[0, min_index:max_index]
+            self.w = w[0, min_index:max_index]
+
+            self.s = np.reshape(self.s, (1, -1))
+            self.w = np.reshape(self.w, (1, -1))
+
+            self.bcv = 0
+
+            self.snr = hdul_sp[0].header["SNR"]
+
+            self.vrad = hdul_sp[0].header["RV"]
+
+        elif self.survey == "FEROS_15":
+            self.n_orders = 1
+
+            s = np.array([hdul_sp[0].data[3][9]])
+            w = np.array([hdul_sp[0].data[0][9]])
+
+            bcv = hdul_sp[0].header["HIERARCH BARYCENTRIC CORRECTION (KM/S)"]
+
+            self.s = s - s.min() + 1
+            self.w = w
+
+            self.DATE_OBS = hdul_sp[0].header['HIERARCH MBJD']
+
+            # 5
+            # min_index = np.where(w[0] > 5705)[0][0]
+            # max_index = np.where(w[0] > 5900)[0][0]
+
+            # #9
+            min_index = np.where(w[0] > 5175)[0][0]
+            max_index = np.where(w[0] > 5350)[0][0]
+
+            self.s = s[0, min_index:max_index]
+            self.w = w[0, min_index:max_index]
+
+            self.s = np.reshape(self.s, (1, -1))
+            self.w = np.reshape(self.w, (1, -1))
+
+            self.bcv = 0
+
+            self.snr = hdul_sp[0].header["SNR"]
+
+            self.vrad = hdul_sp[0].header["RV"]
+
+
+        elif self.survey == "CORALIE":
+
+            self.n_orders = 1
+
+            s = hdul_sp[0].data
+            x = hdul_sp[0].header["CRVAL1"]
+            d = hdul_sp[0].header["CDELT1"]
+            w = np.arange(x, x + d * (len(s)), d)[:-1]
+
+            bcv = hdul_sp[0].header["HIERARCH ESO OBS TARG CORBAORB"]
+
+            self.DATE_OBS = hdul_sp[0].header["HIERARCH ESO DRS BJD"]
+
+            # SMUS
+            # min_index = np.where(w > 5800)[0][0]
+            # max_index = np.where(w > 6000)[0][0]
+
+            # betador
+            min_index = np.where(w > 4900)[0][0]
+            max_index = np.where(w > 5150)[0][0]
+
+            self.s = s[min_index:max_index]
+            self.w = w[min_index:max_index]
+
+            self.s = np.reshape(self.s, (1, -1))
+            self.w = np.reshape(self.w, (1, -1))
+
+            self.bcv = 0
+
+        elif self.survey == "SRG":
+            self.n_orders = 1
+
+            s = hdul_sp[0].data
+            x = hdul_sp[0].header["CRVAL1"]
+            d = hdul_sp[0].header["CDELT1"]
+            w = np.arange(x, x + d * (len(s)), d)[:-1]
+
+            self.air_mass = hdul_sp[0].header["TEMPCCD"]
+
+            self.DATE_OBS = hdul_sp[0].header["BJD"]
+
+
+            min_index = np.where(w > 6000)[0][0]
+            max_index = np.where(w > 6250)[0][0]
+
+            self.s = s[min_index:max_index]
+            self.w = w[min_index:max_index]
+
+            self.s = np.reshape(self.s, (1, -1))
+            self.w = np.reshape(self.w, (1, -1))
+
+            self.bcv = 0
+
+        elif self.survey == "KEK":
+
+            self.n_orders = 1
+
+            print(hdul_sp[0].info())
+
+            print(hdul_sp[0].header)
+
+            print(len(hdul_sp[1].data))
+
+            print(len(hdul_sp[1].data[0]))
+
+            s = hdul_sp[0].data
+
+            x = hdul_sp[0].header["CRVAL1"]
+
+            d = hdul_sp[0].header["CDELT1"]
+
+            w = np.arange(x, x + d * (len(s)), d)[:-1]
+
+        elif self.survey == "PEPSI":
+
+            self.n_orders = 1
+
+            w = [a[0] for a in hdul_sp[1].data]
+            s = [a[1] for a in hdul_sp[1].data]
+
+            print(min_wv, max_wv)
+            min_index = np.where(np.array(w) > min_wv)[0][0]
+            max_index = np.where(np.array(w) > max_wv)[0][0]
+
+            self.s = s[min_index:max_index]
+            self.w = w[min_index:max_index]
+
+            self.s = np.reshape(self.s, (1, -1))
+            self.w = np.reshape(self.w, (1, -1))
+
+            print(min_index, max_index)
+            # print(self.w)
+
+            self.bcv = 0 #bcv
+            # print(hdul_sp[0].header)
+            self.DATE_OBS = hdul_sp[0].header["JD-OBS"]
+
+            # print(hdul_sp[0])
+            print(hdul_sp[0].header["OBJECT"])
+            # print(hdul_sp[1].data)
+            # print(hdul_sp[1].data[0])
+
+            # s = hdul_sp[0].data
+            # x = hdul_sp[0].header["CRVAL1"]
+            # d = hdul_sp[0].header["CDELT1"]
+            # w = np.arange(x, x + d * (len(s)), d)[:-1]
 
 # =============================================================================
 # =============================================================================
@@ -280,7 +465,7 @@ class ReadSpec:
         DATE-OBS: str, observation date from fits file
         vrad: float, radial velocity given in the fits file
         """
-        return self.w, self.s, self.bool_mask, self.DATE_OBS, self.vrad, self.bcv, self.snr
+        return self.w, self.s, self.bool_mask, self.DATE_OBS, self.vrad, self.bcv, self.snr, self.air_mass
 
 # =============================================================================
 # =============================================================================

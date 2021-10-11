@@ -32,6 +32,7 @@ from scipy import interpolate
 from PyAstronomy import pyasl
 import pandas as pd
 import matplotlib.pyplot as plt
+from copy import deepcopy
 
 # =============================================================================
 # =============================================================================
@@ -40,7 +41,8 @@ def save_time_series(time_series, amp, snr, system_type):
     if not os.path.exists(r'res'):
         os.makedirs(r'res')
 
-    details = [str(time_series.size), str(amp), str(snr), system_type]
+    # details = [str(time_series.size), str(amp), str(snr), str(system_type)]
+    details = [str(system_type)]
 
     val_dict = {}
 
@@ -63,7 +65,7 @@ def save_time_series(time_series, amp, snr, system_type):
                                                  orient="index")
             output_data.to_csv('res/' + "_".join(details) + '_vrad_data' + '.csv')
 
-        elif system_type == "sb2":
+        elif system_type == "sb2" or True:
             output_data = pd.DataFrame.from_dict({"vrad_1": time_series.calculated_vrad_list[0],
                                                   "vrad_2": time_series.calculated_vrad_list[1],
                                                   "time": time_series.times},
@@ -105,6 +107,32 @@ def save_res(observations, amp, snr, system_type, spec_list, p, additional_data=
                                           "gls:": observations.periodicity_detector.GLS_power},
                                          orient="index")
     output_data.to_csv('res/' + "_".join(details) + '_data' + '.csv')
+
+    if len(observations.periodicity_detector.fap_dict) > 0:
+        all_fap = observations.periodicity_detector.fap_dict["all"].values()
+        top_fap = observations.periodicity_detector.fap_dict[observations.periodicity_detector.results_frequency["USURPER"][
+            np.argmax(observations.periodicity_detector.results_power["USURPER"])]].values()
+
+        output_data = pd.DataFrame.from_dict({"y": [0.001, 0.01, 0.05, 0.1],
+                                              "all_fap": all_fap,
+                                              "top_fap": top_fap,},
+                                             orient="index")
+        output_data.to_csv('res/' + "_".join(details) + '_fap' + '.csv')
+        if len(observations.periodicity_detector.fap_dict) > 2:
+            all_fap = observations.periodicity_detector.fap_dict["all"].values()
+            top_fap = observations.periodicity_detector.fap_dict[
+                observations.periodicity_detector.results_frequency["USURPER"][
+                    np.argmax(observations.periodicity_detector.results_power["USURPER"])]].values()
+            top_fap_2 = observations.periodicity_detector.fap_dict[
+                observations.periodicity_detector.results_frequency["USURPER"][
+                    np.argsort(observations.periodicity_detector.results_power["USURPER"])[-2]]].values()
+
+            output_data = pd.DataFrame.from_dict({"y": [0.001, 0.01, 0.05, 0.1],
+                                                  "all_fap": all_fap,
+                                                  "top_fap": top_fap,
+                                                  "top_fap_2": top_fap_2, },
+                                                 orient="index")
+            output_data.to_csv('res/' + "_".join(details) + '_fap' + '.csv')
 
     plt.close()
 
@@ -210,11 +238,13 @@ def save_res(observations, amp, snr, system_type, spec_list, p, additional_data=
 
 
 
-def simulate_kepler_ellipse(times):
+def simulate_kepler_ellipse(times, params=[], p=7):
     '''
     This function gets a list of times and generates a corresponding radial velocities list
     representing the velocities for the specific described Keplerian orbit.
     :param times: list of times for which the radial velocities will be calculated
+    :param params: list, TBD - orbit parameters
+    :param p: float, the Keplerian orbit period
     :return: list of radial velocities at the input times
     '''
     # Instantiate a Keplerian elliptical orbit with
@@ -222,7 +252,7 @@ def simulate_kepler_ellipse(times):
     # a period of 2 time units, eccentricity of 0.3,
     # longitude of ascending node of 70 degrees, an inclination
     # of 10 deg, and a periapsis argument of 110 deg.
-    ke = pyasl.KeplerEllipse(65, 7, e=0.3, Omega=70., i=10.0, w=110.0)
+    ke = pyasl.KeplerEllipse(65, p, e=0.3, Omega=70., i=10.0, w=110.0)
 
     # Get a time axis
     x = np.asanyarray(times)
@@ -239,7 +269,7 @@ def simulate_kepler_ellipse(times):
     return vals
 
 
-def simulate_target(temp_spec, size, p, system_type, half_amp, snr, min_val, max_val, signal_type="sinus", faint_template=[], p2=[]):
+def simulate_target(temp_spec, size, p, system_type, half_amp, snr, min_val, max_val, signal_type="sinus", faint_template=[], p2=[], R=[]):
     '''
     This function generates astronomical target simulations, based on PHOENIX synthetic spectra.
     :param temp_spec: PHOENIX spectrum the simulation will be based on
@@ -255,7 +285,7 @@ def simulate_target(temp_spec, size, p, system_type, half_amp, snr, min_val, max
     :return:
     '''
 
-    random.seed(997)
+    # random.seed(997)
     times = [(random.random() * 100) for _ in range(size)]
     if signal_type == "sinus":
         vals = [half_amp * np.sin(2 * t * np.pi / p) for t in times]
@@ -304,15 +334,20 @@ def simulate_target(temp_spec, size, p, system_type, half_amp, snr, min_val, max
             z2 = interpolate.interp1d(new_wl_2[0], faint_star.model.sp, kind='quadratic') #
 
             ratio = (temp_spec.PHXREFF ** 2) / (faint_star.PHXREFF ** 2)
-            sb2_spec = z1(new_wl_2[0][100:-100]) * ratio + z2(new_wl_2[0][100:-100])
+            sb2_spec = z1(new_wl_2[0][200:-200]) * ratio + z2(new_wl_2[0][200:-200])
 
-            sb2_wl = new_wl_2[0][100:-100]
+            sb2_wl = new_wl_2[0][200:-200]
 
             lib_t = Template(spectrum=sb2_spec[0], wavelengths=sb2_wl, min_val=min_val, max_val=max_val,)
 
             new_temp = Spectrum(wv=lib_t.model.wv, sp=lib_t.add_noise(snr)).SpecPreProccess()
 
             temp_for_ccf = Spectrum(wv=[temp_spec.model.wv[0]], sp=temp_spec.model.sp).SpecPreProccess()
+
+            if R != []:
+                template_g = Template(template=new_temp)
+                template_g.GaussianBroadening(resolution=100_000)
+                new_temp = Spectrum(wv=template_g.model.wv, sp=template_g.add_noise(snr)).SpecPreProccess()
 
             visit_spec_list.append(new_temp)
 
@@ -331,8 +366,8 @@ def simulate_target(temp_spec, size, p, system_type, half_amp, snr, min_val, max
                 min_diff = diff
                 min_i = i
 
-        min_ccf = CCF1d().CrossCorrelateSpec(template=Template(template=temp_for_ccf), spec=visit_spec_list[min_i])
-        max_ccf = CCF1d().CrossCorrelateSpec(template=Template(template=temp_for_ccf), spec=visit_spec_list[max_i])
+        min_ccf = CCF1d().CrossCorrelateSpec(template_in=Template(template=temp_for_ccf), spec_in=visit_spec_list[min_i])
+        max_ccf = CCF1d().CrossCorrelateSpec(template_in=Template(template=temp_for_ccf), spec_in=visit_spec_list[max_i])
 
         calculated_vrad_list = [min_ccf, max_ccf]
 
@@ -414,6 +449,113 @@ def simulate_target(temp_spec, size, p, system_type, half_amp, snr, min_val, max
 
     return times, vals, calculated_vrad_list, visit_spec_list
 
+def simulate_planet_around_active_star(v_sin_i, epsilon, integration_ratio, star_template, template_spot,
+                                       p_spot, p_planet, spec_power_ratio, planet_k, star_k, planet_param,
+                                       N, snr, periocic_spot_flag, seed=-1):
+
+    new_temp = Template(template=Spectrum(wv=star_template.model.wv,
+                                          sp=star_template.model.sp).InterpolateSpectrum(delta=0.5))
+
+    new_temp.RotationalBroadening(epsilon=epsilon, vsini=v_sin_i)
+
+    template_star_broadend = deepcopy(Template(template=Spectrum(wv=[star_template.model.wv[0][60:-60]],
+                                                                 sp=[star_template.model.sp[0][60:-60]]).SpecPreProccess()))
+
+    if seed != -1:
+        # seed = 995
+        random.seed(seed)
+
+    times = [(random.random() * 100) for _ in range(N)]
+
+    if periocic_spot_flag:
+        vals_spot = [star_k * np.sin(2 * t * np.pi / p_spot) for t in times]
+    else:
+        std_spot_i = 0.5
+        mu, sigma = 0, std_spot_i  # mean and standard deviation
+        vals_spot = [star_k * np.random.normal(mu, sigma) for _ in times]
+        # vals_spot = [2 * random.uniform(-1, 1) for _ in times] # star_k
+
+
+    keplerian_velocities = simulate_kepler_ellipse(times, planet_param, p_planet)
+    vals_planet = [planet_k * v for v in keplerian_velocities]
+
+    visit_spec_list = []
+
+    for i, v in enumerate(vals_spot):
+        new_wl_spot = template_spot.doppler(v)
+
+        z1 = interpolate.interp1d(new_wl_spot[0], template_spot.model.sp[0], kind='quadratic')
+        z2 = interpolate.interp1d(star_template.model.wv[0], star_template.model.sp[0], kind='quadratic')
+
+        spotted_spec = z1(star_template.model.wv[0][60:-60]) * spec_power_ratio + star_template.model.sp[0][60:-60]
+
+        spotted_wl = star_template.model.wv[0][60:-60]
+
+        spotted_t = Template(spectrum=spotted_spec, wavelengths=spotted_wl)
+
+        if vals_planet[i] != 0:
+            spotted_t_vel = spotted_t.doppler(vals_planet[i])
+        else:
+            spotted_t_vel = spotted_t.model.wv
+
+        new_temp = Spectrum(wv=[spotted_t_vel[0]], sp=[spotted_t.model.sp[0]]).InterpolateSpectrum(delta=1)
+
+        rot_flux = Template().GaussianBroadening(wv=new_temp.wv, sp=new_temp.sp, resolution=100_000)
+
+        new_temp.sp = rot_flux
+
+        if integration_ratio:
+            wv, sp = Template().integrate_spec(integration_ratio=integration_ratio, wv=new_temp.wv, sp=new_temp.sp)
+            new_temp.wv = wv
+            new_temp.sp = sp
+            pass
+
+        new_temp.sp = Template().add_noise(snr, new_temp.sp)
+
+        new_temp = new_temp.SpecPreProccess()
+
+        visit_spec_list.append(new_temp)
+
+    return N, times, visit_spec_list, template_star_broadend
+
+
+def run_ppdc_tests(N, v_sin_i, spec_power_ratio, planet_k, snr, template_star, template_spot, period, periocic_spot_flag):
+
+
+
+    ts = TimeSeries(size=N, times=times, vals=visit_spec_list,
+                    calculated_vrad_list=[])
+    obs = Observations(time_series=ts)
+    obs.initialize_periodicity_detector(freq_range=(1 / 1000, 0.5), periodogram_grid_resolution=1000)
+
+    www = obs.calc_rv_against_template(template_star_broadend, dv=0.01,
+                                 VelBound=[-015.5, 015.5], fastccf=True)
+
+    calculated_vrad_list = www.vels
+
+    print([c for c in www.vels])
+    print([c for c in www.evels])
+    _ = obs.ccf_list[3].plotCCFs()
+    plt.show()
+
+    calculated_ccf_peaks = obs.ccf_peaks
+
+    obs.observation_TimeSeries.calculated_vrad_list = calculated_vrad_list
+    obs.observation_TimeSeries.calculated_ccf_peaks = calculated_ccf_peaks
+
+    obs.periodicity_detector.run_PDC_process(calc_biased_flag=False, calc_unbiased_flag=True)
+    obs.periodicity_detector.run_USURPER_process(calc_biased_flag=False, calc_unbiased_flag=True)
+    obs.periodicity_detector.run_Partial_USURPER_process(reversed_flag=True)
+    obs.periodicity_detector.run_Partial_USURPER_process(reversed_flag=False)
+
+    obs.periodicity_detector.run_GLS_process()
+
+    obs.periodicity_detector.period = period [7, 19]
+    obs.periodicity_detector.periodogram_plots(velocities_flag=True)
+
+    print(Details)
+    plt.show()
+
 
 def run_tests(system_type, size_list, noise_list, half_amp_list):
     '''
@@ -425,7 +567,7 @@ def run_tests(system_type, size_list, noise_list, half_amp_list):
     :param half_amp_list: list of half-amplitudes
     '''
     # Assigning sun-like stellar parameters to the simulated spectra
-    temp = 5000 # 4900 88888888888 TBD
+    temp = 5000
     log_g = 4.5
     metal = 0
     alpha = 0
@@ -555,7 +697,7 @@ def run_tests(system_type, size_list, noise_list, half_amp_list):
                     print("Done.", flush=True)
 
 
-                save_time_series(time_series=ts, amp=half_amp, snr=noise, system_type=system_type)
+                # save_time_series(time_series=ts, amp=half_amp, snr=noise, system_type=system_type)
                 save_res(observations=obs, amp=half_amp, snr=noise, system_type=system_type, spec_list=spec_list, p=7,
                             additional_data=calculated_vrad_list)
 
@@ -579,6 +721,7 @@ if __name__ == '__main__':
 
     Starting simulation. This will take ~50 minutes.\n\n
     """)
+
 
     run_tests(system_type="sb1", size_list=[50], half_amp_list=[10], noise_list=[100])
 

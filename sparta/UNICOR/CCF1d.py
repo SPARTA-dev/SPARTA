@@ -5,15 +5,20 @@
 # a Spectrum object, saved in the self.spec field and a Template object
 # stored in the self.template field.
 #
-# A Template class has the following methods (under construction):
-# CrossCorrelateSpec - multi-order cross correlation.
-# CombineCCFs - sums the CCFs of a multi-order spectrum
-# TBD
+# ---------------------------------------------
+# A CCF1d class stores the following methods:
+# ---------------------------------------------
+# 1) CrossCorrelateSpec - Multi-order cross correlation.
+# 2) CombineCCFs - Sums the CCFs of a multi-order spectrum.
+# 3) extract_RV - Get the radial velocity and its uncertainty from maximum likelihood.
+# 4) calcBIS - Determine full-with-half-maximum of a peaked set of points, x and y.
+# 5) subpixel_CCF - Using a second order approximation to estimate the ccf at a given velocity.
+# 6) correlate1d - A wrapper of the jitted one-dimensional correlation
+# 7) plotCCFs - Produces plots of the calculated CCFs
 #
-# Dependencies: Spectrum and Template class (of UNICOR).
-#               scipy and numpy.
 #
-# Last update: Sahar Shahaf, 20200718.
+# Dependencies: scipy, numpy, astropy, numba, matplotlib and copy.
+# Last update: Avraham Binnenfeld, 20210510.
 
 
 from scipy import interpolate
@@ -22,8 +27,7 @@ import numpy as np
 from astropy import constants as consts, units as u
 from numba import njit
 import matplotlib.pyplot as plt
-import copy
-
+from copy import deepcopy
 
 class CCF1d:
     # =============================================================================
@@ -68,8 +72,8 @@ class CCF1d:
 
         # Initialize:
         # ----------
-        spec = copy.deepcopy(spec_in)
-        template = copy.deepcopy(template_in)
+        template = deepcopy(template_in)
+        spec = deepcopy(spec_in)
 
         if dv is None:
             try:
@@ -112,6 +116,7 @@ class CCF1d:
         # the user. The range is converted to a number of CCF lags, using
         # the velocity spacing dv. Default is 100 km/s.
         Nlags = np.floor((Vrange/dv).decompose().value)
+
         Nord = len(spec.wv)
 
         # Calculate the velocity from the lags
@@ -295,8 +300,6 @@ class CCF1d:
         else:
             return np.nan, np.nan, None
 
-# =============================================================================
-# =============================================================================
     def subpixel_CCF(self, vels, ccf, v=None, Npts=5):
         """
         This function is using a second order approximation to estimate the ccf
@@ -337,7 +340,7 @@ class CCF1d:
 
         else:
             vels_diff = [i - v for i in vels]
-            x_n = np.amin(np.abs(vels_diff))
+            x_n = np.argmin(np.abs(vels_diff))
 
             indlist =[int(x_n - 1), int(x_n), int(x_n + 1)]
             x = np.array(vels[indlist])
@@ -348,6 +351,7 @@ class CCF1d:
                         y[2]*(v-x[0])*(v-x[1])/(x[2]-x[0])/(x[2]-x[1])
                         )
             return y_interp
+
 
     # =============================================================================
     # =============================================================================

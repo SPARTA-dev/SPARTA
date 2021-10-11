@@ -6,16 +6,25 @@
 # a TimeSeries object when initiate.
 # This class also enables running GLS and Zucker PDC and USuRPer on the data (arxiv.org/pdf/1711.06075.pdf) using a
 # PeriodicityDetector class.
-# Directory fits reading is currently implemented for HARPS, APOGEE, NRES, ELODIE and LAMOST observations data.
+# Directory fits reading is currently implemented for observations from HARPS, APOGEE, NRES, ELODIE and LAMOST and more.
 #
 # Observations class stores the following methods:
-# TBD tbd finish documentation
 # ---------------------------------------------
-# 1) convert_times_to_relative_float_values - converts the observation dates to float values,
-#         marking the days past the first visit
+# 1) PreProccessSpectra - contains different pre-processing procedures applied on an observed spectrum.
+# 2) SelectOrders - enables the user to keep or discard orders from the observed data.
+# 3) calc_rv_against_template - calculates radial velocity for the entire spectrum time series,
+#                               using CCF against resting template.
+# 4) retrieve_BIS - computes BIS from the calculated CCF
+# 5) initialize_periodicity_detector -
+#                    initiate the object's PeriodicityDetector instance before using it to create periodograms.
+# 6) convert_times_to_relative_float_values -
+#                            converts the observation dates to float values, marking the days past the first visit.
+# 7) create_avg_template - This function creates a naive toy resting template, by averaging all spectrum observations.
+# 8) clean_time_series - enables systematically removing observation data.
 #
-# Dependencies: os and easygui, tqdm, numpy.
-# Last update: Avraham Binnenfeld, 20200611.
+#
+# Dependencies: os, sys, easygui, tqdm, numpy and matplotlib.
+# Last update: Avraham Binnenfeld, 20210510.
 
 import os, sys
 import numpy as np
@@ -27,11 +36,11 @@ import matplotlib.pyplot as plt
 import easygui
 from tqdm import tqdm
 
-
 class Observations:
     # =============================================================================
     # =============================================================================
-    def __init__(self, read_function=None, survey=None, min_snr=-1, target_visits_lib=None, time_series=[]):
+    def __init__(self, survey="APOGEE", min_snr=-1, target_visits_lib=None, time_series=[],
+                 min_avg_flux_val=-1, sample_rate=1, output=False, min_wv=5150, max_wv=5300):
         '''
         Input: All input is optional, and needs to be called along
                with its keyword. Below appears a list of the possible input
@@ -43,9 +52,6 @@ class Observations:
               target_visits_lib: str, observation visit directory path
               time_series: TimeSeries object, in case a direct load of TimeSeries (instead of file reading)
         '''
-
-        assert ((read_function is not None) or (survey is not None)), "Provide read_function or survey"
-
         if time_series == []:
             self.file_list = []
             self.spec_list = []
@@ -54,38 +60,31 @@ class Observations:
             self.vrad_list = []
             self.bcv = []
             self.snr = []
+            self.air_mass = []
 
             if target_visits_lib:
                 path = target_visits_lib
             else:
                 path = easygui.diropenbox(msg=None, title='Select ' + survey + ' dir:',)
 
-            # for filename in os.listdir(path):
-            #     if filename.endswith(".fits") or filename.endswith(".fits.gz"):
-            #         self.visits_list.append(os.path.join(path, filename))
-            #     else:
-            #         pass
+            count = 0
 
             for root, dirs, files in os.walk(path):
                 for file in files:
-                    if file.endswith(".fits") or file.endswith(".fits.gz"):
-                        self.file_list.append(os.path.join(root, file))
+                    if (file.endswith(".fits") or file.endswith(".fits.gz") or file.endswith(".fts.gz") or file.endswith(".fits.Z")) and not file.startswith('~'):
+                        if count % sample_rate == 0:
+                            self.file_list.append(os.path.join(root, file))
+                        count = count + 1
                     else:
                         pass
 
-            # self.sample_size = len(self.file_list)
-
             for visit_path in self.file_list:
 
-                if read_function is None:
-                    visit = ReadSpec(survey=survey)
-                else:
-                    visit = ReadSpec(read_function=read_function)
+                visit = ReadSpec(survey)
+                visit.load_spectrum_from_fits(path=visit_path, output=output, min_wv=min_wv, max_wv=max_wv)
+                w, s, bool_mask_s, date_obs, vrad, bcv, snr, air_mass = visit.retrieve_all_spectrum_parameters()
 
-                visit.load_spectrum_from_fits(path=visit_path)
-                w, s, bool_mask_s, date_obs, vrad, bcv, snr = visit.retrieve_all_spectrum_parameters()
-
-                if snr >= min_snr or snr == -1 or min_snr == -1:
+                if (snr >= min_snr or snr == -1 or min_snr == -1) and (min_avg_flux_val == -1 or min_avg_flux_val <= np.mean(s)):
                     if visit.bcv==[]:
                         bcv = 0.0
                     sp = Spectrum(wv=w, sp=s, bjd=date_obs, bcv=bcv, name=survey)
@@ -95,6 +94,7 @@ class Observations:
                     self.time_list.append(date_obs)
                     self.bcv.append(bcv)
                     self.snr.append(snr)
+                    self.air_mass.append(air_mass)
 
                     if vrad != []:
                         self.vrad_list.append(vrad)
@@ -120,17 +120,7 @@ class Observations:
                            delta=0.5, RemCosmicNum=3, FilterLC=3, FilterHC=0.15,
                            alpha=0.3, verbose=True):
         '''
-        TBD tbd finish documentation
-        :param Ntrim:
-        :param CleanMargins:
-        :param RemoveNaNs:
-        :param delta:
-        :param RemCosmicNum:
-        :param FilterLC:
-        :param FilterHC:
-        :param alpha:
-        :param verbose:
-        :return:
+        This function conatains different pre-processing procedures applied on an observed spectrum.
         '''
         if not verbose:
             # Disable output
@@ -154,10 +144,14 @@ class Observations:
 # =============================================================================
     def SelectOrders(self, orders, remove=True):
         '''
-        TBD tbd finish documentation
-        :param orders:
-        :param remove:
-        :return:
+        This routine enables the user to keep or discard orders from the observed
+        data. Orders are numbered according to their index (0-> #ord-1),
+
+        :param orders: Indices of the required orders
+        :param include: Boolean. If True, these orders will be removed.
+                        otherwise, these will be the orders that will
+                        be kept.
+        :return: Same structure, with the orders arranged.
         '''
         for s in self.spec_list:
             s.SelectOrders(orders, remove=remove)
@@ -167,13 +161,14 @@ class Observations:
     def calc_rv_against_template(self, template, dv=0.1, VelBound=150,
                                  err_per_ord=False, combine_ccfs=True, fastccf=False):
         '''
-        TBD tbd finish documentation
-        :param template:
-        :param dv:
-        :param VelBound:
-        :param err_per_ord:
-        :param combine_ccfs:
-        :return:
+        This function calculates radial velocity for the entire spectrum time series, using CCF against resting template.
+        :param: spec_list - a list of Spectrum objects, with the observed data.
+        :param: template  - a Template object, with which the observaations are correlated.
+        :param: dv, VelBound, err_per_ord - parameters for the CCF1d CrossCorrelateSpec routine
+                                            see documentation therein.
+
+        :return: ccfs - A list of CCF1d objects, one for each observation.
+
         '''
 
         ccfs = (self.observation_TimeSeries.
@@ -213,7 +208,7 @@ class Observations:
 # =============================================================================
     def retrieve_BIS(self, bisect_val=[0.35, 0.95], use_combined=True):
         '''
-        After the cross correlations were calculated, the BIS can be computed.
+        This function computes BIS from the calculated CCF.
 
         :param: bisect_val - the values at which to calculate the
         :param: use_combined - Boolean. Use the combined CCFs or multiorder.
@@ -255,27 +250,99 @@ class Observations:
             float_times[i] = (t - start_time)
         self.time_list = float_times
 
+# =============================================================================
+# =============================================================================
+    def create_avg_template(self):
+        """
+        This function creates a naive toy resting template, by averaging all spectrum observations.
+        """
+        float_times = [0 for _ in range(self.sample_size)]
+        start_time = int(min(self.time_list))
+        self.first_time = start_time
+        for i, t in enumerate(self.time_list):
+            float_times[i] = (t - start_time)
+        self.time_list = float_times
+
+# =============================================================================
+# =============================================================================
+    def clean_time_series(self, max_vel=[], min_vel=[], max_time=[], nan_flag=True, sample_rate=1):
+        """
+        This functions enables systematically removing observations, according to either min or max values, max time,
+        nan values or sampling rate.
+        """
+
+        self.air_mass = self.time_list
+
+        if sample_rate != 1:
+            ok_index = []
+            for i in range(len(self.observation_TimeSeries.times)):
+                if sample_rate > 0 :
+                    if i % sample_rate == 0:
+                        ok_index.append(True)
+                    else:
+                        ok_index.append(False)
+                elif sample_rate < 0:
+                    if i % abs(sample_rate) == 0:
+                        ok_index.append(False)
+                    else:
+                        ok_index.append(True)
+            ok_index = np.where(ok_index)[0]
+            self.observation_TimeSeries.times = [self.observation_TimeSeries.times[i] for i in ok_index]
+            self.observation_TimeSeries.vals = [self.observation_TimeSeries.vals[i] for i in ok_index]
+            self.observation_TimeSeries.calculated_vrad_list = [self.observation_TimeSeries.calculated_vrad_list[i] for i in
+                                                                ok_index]
+            self.air_mass = [self.air_mass[i] for i in ok_index]
+
+
+        if nan_flag:
+            ok_index = np.where(~np.isnan(self.observation_TimeSeries.calculated_vrad_list))[0]
+            self.observation_TimeSeries.times = [self.observation_TimeSeries.times[i] for i in ok_index]
+            self.observation_TimeSeries.vals = [self.observation_TimeSeries.vals[i] for i in ok_index]
+            self.observation_TimeSeries.calculated_vrad_list = [self.observation_TimeSeries.calculated_vrad_list[i] for i in ok_index]
+            self.air_mass = [self.air_mass[i] for i in ok_index]
+
+        if max_vel:
+
+            ok_index = [i for i, x in enumerate(self.observation_TimeSeries.calculated_vrad_list) if x <= max_vel]
+            self.observation_TimeSeries.times = [self.observation_TimeSeries.times[i] for i in ok_index]
+            self.observation_TimeSeries.vals = [self.observation_TimeSeries.vals[i] for i in ok_index]
+            self.observation_TimeSeries.calculated_vrad_list = [self.observation_TimeSeries.calculated_vrad_list[i] for i in ok_index]
+            self.air_mass = [self.air_mass[i] for i in ok_index]
+
+        if min_vel:
+
+            ok_index = [i for i, x in enumerate(self.observation_TimeSeries.calculated_vrad_list) if x >= min_vel]
+            self.observation_TimeSeries.times = [self.observation_TimeSeries.times[i] for i in ok_index]
+            self.observation_TimeSeries.vals = [self.observation_TimeSeries.vals[i] for i in ok_index]
+            self.observation_TimeSeries.calculated_vrad_list = [self.observation_TimeSeries.calculated_vrad_list[i] for i in ok_index]
+            self.air_mass = [self.air_mass[i] for i in ok_index]
+
+        if max_time:
+
+            ok_index = [i for i, x in enumerate(self.observation_TimeSeries.times) if x <= max_time]
+            self.observation_TimeSeries.times = [self.observation_TimeSeries.times[i] for i in ok_index]
+            self.observation_TimeSeries.vals = [self.observation_TimeSeries.vals[i] for i in ok_index]
+            self.observation_TimeSeries.calculated_vrad_list = [self.observation_TimeSeries.calculated_vrad_list[i] for i in ok_index]
+            self.air_mass = [self.air_mass[i] for i in ok_index]
+
+
+        self.sample_size = len(self.observation_TimeSeries.vals)
+        self.observation_TimeSeries.size = self.sample_size
+        self.spec_list = self.observation_TimeSeries.vals
+
 
 if __name__ == '__main__':
     '''
-    An examploratory code showing reading of an HARPS or an APOGEE observation directory,
-    creating GLS and PDC periodograms for it and plot them.
+    An examploratory code showing reading of an APOGEE observation directory,
+    creating GLS and USURPER periodograms for it and plotting them.
     '''
-    # obs_data = Observations(survey="LAMOST")
 
-    # Alternatively:
-    # obs_data = Observations(survey="HARPS")
+    obs_data = Observations(survey="APOGEE")
 
-    # import scipy.io
-    #
-    # mat = scipy.io.loadmat(r"C:\Users\AbrahamBini\Downloads\specAll_17obs.mat")
-    # len(mat["HD235679_20180531"][0][0])
-    obs_data = Observations(survey="UVES")
-
-    obs_data.initialize_periodicity_detector(freq_range=(0, 10), periodogram_grid_resolution=500)
-    # obs_data.initialize_periodicity_detector(freq_range=(0, 10), periodogram_grid_resolution=100)
+    obs_data.initialize_periodicity_detector(freq_range=(0, 1), periodogram_grid_resolution=10_000)
 
     obs_data.periodicity_detector.run_USURPER_process(calc_biased_flag=False, calc_unbiased_flag=True)
+    obs_data.periodicity_detector.run_GLS_process()
 
     obs_data.periodicity_detector.periodogram_plots()
 

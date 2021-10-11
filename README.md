@@ -1,13 +1,12 @@
 # SPARTA
 
 <p>
-<a href="http://ascl.net/2007.022"><img src="https://img.shields.io/badge/ascl-2007.022-blue.svg?colorB=262255" alt="ascl:2007.022" /></a>    
 <a href="https://github.com/SPARTA-dev/SPARTA">
     <img src="https://img.shields.io/badge/GitHub-SPARTA--dev%2FSPARTA-blue?style=flat"></a>
 <a href="https://github.com/SPARTA-dev/SPARTA/blob/master/LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-blue?style=flat"></a>
-<a href="https://arxiv.org/abs/2007.13771">
-    <img src="https://img.shields.io/badge/read-USuRPER_paper-yellowgreen?style=flat"></a>
+<a href="https://github.com/SPARTA-dev/SPARTA">
+    <img src="https://img.shields.io/badge/read-USuRPER_paper_draft-yellowgreen?style=flat"></a>
 <a href="https://github.com/SPARTA-dev/SPARTA/tree/master/examples">
     <img src="https://img.shields.io/badge/tutorials-notebooks-yellowgreen?style=flat"></a>
 </p>

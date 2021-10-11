@@ -13,14 +13,18 @@
 # 2) download_PHOENIX_files - Downloads the synthetic spectrum files from the Goettingen ftp
 # 3) doppler - Shifts the synthetic spectrum according to a given velocity (Doppler effect)
 # 4) add_noise - Adds simulated noise to the synthetic spectrum according to a given snr
-# under construction -
-# GaussianBroadening - broadens the template with a Gaussian window,
+# 5) GaussianBroadening - broadens the template with a Gaussian window,
 #                      to account for the instrumental broadening.
-# RotationalBroadening - broadens the template with a rotaional profile
+# 6) RotationalBroadening - broadens the template with a rotaional profile
 #                        to account for stellar rotation.
+# 7) integrate_spec - sums up consecutive pixels in the given Template model,
+#                           to lower the resolution for computational needs
+# 8) save_template_model - exports the template model, possibly after being edited and manipulated.
+# 9) cut_multiorder - cuts the template according to a given wavelength bound.
+# 10) cut_multiorder_like - cuts the template to the shape of a given Spectrum object.
 #
-# Dependencies: numpy, astropy, ftplib, pathlib, random and os.
-# Last update: Avraham Binnenfeld, 20200607.
+# Dependencies: numpy, astropy, ftplib, pathlib, random, PyAstronomy, os and pandas.
+# Last update: Avraham Binnenfeld, 20210510.
 
 
 from astropy.io import fits
@@ -105,16 +109,16 @@ class Template:
             # which has to be downloaded an extracted manually,
             # the medium res wv vector is computed in the following way:
 
-            # ----- START of low-res insertion -------
-
+            # # ----- START of low-res insertion -------
+            #
             # w = s.copy()
             # w[0] = np.e ** hdul_spec[0].header["CRVAL1"]
             # beta = hdul_spec[0].header["CDELT1"]
-
+            #
             # for i in range(len(w) - 1):
             #     w[i + 1] = w[0] * (1 + beta) ** i
-
-            # ------- END of low-res insertion ---------
+            #
+            # # ------- END of low-res insertion ---------
 
             # star mass g
 
@@ -159,6 +163,15 @@ class Template:
         else:
             self.model = Spectrum()
             self.vel = []
+
+        if 'PHXMASS' in kwargs:
+            self.PHXMASS = kwargs['PHXMASS']
+
+        if 'PHXMASS' in kwargs:
+            self.PHXREFF = kwargs['PHXREFF']
+
+        # return self
+
 
     # =============================================================================
     # =============================================================================
@@ -267,7 +280,7 @@ class Template:
         beta = ((vel/self.model.c).decompose()).value
 
         if wv == []:
-            return self.model.wv.astype("float64") * (1 + beta)
+            return np.array(self.model.wv).astype("float64") * (1 + beta)
         else:
             return (wv * (1 + beta)).astype("float64")
 
