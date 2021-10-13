@@ -64,7 +64,7 @@ def simulate_planet_around_active_star(v_sin_i, epsilon, integration_ratio, star
         z1 = interpolate.interp1d(new_wl_spot[0], star_template.model.sp[0], kind='quadratic')
         z2 = interpolate.interp1d(template_star_broadend.model.wv[0], template_star_broadend.model.sp[0], kind='quadratic')
 
-        spotted_spec = z1(template_star_broadend.model.wv[0][60:-60]) * spec_power_ratio + template_star_broadend.model.sp[0][60:-60]
+        spotted_spec = z1(template_star_broadend.model.wv[0][60:-60]) * - spec_power_ratio + template_star_broadend.model.sp[0][60:-60]
 
         spotted_wl = template_star_broadend.model.wv[0][60:-60]
 
@@ -75,7 +75,7 @@ def simulate_planet_around_active_star(v_sin_i, epsilon, integration_ratio, star
         z1 = interpolate.interp1d(new_wl_spot[0], template_spot.model.sp[0], kind='quadratic')
         z2 = interpolate.interp1d(spotted_t.model.wv[0], spotted_t.model.sp[0], kind='quadratic')
 
-        spotted_spec = z1(spotted_t.model.wv[0][60:-60]) * - spec_power_ratio + spotted_t.model.sp[0][60:-60]
+        spotted_spec = z1(spotted_t.model.wv[0][60:-60]) * spec_power_ratio + spotted_t.model.sp[0][60:-60]
 
         spotted_wl = spotted_t.model.wv[0][60:-60]
 
