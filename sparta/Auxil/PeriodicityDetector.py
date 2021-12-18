@@ -23,6 +23,7 @@ from astropy.timeseries import LombScargle
 from sparta.USURPER.USURPER_functions import calc_PDC, calc_PDC_unbiased, calc_pdc_distance_matrix
 from copy import deepcopy
 import random
+from scipy.stats.distributions import chi2
 
 class PeriodicityDetector:
 
@@ -208,10 +209,28 @@ class PeriodicityDetector:
 
         return self.GLS_frequency, self.GLS_power
 
+    # =============================================================================
+    # =============================================================================
+    def calc_pdc_periodograms_pval(self, peak_values, plot=False):
+        '''
+        This function returns the p-value of a given peak value in the PDC periodogram,
+        based on Shen et. al. 2019 (https://arxiv.org/abs/1912.12150).
+        '''
+
+        p_vals = []
+
+        for peak in peak_values:
+            p_vals.append(chi2.sf(peak * len(self.time_series.times) + 1, 1))
+
+        if plot:
+            self.periodogram_plots(plot_pval=(peak_values, p_vals))
+
+        return p_vals
+
 
     # =============================================================================
     # =============================================================================
-    def periodogram_plots(self, velocities_flag=False):
+    def periodogram_plots(self, velocities_flag=False, plot_pval=False):
         '''
         This function plots the calculated periodograms.
         '''
@@ -220,18 +239,48 @@ class PeriodicityDetector:
 
         index = 0
 
+        colors = ['red', 'orange', 'blue', 'green', 'purple', 'dodgerblue']
+
         fig, axs = plt.subplots(periodograms_count, squeeze=False, figsize=(11, periodograms_count * 4))
 
         for method in self.results_frequency:
             axs[index, 0].plot(self.results_frequency[method], self.results_power[method], 'k')
             if method == "USURPER":
-                axs[index, 0].legend(["USURPER", 0.001, 0.01, 0.05, 0.1])
+                axs[index, 0].legend(["USURPER"])
+                if plot_pval:
+                    l = [" "]
+                    for i in range(len(plot_pval[0])):
+                        axs[index, 0].hlines(y=plot_pval[0][i], xmin=self.freq_range[0], xmax=self.freq_range[1], linewidth=1, alpha=0.5, ls='--', color=colors[i%6])
+                        l.append("P-VAL: " + str(np.round(plot_pval[1][i], 6)))
+                    axs[index, 0].legend(l)
             if method == "Partial_USURPER":
                 axs[index, 0].set_title("Partial_PDC")
+                if plot_pval:
+                    l = [" "]
+                    for i in range(len(plot_pval[0])):
+                        axs[index, 0].hlines(y=plot_pval[0][i], xmin=self.freq_range[0], xmax=self.freq_range[1], linewidth=1, alpha=0.5, ls='--', color=colors[i%6])
+                        l.append("P-VAL: " + str(np.round(plot_pval[1][i], 6)))
+                    axs[index, 0].legend(l)
+
             elif method == "Partial_USURPER_reversed":
                 axs[index, 0].set_title("Partial_USURPER")
+                if plot_pval:
+                    l = [" "]
+                    for i in range(len(plot_pval[0])):
+                        axs[index, 0].hlines(y=plot_pval[0][i], xmin=self.freq_range[0], xmax=self.freq_range[1], linewidth=1, alpha=0.5, ls='--', color=colors[i%6])
+                        l.append("P-VAL: " + str(np.round(plot_pval[1][i], 6)))
+                    axs[index, 0].legend(l)
+
             else:
                 axs[index, 0].set_title(method)
+                if plot_pval and method != 'GLS':
+                    l = [" "]
+                    for i in range(len(plot_pval[0])):
+                        axs[index, 0].hlines(y=plot_pval[0][i], xmin=self.freq_range[0], xmax=self.freq_range[1], linewidth=1, alpha=0.5, ls='--', color=colors[i%6])
+                        l.append("P-VAL: " + str(np.round(plot_pval[1][i], 6)))
+                    axs[index, 0].legend(l)
+
+
             if self.period != None:
                 for p in self.period:
                     axs[index, 0].axvline(x=1/p, alpha=0.5, ls='--')
