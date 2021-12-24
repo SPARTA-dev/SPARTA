@@ -364,8 +364,11 @@ class ReadSpec:
             # max_index = np.where(w > 6000)[0][0]
 
             # betador
-            min_index = np.where(w > 4900)[0][0]
-            max_index = np.where(w > 5150)[0][0]
+            # min_index = np.where(w > 4900)[0][0]
+            # max_index = np.where(w > 5150)[0][0]
+            
+            min_index = np.where(w > min_wv)[0][0]
+            max_index = np.where(w > max_wv)[0][0]
 
             self.s = s[min_index:max_index]
             self.w = w[min_index:max_index]
