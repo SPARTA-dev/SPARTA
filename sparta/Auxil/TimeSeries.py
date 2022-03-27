@@ -17,7 +17,7 @@
 
 # ---------------------------------------------
 # Dependencies: os and easygui, tqdm, numpy, copy, scipy and matplotlib.
-# Last update: Avraham Binnenfeld, 20210510.
+# Last update: Sahar Shahaf, 20220327.
 
 from sparta.UNICOR.CCF1d import CCF1d
 import numpy as np

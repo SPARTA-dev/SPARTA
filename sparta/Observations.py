@@ -24,7 +24,7 @@
 #
 #
 # Dependencies: os, sys, easygui, tqdm, numpy and matplotlib.
-# Last update: Avraham Binnenfeld, 20210510.
+# Last update: Sahar Shahaf, 20220327.
 
 import os, sys
 import numpy as np

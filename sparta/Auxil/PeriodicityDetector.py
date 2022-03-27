@@ -75,7 +75,7 @@ class PeriodicityDetector:
 
     # =============================================================================
     # =============================================================================
-    def run_PDC_process(self, calc_biased_flag=True, calc_unbiased_flag=False):
+    def calc_PDC(self, calc_biased_flag=False, calc_unbiased_flag=True):
         '''
         This function runs the entire PDC calculation process.
         Input:
@@ -121,7 +121,7 @@ class PeriodicityDetector:
 
     # =============================================================================
     # =============================================================================
-    def run_USURPER_process(self, calc_biased_flag=False, calc_unbiased_flag=True):
+    def calc_USURPER(self, calc_biased_flag=False, calc_unbiased_flag=True):
         '''
         This function runs the entire USURPER calculation process.
         Input:
@@ -156,7 +156,7 @@ class PeriodicityDetector:
 
     # =============================================================================
     # =============================================================================
-    def run_Partial_USURPER_process(self, reversed_flag=False, reverse_existing=False):
+    def calc_partial_USURPER(self, reversed_flag=False, reverse_existing=False):
         '''
         Currently under development.
         Input:
@@ -186,7 +186,7 @@ class PeriodicityDetector:
 
     # =============================================================================
     # =============================================================================
-    def run_GLS_process(self):
+    def calc_GLS(self):
         '''
         This function runs the GLS calculation process.
         '''
