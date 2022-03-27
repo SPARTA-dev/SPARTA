@@ -21,8 +21,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from astropy.timeseries import LombScargle
 from sparta.USURPER.USURPER_functions import calc_PDC, calc_PDC_unbiased, calc_pdc_distance_matrix
-from copy import deepcopy
-import random
 from scipy.stats.distributions import chi2
 
 class PeriodicityDetector:
@@ -211,79 +209,56 @@ class PeriodicityDetector:
 
     # =============================================================================
     # =============================================================================
-    def calc_pdc_periodograms_pval(self, peak_values, plot=False):
+    def calc_pdc_pval(self, values, inverse_sf=False):
         '''
         This function returns the p-value of a given peak value in the PDC periodogram,
         based on Shen et. al. 2019 (https://arxiv.org/abs/1912.12150).
         '''
 
-        p_vals = []
-
-        for peak in peak_values:
-            p_vals.append(chi2.sf(peak * len(self.time_series.times) + 1, 1))
-
-        if plot:
-            self.periodogram_plots(plot_pval=(peak_values, p_vals))
-
-        return p_vals
+        N = len(self.time_series.times)
+        if not inverse_sf:
+            output = np.array(
+                [chi2.sf(val * N + 1, 1) for val in values]
+            )
+        else:
+            output = np.array(
+                [(chi2.isf(val, 1)-1)/N for val in values]
+            )
+        return output
 
     # =============================================================================
     # =============================================================================
-    def periodogram_plots(self, plot_pval=False, figsize=(11, 4)):
+    def plot_periodograms(self, annotate_pval=None, figsize=(11, 4)):
         '''
         This function plots the calculated periodograms.
         '''
 
-        periodograms_count = len(self.results_frequency)
         index = 0
+        count = len(self.results_frequency)
         colors = ['red', 'orange', 'blue', 'green', 'purple', 'dodgerblue']
+        if annotate_pval is not None:
+            annotate_levels = self.calc_pdc_pval(annotate_pval, inverse_sf=True)
 
-        fig, axs = plt.subplots(periodograms_count, squeeze=False,
-                                figsize=(figsize[0], periodograms_count * figsize[1]))
+        fig, axs = plt.subplots(count, squeeze=False,
+                                figsize=(figsize[0], count * figsize[1]))
 
         for method in self.results_frequency:
-            axs[index, 0].plot(self.results_frequency[method], self.results_power[method], 'k')
-            if method == "USURPER":
-                axs[index, 0].legend(["USURPER"])
-                if plot_pval:
-                    l = [" "]
-                    for i in range(len(plot_pval[0])):
-                        axs[index, 0].hlines(y=plot_pval[0][i], xmin=self.freq_range[0], xmax=self.freq_range[1], linewidth=1, alpha=0.5, ls='--', color=colors[i%6])
-                        l.append("P-VAL: " + str(np.round(plot_pval[1][i], 6)))
-                    axs[index, 0].legend(l)
-            if method == "Partial_USURPER":
-                axs[index, 0].set_title("Partial_PDC")
-                if plot_pval:
-                    l = [" "]
-                    for i in range(len(plot_pval[0])):
-                        axs[index, 0].hlines(y=plot_pval[0][i], xmin=self.freq_range[0], xmax=self.freq_range[1], linewidth=1, alpha=0.5, ls='--', color=colors[i%6])
-                        l.append("P-VAL: " + str(np.round(plot_pval[1][i], 6)))
-                    axs[index, 0].legend(l)
-
-            elif method == "Partial_USURPER_reversed":
-                axs[index, 0].set_title("Partial_USURPER")
-                if plot_pval:
-                    l = [" "]
-                    for i in range(len(plot_pval[0])):
-                        axs[index, 0].hlines(y=plot_pval[0][i], xmin=self.freq_range[0], xmax=self.freq_range[1], linewidth=1, alpha=0.5, ls='--', color=colors[i%6])
-                        l.append("P-VAL: " + str(np.round(plot_pval[1][i], 6)))
-                    axs[index, 0].legend(l)
-
-            else:
-                axs[index, 0].set_title(method)
-                if plot_pval and method != 'GLS':
-                    l = [" "]
-                    for i in range(len(plot_pval[0])):
-                        axs[index, 0].hlines(y=plot_pval[0][i], xmin=self.freq_range[0], xmax=self.freq_range[1], linewidth=1, alpha=0.5, ls='--', color=colors[i%6])
-                        l.append("P-VAL: " + str(np.round(plot_pval[1][i], 6)))
-                    axs[index, 0].legend(l)
+            axs[index, 0].plot(self.results_frequency[method],
+                               self.results_power[method], 'k', linewidth=1.0)
+            l = [method]
+            if (annotate_pval is not None) and (method != 'GLS') and \
+                    (method != "USURPER_biased") and (method != "PDC_biased"):
+                for anlev_ind, anlev in enumerate(annotate_levels):
+                    axs[index, 0].hlines(y=anlev, xmin=self.freq_range[0], xmax=self.freq_range[1],
+                                         linewidth=0.5, alpha=0.5, ls='--', color=colors[anlev_ind % 6])
+                    l.append(f"p-value: {annotate_pval[anlev_ind]:.2g}")
+            axs[index, 0].legend(l)
 
             if self.period_truth is not None:
                 for p in self.period_truth:
                     axs[index, 0].axvline(x=1/p, alpha=0.5, ls='--')
-
-                pass
             index = index + 1
+
         if index == 0:
             axs[index, 0].set(xlabel="Frequency [1/day]")
         else:
