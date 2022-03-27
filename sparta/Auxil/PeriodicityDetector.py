@@ -15,7 +15,7 @@
 # 5) periodogram_plots - plots the calculated periodograms.
 #
 # Dependencies: numpy, astropy, matplotlib, copy and random.
-# Last update: Avraham Binnenfeld, 20210510.
+# Last update: Sahar Shahaf, 20220327.
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -45,7 +45,7 @@ class PeriodicityDetector:
         if 'freq_range' and 'periodogram_grid_resolution' in kwargs:
             self.periodogram_grid_resolution = kwargs['periodogram_grid_resolution']
             self.freq_range = kwargs['freq_range']
-            self.period = None
+            self.period_truth = None
             self.GLS_flag = False
             self.biased_PDC_flag = False
             self.unbiased_PDC_flag = False
@@ -227,21 +227,19 @@ class PeriodicityDetector:
 
         return p_vals
 
-
     # =============================================================================
     # =============================================================================
-    def periodogram_plots(self, velocities_flag=False, plot_pval=False):
+    def periodogram_plots(self, plot_pval=False, figsize=(11, 4)):
         '''
         This function plots the calculated periodograms.
         '''
 
-        periodograms_count = len(self.results_frequency) + velocities_flag
-
+        periodograms_count = len(self.results_frequency)
         index = 0
-
         colors = ['red', 'orange', 'blue', 'green', 'purple', 'dodgerblue']
 
-        fig, axs = plt.subplots(periodograms_count, squeeze=False, figsize=(11, periodograms_count * 4))
+        fig, axs = plt.subplots(periodograms_count, squeeze=False,
+                                figsize=(figsize[0], periodograms_count * figsize[1]))
 
         for method in self.results_frequency:
             axs[index, 0].plot(self.results_frequency[method], self.results_power[method], 'k')
@@ -280,9 +278,8 @@ class PeriodicityDetector:
                         l.append("P-VAL: " + str(np.round(plot_pval[1][i], 6)))
                     axs[index, 0].legend(l)
 
-
-            if self.period != None:
-                for p in self.period:
+            if self.period_truth is not None:
+                for p in self.period_truth:
                     axs[index, 0].axvline(x=1/p, alpha=0.5, ls='--')
 
                 pass
@@ -291,21 +288,3 @@ class PeriodicityDetector:
             axs[index, 0].set(xlabel="Frequency [1/day]")
         else:
             axs[index-1, 0].set(xlabel="Frequency [1/day]")
-
-        if velocities_flag:
-            if self.period == None:
-                self.period = [9_999]
-
-            times_folded = [t % self.period[0] for t in self.time_series.times]
-
-            if isinstance(self.time_series.vals[0], float):
-                v_list = self.time_series.vals
-            else:
-                if self.time_series.calculated_vrad_list != []:
-                    v_list = self.time_series.calculated_vrad_list
-            axs[index, 0].scatter(times_folded, v_list, alpha=0.6)
-            axs[index, 0].set(xlabel="time (days)", ylabel="Vrad (km/s)")
-            axs[index, 0].set_title("Vrad")
-            axs[index, 0].set_ylim(min(v_list), max(v_list))
-
-        plt.tight_layout()

@@ -52,10 +52,10 @@ class TimeSeries:
         else:
             self.calculated_vrad_list = []
 
-        if 'period' in kwargs:
-            self.period = kwargs['period']
+        if 'fold_period' in kwargs:
+            self.fold_period = kwargs['fold_period']
         else:
-            self.period = []
+            self.fold_period = []
 
         self.calculated_ccf_peaks = []
 
@@ -142,7 +142,7 @@ class TimeSeries:
 
     # =============================================================================
     # =============================================================================
-    def plot_velocities(self):
+    def plot_velocities(self, figsize=(7,7), sty='ok'):
         '''
         This function plots the time series.
         '''
@@ -150,12 +150,12 @@ class TimeSeries:
             assert 'plot_velocities is available for scalar values time-series only'
             return
 
-        fig, axs = plt.subplots(2)
-        axs[0].scatter(self.times, self.vals)
+        fig, axs = plt.subplots(2, figsize=figsize)
+        axs[0].plot(self.times, self.vals,sty)
         axs[0].set_title("Time VS. Value")
-        if self.period:
-            times_phased = [t % self.period for t in self.times]
-            axs[1].scatter(times_phased, self.vals)
+        if self.fold_period:
+            times_phased = [t % self.fold_period for t in self.times]
+            axs[1].plot(times_phased, self.vals,sty)
             axs[1].set_title("Phase Folded Values")
         else:
             axs[1] = None
