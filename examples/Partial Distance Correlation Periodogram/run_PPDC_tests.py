@@ -148,8 +148,8 @@ def run_ppdc_tests(N, v_sin_i, spec_power_ratio, planet_k, snr, template_star, t
 
     calculated_ccf_peaks = obs.ccf_peaks
 
-    obs.observation_TimeSeries.calculated_vrad_list = calculated_vrad_list
-    obs.observation_TimeSeries.calculated_ccf_peaks = calculated_ccf_peaks
+    obs.time_series.calculated_vrad_list = calculated_vrad_list
+    obs.time_series.calculated_ccf_peaks = calculated_ccf_peaks
 
     obs.periodicity_detector.run_PDC_process(calc_biased_flag=False, calc_unbiased_flag=True)
     obs.periodicity_detector.run_USURPER_process(calc_biased_flag=False, calc_unbiased_flag=True)

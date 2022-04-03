@@ -93,12 +93,12 @@ def save_res(observations, amp, snr, system_type, spec_list, p, additional_data=
     if not os.path.exists(r'res'):
         os.makedirs(r'res')
 
-    details = [str(observations.observation_TimeSeries.size), str(amp), str(snr), system_type]
+    details = [str(observations.time_series.size), str(amp), str(snr), system_type]
 
     observations.periodicity_detector.periodogram_plots()
 
     plt.suptitle("system_type: {}, half amp: {}, snr: {}, set size: {}".format(
-        system_type, amp, snr, observations.observation_TimeSeries.size), y=1.00) # , size="medium"
+        system_type, amp, snr, observations.time_series.size), y=1.00) # , size="medium"
     plt.savefig("res/" + "_".join(details) + '_plot' + format, dpi=100)
 
     output_data = pd.DataFrame.from_dict({"trial_freqs": observations.periodicity_detector.pdc_res_freqs,
@@ -137,19 +137,19 @@ def save_res(observations, amp, snr, system_type, spec_list, p, additional_data=
     plt.close()
 
     if system_type == "sb1":
-        times_phased = [t % p for t in observations.observation_TimeSeries.times]
-        plt.scatter(times_phased, observations.observation_TimeSeries.calculated_vrad_list, marker='o', c='k')
+        times_phased = [t % p for t in observations.time_series.times]
+        plt.scatter(times_phased, observations.time_series.calculated_vrad_list, marker='o', c='k')
         plt.title("system_type: {}, half amp: {}, snr: {}, set size: {}".format(
-            system_type, amp, snr, observations.observation_TimeSeries.size))
+            system_type, amp, snr, observations.time_series.size))
         plt.xlabel("Time [day]")
         plt.ylabel("RV [km/s]")
         # plt.grid()
         plt.savefig('res/' + "_".join(details) + '_phase_folded_velocities' + format, dpi=100)
         plt.close()
 
-        plt.scatter(observations.observation_TimeSeries.times, observations.observation_TimeSeries.calculated_vrad_list, marker='o', c='k')
+        plt.scatter(observations.time_series.times, observations.time_series.calculated_vrad_list, marker='o', c='k')
         plt.title("system_type: {}, half amp: {}, snr: {}, set size: {}".format(
-            system_type, amp, snr, observations.observation_TimeSeries.size))
+            system_type, amp, snr, observations.time_series.size))
         plt.xlabel("Time [day]")
         plt.ylabel("RV [km/s]")
         # plt.grid()
@@ -161,30 +161,30 @@ def save_res(observations, amp, snr, system_type, spec_list, p, additional_data=
         # plt.plot(ccf.Corr['vel'], ccf.Corr['corr'][0])
         # plt.xlabel("RV [km / s]")
         # plt.title("system_type: {}, half amp: {}, snr: {}, set size: {}, resolution: {}.".format(
-        #    system_type, amp, snr, observations.observation_TimeSeries.size, observations.periodicity_detector.periodogram_grid_resolution))
+        #    system_type, amp, snr, observations.time_series.size, observations.periodicity_detector.periodogram_grid_resolution))
         # plt.savefig('res/' + "_".join(details) + '_ccf_example' + '.png', dpi=100)
         # plt.close()
 
     elif system_type == "sb2" and additional_data != []:
-        times_phased = [t % p for t in observations.observation_TimeSeries.times]
-        plt.scatter(times_phased, observations.observation_TimeSeries.calculated_vrad_list[0], marker='o', c='k')
-        plt.scatter(times_phased, observations.observation_TimeSeries.calculated_vrad_list[1], marker='^', c='w', edgecolors='k')
+        times_phased = [t % p for t in observations.time_series.times]
+        plt.scatter(times_phased, observations.time_series.calculated_vrad_list[0], marker='o', c='k')
+        plt.scatter(times_phased, observations.time_series.calculated_vrad_list[1], marker='^', c='w', edgecolors='k')
         plt.legend(["Primary", "Secondary"])
         plt.xlabel("Time [day]")
         plt.ylabel("RV [km/s]")
         plt.title("system_type: {}, half amp: {}, snr: {}, set size: {}".format(
-            system_type, amp, snr, observations.observation_TimeSeries.size))
+            system_type, amp, snr, observations.time_series.size))
         # plt.grid()
         plt.savefig('res/' + "_".join(details) + '_phase_folded_velocities' + format, dpi=100)
         plt.close()
 
-        plt.scatter(observations.observation_TimeSeries.times, observations.observation_TimeSeries.calculated_vrad_list[0], marker='o', c='k')
-        plt.scatter(observations.observation_TimeSeries.times, observations.observation_TimeSeries.calculated_vrad_list[1], marker='^', c='w', edgecolors='k')
+        plt.scatter(observations.time_series.times, observations.time_series.calculated_vrad_list[0], marker='o', c='k')
+        plt.scatter(observations.time_series.times, observations.time_series.calculated_vrad_list[1], marker='^', c='w', edgecolors='k')
         plt.legend(["Primary", "Secondary"])
         plt.xlabel("Time [day]")
         plt.ylabel("RV [km/s]")
         plt.title("system_type: {}, half amp: {}, snr: {}, set size: {}".format(
-            system_type, amp, snr, observations.observation_TimeSeries.size))
+            system_type, amp, snr, observations.time_series.size))
         # plt.grid()
         plt.savefig('res/' + "_".join(details) + '_velocities' + format, dpi=100)
         plt.close()
@@ -192,7 +192,7 @@ def save_res(observations, amp, snr, system_type, spec_list, p, additional_data=
         # ccf = additional_data[0]
         # plt.plot(ccf.Corr['vel'], ccf.Corr['corr'][0])
         # plt.title("system_type: {}, half amp: {}, snr: {}, set size: {}, resolution: {}.".format(
-        #    system_type, amp, snr, observations.observation_TimeSeries.size, observations.periodicity_detector.periodogram_grid_resolution))
+        #    system_type, amp, snr, observations.time_series.size, observations.periodicity_detector.periodogram_grid_resolution))
         # plt.xlabel("RV [km / s]")
         # plt.savefig('res/' + "_".join(details) + '_ccf_min' + '.png', dpi=100)
         # plt.close()
@@ -200,26 +200,26 @@ def save_res(observations, amp, snr, system_type, spec_list, p, additional_data=
         # ccf = additional_data[1]
         # plt.plot(ccf.Corr['vel'], ccf.Corr['corr'][0])
         # plt.title("system_type: {}, half amp: {}, snr: {}, set size: {}, resolution: {}.".format(
-        #     system_type, amp, snr, observations.observation_TimeSeries.size, observations.periodicity_detector.periodogram_grid_resolution))
+        #     system_type, amp, snr, observations.time_series.size, observations.periodicity_detector.periodogram_grid_resolution))
         # plt.xlabel("RV [km / s]")
         # plt.savefig('res/' + "_".join(details) + '_ccf_max' + '.png', dpi=100)
         # plt.close()
 
     elif system_type == "cepheid":
-        times_phased = [t % p for t in observations.observation_TimeSeries.times]
-        temps = [temp + 5500 for temp in observations.observation_TimeSeries.calculated_vrad_list]
+        times_phased = [t % p for t in observations.time_series.times]
+        temps = [temp + 5500 for temp in observations.time_series.calculated_vrad_list]
         plt.scatter(times_phased, temps, alpha=0.7, marker='o', c='k')
         plt.xlabel("Time [day]")
         plt.ylabel("Teff [K]")
         plt.title("system_type: {}, half amp: {}, snr: {}, set size: {}".format(
-            system_type, amp, snr, observations.observation_TimeSeries.size))
+            system_type, amp, snr, observations.time_series.size))
         # plt.grid()
         plt.savefig('res/' + "_".join(details) + '_phased_folded_tempratures' + format, dpi=100)
         plt.close()
 
-        plt.scatter(observations.observation_TimeSeries.times, temps, alpha=0.7, marker='o', c='k')
+        plt.scatter(observations.time_series.times, temps, alpha=0.7, marker='o', c='k')
         plt.title("system_type: {}, half amp: {}, snr: {}, set size: {}".format(
-            system_type, amp, snr, observations.observation_TimeSeries.size))
+            system_type, amp, snr, observations.time_series.size))
         plt.xlabel("Time [day]")
         plt.ylabel("Teff [K]")
         # plt.grid()
@@ -231,7 +231,7 @@ def save_res(observations, amp, snr, system_type, spec_list, p, additional_data=
         # plt.plot(ccf.Corr['vel'], ccf.Corr['corr'][0])
 
         # plt.title("system_type: {}, half amp: {}, snr: {}, set size: {}, resolution: {}.".format(
-        #     system_type, amp, snr, observations.observation_TimeSeries.size, observations.periodicity_detector.periodogram_grid_resolution))
+        #     system_type, amp, snr, observations.time_series.size, observations.periodicity_detector.periodogram_grid_resolution))
         # plt.xlabel("RV [km / s]")
         # plt.savefig('res/' + "_".join(details) + '_ccf_example' + '.png', dpi=100)
         # plt.close()
@@ -540,8 +540,8 @@ def run_ppdc_tests(N, v_sin_i, spec_power_ratio, planet_k, snr, template_star, t
 
     calculated_ccf_peaks = obs.ccf_peaks
 
-    obs.observation_TimeSeries.calculated_vrad_list = calculated_vrad_list
-    obs.observation_TimeSeries.calculated_ccf_peaks = calculated_ccf_peaks
+    obs.time_series.calculated_vrad_list = calculated_vrad_list
+    obs.time_series.calculated_ccf_peaks = calculated_ccf_peaks
 
     obs.periodicity_detector.run_PDC_process(calc_biased_flag=False, calc_unbiased_flag=True)
     obs.periodicity_detector.run_USURPER_process(calc_biased_flag=False, calc_unbiased_flag=True)
@@ -607,7 +607,7 @@ def run_tests(system_type, size_list, noise_list, half_amp_list):
                     # Disable output
                     sys.stdout = open(os.devnull, 'w')
                     calculated_vrad_list = obs.calc_rv_against_template(template).vels
-                    obs.observation_TimeSeries.calculated_vrad_list = calculated_vrad_list
+                    obs.time_series.calculated_vrad_list = calculated_vrad_list
                     obs.periodicity_detector.run_USURPER_process(calc_biased_flag=False, calc_unbiased_flag=True)
                     # Enable output:
                     sys.stdout = sys.__stdout__

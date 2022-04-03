@@ -103,14 +103,14 @@ class Observations:
 
             self.convert_times_to_relative_float_values()
 
-            self.observation_TimeSeries = TimeSeries(size=self.sample_size, times=self.time_list,
-                                                     vals=self.spec_list)
+            self.time_series = TimeSeries(size=self.sample_size, times=self.time_list,
+                                          vals=self.spec_list)
         else:
-            self.observation_TimeSeries = time_series
+            self.time_series = time_series
             self.spec_list = time_series.vals
             self.time_list = time_series.times
 
-            self.sample_size = self.observation_TimeSeries.size
+            self.sample_size = self.time_series.size
 
         self.periodicity_detector = []
 
@@ -171,7 +171,7 @@ class Observations:
 
         '''
 
-        ccfs = (self.observation_TimeSeries.
+        ccfs = (self.time_series.
                 calc_rv_against_template(self.spec_list,
                                          template,
                                          dv=dv,
@@ -214,7 +214,7 @@ class Observations:
         :param: use_combined - Boolean. Use the combined CCFs or multiorder.
         :return: self - added the BIS values.
         '''
-        BIS, eBIS = (self.observation_TimeSeries.
+        BIS, eBIS = (self.time_series.
                      getBIS(self.ccf_list,
                             bisect_val=bisect_val,
                             use_combined=use_combined)
@@ -233,8 +233,8 @@ class Observations:
         periodogram_grid_resolution: float, the periodogram grid resolution
         freq_range: float tuple, the periodogram frequency range
         """
-        self.periodicity_detector = PeriodicityDetector(time_series=self.observation_TimeSeries, freq_range=freq_range,
-                                                 periodogram_grid_resolution=periodogram_grid_resolution)
+        self.periodicity_detector = PeriodicityDetector(time_series=self.time_series, freq_range=freq_range,
+                                                        periodogram_grid_resolution=periodogram_grid_resolution)
 
 # =============================================================================
 # =============================================================================
@@ -275,7 +275,7 @@ class Observations:
 
         if sample_rate != 1:
             ok_index = []
-            for i in range(len(self.observation_TimeSeries.times)):
+            for i in range(len(self.time_series.times)):
                 if sample_rate > 0 :
                     if i % sample_rate == 0:
                         ok_index.append(True)
@@ -287,48 +287,48 @@ class Observations:
                     else:
                         ok_index.append(True)
             ok_index = np.where(ok_index)[0]
-            self.observation_TimeSeries.times = [self.observation_TimeSeries.times[i] for i in ok_index]
-            self.observation_TimeSeries.vals = [self.observation_TimeSeries.vals[i] for i in ok_index]
-            self.observation_TimeSeries.calculated_vrad_list = [self.observation_TimeSeries.calculated_vrad_list[i] for i in
-                                                                ok_index]
+            self.time_series.times = [self.time_series.times[i] for i in ok_index]
+            self.time_series.vals = [self.time_series.vals[i] for i in ok_index]
+            self.time_series.calculated_vrad_list = [self.time_series.calculated_vrad_list[i] for i in
+                                                     ok_index]
             self.air_mass = [self.air_mass[i] for i in ok_index]
 
 
         if nan_flag:
-            ok_index = np.where(~np.isnan(self.observation_TimeSeries.calculated_vrad_list))[0]
-            self.observation_TimeSeries.times = [self.observation_TimeSeries.times[i] for i in ok_index]
-            self.observation_TimeSeries.vals = [self.observation_TimeSeries.vals[i] for i in ok_index]
-            self.observation_TimeSeries.calculated_vrad_list = [self.observation_TimeSeries.calculated_vrad_list[i] for i in ok_index]
+            ok_index = np.where(~np.isnan(self.time_series.calculated_vrad_list))[0]
+            self.time_series.times = [self.time_series.times[i] for i in ok_index]
+            self.time_series.vals = [self.time_series.vals[i] for i in ok_index]
+            self.time_series.calculated_vrad_list = [self.time_series.calculated_vrad_list[i] for i in ok_index]
             self.air_mass = [self.air_mass[i] for i in ok_index]
 
         if max_vel:
 
-            ok_index = [i for i, x in enumerate(self.observation_TimeSeries.calculated_vrad_list) if x <= max_vel]
-            self.observation_TimeSeries.times = [self.observation_TimeSeries.times[i] for i in ok_index]
-            self.observation_TimeSeries.vals = [self.observation_TimeSeries.vals[i] for i in ok_index]
-            self.observation_TimeSeries.calculated_vrad_list = [self.observation_TimeSeries.calculated_vrad_list[i] for i in ok_index]
+            ok_index = [i for i, x in enumerate(self.time_series.calculated_vrad_list) if x <= max_vel]
+            self.time_series.times = [self.time_series.times[i] for i in ok_index]
+            self.time_series.vals = [self.time_series.vals[i] for i in ok_index]
+            self.time_series.calculated_vrad_list = [self.time_series.calculated_vrad_list[i] for i in ok_index]
             self.air_mass = [self.air_mass[i] for i in ok_index]
 
         if min_vel:
 
-            ok_index = [i for i, x in enumerate(self.observation_TimeSeries.calculated_vrad_list) if x >= min_vel]
-            self.observation_TimeSeries.times = [self.observation_TimeSeries.times[i] for i in ok_index]
-            self.observation_TimeSeries.vals = [self.observation_TimeSeries.vals[i] for i in ok_index]
-            self.observation_TimeSeries.calculated_vrad_list = [self.observation_TimeSeries.calculated_vrad_list[i] for i in ok_index]
+            ok_index = [i for i, x in enumerate(self.time_series.calculated_vrad_list) if x >= min_vel]
+            self.time_series.times = [self.time_series.times[i] for i in ok_index]
+            self.time_series.vals = [self.time_series.vals[i] for i in ok_index]
+            self.time_series.calculated_vrad_list = [self.time_series.calculated_vrad_list[i] for i in ok_index]
             self.air_mass = [self.air_mass[i] for i in ok_index]
 
         if max_time:
 
-            ok_index = [i for i, x in enumerate(self.observation_TimeSeries.times) if x <= max_time]
-            self.observation_TimeSeries.times = [self.observation_TimeSeries.times[i] for i in ok_index]
-            self.observation_TimeSeries.vals = [self.observation_TimeSeries.vals[i] for i in ok_index]
-            self.observation_TimeSeries.calculated_vrad_list = [self.observation_TimeSeries.calculated_vrad_list[i] for i in ok_index]
+            ok_index = [i for i, x in enumerate(self.time_series.times) if x <= max_time]
+            self.time_series.times = [self.time_series.times[i] for i in ok_index]
+            self.time_series.vals = [self.time_series.vals[i] for i in ok_index]
+            self.time_series.calculated_vrad_list = [self.time_series.calculated_vrad_list[i] for i in ok_index]
             self.air_mass = [self.air_mass[i] for i in ok_index]
 
 
-        self.sample_size = len(self.observation_TimeSeries.vals)
-        self.observation_TimeSeries.size = self.sample_size
-        self.spec_list = self.observation_TimeSeries.vals
+        self.sample_size = len(self.time_series.vals)
+        self.time_series.size = self.sample_size
+        self.spec_list = self.time_series.vals
 
 
 if __name__ == '__main__':
