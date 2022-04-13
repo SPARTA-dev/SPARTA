@@ -218,6 +218,22 @@ class ReadSpec:
 
             self.DATE_OBS = hdul_sp[0].header["BJD"]
 
+        elif self.survey == "NRES-BANZAI":
+            sci_fiber_mask = hdul_sp[1].data['fiber'] == hdul_sp[0].header['SCIFIBER']
+            self.n_orders = 68      # Not sure why this is 68 rather than 67
+            s = []
+            w = []
+            for ordind in np.arange(self.n_orders):
+                s.append(np.array(hdul_sp[1].data['normflux'][sci_fiber_mask][ordind]))
+                w.append(np.array(hdul_sp[1].data['wavelength'][sci_fiber_mask][ordind]))
+
+            self.bcv = float(hdul_sp[0].header['BARYCORR']) / 1000      # Convert from m/s to km/s
+
+            self.s = s
+            self.w = w
+
+            self.DATE_OBS = hdul_sp[0].header["TCORR"]  # Barycentre-corrected time, in BJD_TDB
+
         elif self.survey == "TRES":
             self.n_orders = 1
 

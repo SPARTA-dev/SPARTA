@@ -5,10 +5,12 @@
     <img src="https://img.shields.io/badge/GitHub-SPARTA--dev%2FSPARTA-blue?style=flat"></a>
 <a href="https://github.com/SPARTA-dev/SPARTA/blob/master/LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-blue?style=flat"></a>
-<a href="https://github.com/SPARTA-dev/SPARTA">
-    <img src="https://img.shields.io/badge/read-USuRPER_paper_draft-yellowgreen?style=flat"></a>
+<a href="https://ui.adsabs.harvard.edu/abs/2020A%26A...642A.146B/abstract">
+    <img src="https://img.shields.io/badge/read-USuRPER_paper-yellowgreen?style=flat"></a>
+<a href="https://ui.adsabs.harvard.edu/abs/2022A%26A...659A.189B/abstract">
+    <img src="https://img.shields.io/badge/read-partial_PDC_paper-yellowgreen?style=flat"></a>
 <a href="https://github.com/SPARTA-dev/SPARTA/tree/master/examples">
-    <img src="https://img.shields.io/badge/tutorials-notebooks-yellowgreen?style=flat"></a>
+    <img src="https://img.shields.io/badge/tutorials-notebooks-green?style=flat"></a>
 </p>
 
 
