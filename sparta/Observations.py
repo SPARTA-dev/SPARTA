@@ -71,7 +71,7 @@ class Observations:
 
             for root, dirs, files in os.walk(path):
                 for file in files:
-                    if (file.endswith(".fits") or file.endswith(".fits.gz") or file.endswith(".fts.gz") or file.endswith(".fits.Z")) and not file.startswith('~'):
+                    if (file.endswith(".fits") or file.endswith(".fits.gz") or file.endswith(".fts.gz") or file.endswith(".fits.Z") or file.endswith(".fits.fz")) and not file.startswith('~'):
                         if count % sample_rate == 0:
                             self.file_list.append(os.path.join(root, file))
                         count = count + 1
