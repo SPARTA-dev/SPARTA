@@ -10,9 +10,9 @@
 #                      using USuRPer_functions.py functions.
 # 2) run_USURPER_process - an 'overall' procedure runs the entire Zucker USuRPer calculation process
 #                      using USuRPer_functions.py functions.
-# 3) run_Partial_USURPER_process - an 'overall' procedure runs the partial PDC.
+# 3) calc_partial_periodogram - an 'overall' procedure runs the partial PDC.
 # 4) run_GLS_process - runs the GLS calculation process.
-# 5) periodogram_plots - plots the calculated periodograms.
+# 5) plot_periodograms - plots the calculated periodograms.
 #
 # Dependencies: numpy, astropy, matplotlib, copy and random.
 # Last update: Sahar Shahaf, 20220327.
@@ -48,7 +48,7 @@ class PeriodicityDetector:
             self.biased_PDC_flag = False
             self.unbiased_PDC_flag = False
             self.partial_flag = False
-            self.reverse_partial_flag = False
+            self.partial_type = "shift"
 
         self.method = []
 
@@ -75,7 +75,7 @@ class PeriodicityDetector:
 
     # =============================================================================
     # =============================================================================
-    def calc_PDC(self, calc_biased_flag=False, calc_unbiased_flag=True):
+    def calc_PDC(self, calc_biased_flag=False, calc_unbiased_flag=True, fast=False):
         '''
         This function runs the entire PDC calculation process.
         Input:
@@ -99,13 +99,13 @@ class PeriodicityDetector:
         self.biased_PDC_flag = calc_biased_flag
         self.unbiased_PDC_flag = calc_unbiased_flag
 
-        calc_pdc_distance_matrix(self, calc_biased_flag, calc_unbiased_flag)
+        calc_pdc_distance_matrix(self, calc_biased_flag, calc_unbiased_flag, fast=fast)
 
         for index, f in enumerate(self.pdc_res_freqs):
             if calc_biased_flag:
                 self.pdc_res_power_biased[index] = calc_PDC(self, f)
             if calc_unbiased_flag:
-                self.pdc_res_power_unbiased[index] = calc_PDC_unbiased(self, f)
+                self.pdc_res_power_unbiased[index] = calc_PDC_unbiased(self, f, fast=fast)
 
 
         if calc_biased_flag:
@@ -121,7 +121,7 @@ class PeriodicityDetector:
 
     # =============================================================================
     # =============================================================================
-    def calc_USURPER(self, calc_biased_flag=False, calc_unbiased_flag=True):
+    def calc_USURPER(self, calc_biased_flag=False, calc_unbiased_flag=True, fast=False):
         '''
         This function runs the entire USURPER calculation process.
         Input:
@@ -138,13 +138,13 @@ class PeriodicityDetector:
         self.biased_PDC_flag = calc_biased_flag
         self.unbiased_PDC_flag = calc_unbiased_flag
 
-        calc_pdc_distance_matrix(self, calc_biased_flag, calc_unbiased_flag)
+        calc_pdc_distance_matrix(self, calc_biased_flag, calc_unbiased_flag, fast=fast)
 
         for index, f in enumerate(self.pdc_res_freqs):
             if calc_biased_flag:
                 self.pdc_res_power_biased[index] = calc_PDC(self, f)
             if calc_unbiased_flag:
-                self.pdc_res_power_unbiased[index] = calc_PDC_unbiased(self, f)
+                self.pdc_res_power_unbiased[index] = calc_PDC_unbiased(self, f, fast=fast)
 
         if calc_biased_flag:
             self.results_power.update({self.method + "_biased": self.pdc_res_power_biased.copy()})
@@ -156,7 +156,7 @@ class PeriodicityDetector:
 
     # =============================================================================
     # =============================================================================
-    def calc_partial_USURPER(self, reversed_flag=False, reverse_existing=False):
+    def calc_partial_periodogram(self, partial_type="shift", reverse_existing=False, fast=False):
         '''
         Currently under development.
         Input:
@@ -164,12 +164,15 @@ class PeriodicityDetector:
               calc_unbiased_flag: bool, sets running the unbiased PDC
         '''
 
-        self.reverse_partial_flag = reversed_flag
+        self.partial_type = partial_type
 
         if not isinstance(self.time_series.vals[0], float):
-            self.method = "Partial_USURPER"
+            if partial_type == "shift":
+                self.method = "shift_periodogram"
+            elif partial_type == "shape":
+                self.method = "shape_periodogram"
         else:
-            assert 'Partial_USURPER is available for spectrum time-series only'
+            assert 'Partial_periodogram is available for spectrum time-series only'
             return
 
         calc_pdc_distance_matrix(self, calc_biased_flag=False, calc_unbiased_flag=True, reverse_existing=reverse_existing)
@@ -177,12 +180,8 @@ class PeriodicityDetector:
         for index, f in enumerate(self.pdc_res_freqs):
             self.pdc_res_power_unbiased[index] = calc_PDC_unbiased(self, f)
 
-        if reversed_flag:
-            self.results_frequency.update({self.method + "_reversed": self.pdc_res_freqs.copy()})
-            self.results_power.update({self.method + "_reversed": self.pdc_res_power_unbiased.copy()})
-        else:
-            self.results_frequency.update({self.method: self.pdc_res_freqs.copy()})
-            self.results_power.update({self.method: self.pdc_res_power_unbiased.copy()})
+        self.results_frequency.update({self.method: self.pdc_res_freqs.copy()})
+        self.results_power.update({self.method: self.pdc_res_power_unbiased.copy()})
 
     # =============================================================================
     # =============================================================================
@@ -228,13 +227,13 @@ class PeriodicityDetector:
 
     # =============================================================================
     # =============================================================================
-    def plot_periodograms(self, annotate_pval=None, figsize=(11, 4)):
+    def plot_periodograms(self, plot_vals=False, annotate_pval=None, figsize=(11, 4)):
         '''
         This function plots the calculated periodograms.
         '''
 
         index = 0
-        count = len(self.results_frequency)
+        count = len(self.results_frequency) + plot_vals
         colors = ['red', 'orange', 'blue', 'green', 'purple', 'dodgerblue']
         if annotate_pval is not None:
             annotate_levels = self.calc_pdc_pval(annotate_pval, inverse_sf=True)
@@ -259,7 +258,25 @@ class PeriodicityDetector:
                     axs[index, 0].axvline(x=1/p, alpha=0.5, ls='--')
             index = index + 1
 
+
+
+        if plot_vals:
+            if self.period_truth == None:
+                self.period_truth = [999_999]
+
+            times_folded = [t % self.period_truth[0] for t in self.time_series.times]
+
+            if isinstance(self.time_series.vals[0], float):
+                v_list = self.time_series.vals
+            else:
+                if self.time_series.calculated_vrad_list != []:
+                    v_list = self.time_series.calculated_vrad_list
+
+            axs[index, 0].scatter(times_folded, v_list, alpha=0.6)
+            axs[index, 0].set(xlabel="time (days)", ylabel="Vrad (km/s)")
+            axs[index, 0].set_ylim(min(v_list), max(v_list))
+
         if index == 0:
             axs[index, 0].set(xlabel="Frequency [1/day]")
         else:
-            axs[index-1, 0].set(xlabel="Frequency [1/day]")
+            axs[count - 1 - plot_vals, 0].set(xlabel="Frequency [1/day]")
