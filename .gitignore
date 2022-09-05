@@ -17,6 +17,7 @@ Thumbs.db
 .idea
 *SPARTA.egg-info
 *.ipynb_checkpoints
+*__pycache__
 examples/Binni/
 examples/res/
 sparta/UNICOR/template_files/

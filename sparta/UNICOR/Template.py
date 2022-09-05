@@ -37,6 +37,7 @@ import os
 from PyAstronomy import pyasl
 import pandas as pd
 from astropy import units as u
+from astropy.table import Table
 
 
 TEMPLATE_FILES_PATH = os.path.join(
@@ -59,7 +60,9 @@ class Template:
 
         alternatively:
         1) Template spectrum and wavelengths can be passed on to the class and will be saved as-is.
+           This required passing  "template=[template object]"
         2) A ready-for-use Spectrum object can be passed on to the class and will be saved as-is.
+        3) The path of a HARPS DRS mask can be provided.
         '''
         if 'template' in kwargs:
             self.model = kwargs['template']
@@ -105,23 +108,6 @@ class Template:
 
             w = np.squeeze(np.array(hdul_wl[0].data))
 
-            # in case of loading low-res PHOENIX spectrum,
-            # which has to be downloaded an extracted manually,
-            # the medium res wv vector is computed in the following way:
-
-            # # ----- START of low-res insertion -------
-            #
-            # w = s.copy()
-            # w[0] = np.e ** hdul_spec[0].header["CRVAL1"]
-            # beta = hdul_spec[0].header["CDELT1"]
-            #
-            # for i in range(len(w) - 1):
-            #     w[i + 1] = w[0] * (1 + beta) ** i
-            #
-            # # ------- END of low-res insertion ---------
-
-            # star mass g
-
             # Change to air wavelengths, if required
             # The following transformation is taken from Morton (2000, ApJ. Suppl., 130, 403)
             if 'air' in kwargs:
@@ -145,6 +131,38 @@ class Template:
             wavelengths = np.reshape(wavelengths, (1, -1))
 
             spectrum = spectrum / (10 ** 13)
+
+            self.model = Spectrum(wv=wavelengths, sp=spectrum)
+
+        elif 'mask' in kwargs:
+            self.min_val = kwargs['min_val']
+            self.max_val = kwargs['max_val']
+            self.wl_f_n = 'WAVE_PHOENIX-ACES-AGSS-COND-2011.fits'
+
+            hdul_wl = fits.open(
+                os.path.join(TEMPLATE_FILES_PATH, self.wl_f_n)
+            )
+
+            w = np.squeeze(np.array(hdul_wl[0].data))
+            s = np.zeros_like(w)
+
+            min_index = np.where(w > self.min_val)[0][0]
+            max_index = np.where(w > self.max_val)[0][0]
+
+            raw_mask = Table.read(kwargs['mask'], format='ascii')
+            raw_mask['col1'].name = 'wv1'
+            raw_mask['col2'].name = 'wv2'
+            raw_mask['col3'].name = 'msk'
+
+            for i, m in enumerate(raw_mask['msk']):
+                ii = np.argwhere((w > raw_mask['wv1'][i]) & (w < raw_mask['wv2'][i]))
+                s[ii] = -m
+
+            spectrum = s[min_index:max_index]
+            wavelengths = w[min_index:max_index]
+
+            spectrum = np.reshape(spectrum, (1, -1))
+            wavelengths = np.reshape(wavelengths, (1, -1))
 
             self.model = Spectrum(wv=wavelengths, sp=spectrum)
 
@@ -172,8 +190,6 @@ class Template:
 
         # return self
 
-
-    # =============================================================================
     # =============================================================================
     def GaussianBroadening(self, **kwargs):
         '''
