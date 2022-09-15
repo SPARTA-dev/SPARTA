@@ -11,13 +11,12 @@
 # 2) calc_PDC_unbiased - calculates the unbiased PDC value for a given frequency.
 # 3) calc_PDC - calculates the PDC value for a given frequency.
 #
-# Dependencies: numpy, math.
-# Last update: Avraham Binnenfeld, 20200607.
+# Last update: Sahar Shahaf, 20220915
 
 import numpy as np
-from sparta.UNICOR import Template, Spectrum, CCF1d
-from numba import jit
-import math
+from sparta.UNICOR import Template
+from numba import njit
+
 
 # =============================================================================
 # =============================================================================
@@ -38,59 +37,64 @@ class USURPER:
 
 # =============================================================================
 # =============================================================================
+@njit
 def inner_prod(a, b):
+    '''
+    :param a: U-centered matrix (numpy)
+    :param b: U-centered matrix (numpy)
+    :return: calculate the inner product of two distance matrices.
+    '''
 
-    size = len(a)
-
-    A = np.array(a)
-    B = np.array(b)
-
-    np.fill_diagonal(A, 0)
-    np.fill_diagonal(B, 0)
-
-    sum_bin = np.sum(np.multiply(A, B))
-
-    res = 1 / (size * (size - 3)) * sum_bin
+    n = len(a)
+    mat = np.multiply(a,b)
+    sum_bin = np.sum(mat)
+    res = 1 / (n * (n - 3)) * sum_bin
 
     return res
 
 
+@njit
 def norm_z(a, b):
     '''
-
-    :param a:
-    :param b:
-    :return:
+    :param a: U-centered matrix (numpy)
+    :param b: U-centered matrix (numpy)
+    :return: the part of a which is orthogonal to b.
     '''
-    return np.array(a) - (inner_prod(a, b) / inner_prod(b, b)) * np.array(b)
+    factor = inner_prod(a, b) / inner_prod(b, b)
+    return a - factor*b
 
 
+
+@njit
 def unbiased_u_centering(a, n):
-    mat_unbiased = [[None for _ in range(n)] for _ in range(n)]
+    '''
+    :param a: U-centered matrix (numpy nXn array)
+    :param n: integer (length of a...)
+    :return: U-center a distance matrix
+    '''
+    # Sum of rows
+    v2_vec = np.array([np.sum(x) / (n - 2) for x in a])
+    v2     = v2_vec.repeat(n).reshape((-1, n))
 
-    mat_unbiased = np.array(mat_unbiased)
-    np.fill_diagonal(mat_unbiased, 0)
+    # Sum of cols
+    v3_vec = np.array([np.sum(x) / (n - 2) for x in a.T])
+    v3 = v3_vec.repeat(n).reshape((-1, n))
 
-    for i in range(n):
-        for j in range(n):
-            if i != j:
-                mat_unbiased[i][j] = a[i][j]
-                v2 = np.sum(a[i])
-                v2 = v2 / (n - 2)
+    # Total sum
+    tot_sum = np.sum(v3_vec)/(n-1)
+    v4 = np.full((n, n), tot_sum)
 
-                v3 = np.sum(a, axis=0)[j]
-                v3 = v3 / (n - 2)
+    # Do the U-centering and make sure that the diagonal is zero.
+    mat_unbiased = a - v2 - v3 + v4
+    for i in np.arange(n):
+        mat_unbiased[i,i] = 0
 
-                v4 = np.sum(a)
-                v4 = v4 / ((n - 1) * (n - 2))
-
-                mat_unbiased[i][j] = mat_unbiased[i][j] - v2 - v3 + v4
-
-    return mat_unbiased.copy()
+    return mat_unbiased
 
 
 # =============================================================================
 # =============================================================================
+@njit
 def calc_PDC(periodicity_detector, f):
     '''
     This function calculates the PDC value for a given frequency.
@@ -193,46 +197,41 @@ def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbias
           calc_biased_flag: bool, sets calculating the distance matrix for the biased PDC
           calc_unbiased_flag: bool, sets calculating the distance matrix for the unbiased PDC
     '''
+    n = periodicity_detector.time_series.size
+    if not reverse_existing:
 
-    if reverse_existing == False:
+        a = np.zeros((n,n))
+        c = np.zeros((n, n))
 
-        a = [[None for _ in range(periodicity_detector.time_series.size)] for _ in
-             range(periodicity_detector.time_series.size)]
+        if periodicity_detector.method == 'USURPER':
+            sp_matrix =  resample_spec_to_common_grid(periodicity_detector.time_series.vals, factor=1)
 
-        c = [[None for _ in range(periodicity_detector.time_series.size)] for _ in
-             range(periodicity_detector.time_series.size)]
+        if (periodicity_detector.method.split('_')[0] == "shift") or (periodicity_detector.method.split('_')[0] == "shape"):
+            for i, s in enumerate(periodicity_detector.time_series.vals):
+                vel_tmp = periodicity_detector.time_series.calculated_vrad_list[i]
+                periodicity_detector.time_series.vals[i].wv[0] = Template().doppler(-vel_tmp, s.wv[0])
+            sp_matrix =  resample_spec_to_common_grid(periodicity_detector.time_series.vals, factor=1)
 
         for i, i_val in enumerate(periodicity_detector.time_series.vals):
             for j, j_val in enumerate(periodicity_detector.time_series.vals):
                 if i > j:
-                    a[i][j] = a[j][i]
-                    c[i][j] = c[j][i]
+                    a[i,j] = a[j,i]
+                    c[i,j] = c[j,i]
                 elif i == j:
-                    a[i][j] = 0
-                    c[i][j] = 0
+                    pass
                 else:
                     if periodicity_detector.method == 'PDC':
-                        a[i][j] = abs(i_val - j_val)
+                        a[i,j] = abs(i_val - j_val)
 
                     elif periodicity_detector.method == 'USURPER':
-                        ccf = CCF1d().CrossCorrelateSpec(spec_in=j_val, template_in=Template(template=i_val), dv=0.5,
-                                                         VelBound=[-1, 1], fastccf=False)
-                        ccf_val = ccf.subpixel_CCF(ccf.Corr['vel'], ccf.Corr['corr'][0], 0)
-                        a[i][j] = np.sqrt(1 - abs(min(ccf_val, 1))) * np.sqrt(2)
+                        ccf_val = np.sum(sp_matrix[:,i]*sp_matrix[:,j])
+                        a[i,j] = np.sqrt(1 - ccf_val) * np.sqrt(2)
 
-                    elif periodicity_detector.method.split('_')[0] == "shift" or periodicity_detector.method.split('_')[0] == "shape":
-                        a[i][j] = abs(periodicity_detector.time_series.calculated_vrad_list[i] -
+                    elif (periodicity_detector.method.split('_')[0] == "shift") or (periodicity_detector.method.split('_')[0] == "shape"):
+                        a[i,j] = abs(periodicity_detector.time_series.calculated_vrad_list[i] -
                                             periodicity_detector.time_series.calculated_vrad_list[j])
-
-                        s = Spectrum(wv=[Template().doppler(-periodicity_detector.time_series.calculated_vrad_list[j], j_val.wv[0])],
-                                     sp=j_val.sp) # .SpecPreProccess()
-                        t = Template(spectrum=i_val.sp[0], wavelengths=i_val.wv[0])
-                        t.model.wv = t.doppler(-periodicity_detector.time_series.calculated_vrad_list[i])
-
-                        ccf = CCF1d().CrossCorrelateSpec(spec_in=s, template_in=t, dv=0.5,
-                                                         VelBound=[-1, 1], fastccf=False)
-                        ccf_val = ccf.subpixel_CCF(ccf.Corr['vel'], ccf.Corr['corr'][0], v=0)
-                        c[i][j] = np.sqrt(1 - abs(min(ccf_val, 1))) * np.sqrt(2)
+                        ccf_val = np.sum(sp_matrix[:, i] * sp_matrix[:, j])
+                        c[i,j] = np.sqrt(1 - ccf_val) * np.sqrt(2)
 
 
         if periodicity_detector.method == 'shape_periodogram':
@@ -270,7 +269,7 @@ def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbias
     return a
 
 
-@jit(nopython=True, cache=True)
+@njit
 def cpu_cumsum_cpy(data):  # pragma: no cover
     """Create cumulative sum since numba doesn't sum over axes."""
     cumsum = data.copy()
@@ -279,7 +278,7 @@ def cpu_cumsum_cpy(data):  # pragma: no cover
     return cumsum
 
 
-@jit(nopython=True, cache=True)
+@njit
 def fast_1d_dcov_cpy(x, y, bias=False):
     """
     This function is taken from the Hyppo package https://github.com/neurodata/hyppo
@@ -382,6 +381,49 @@ def fast_1d_dcov_cpy(x, y, bias=False):
     )
 
     return stat
+
+
+# =============================================================================
+# =============================================================================
+def get_wv_grid(sp_list, factor):
+    '''
+    This is only for 1d spectra
+    Does not support orders for now
+    (USuRPER in general does not support multioprder).
+    '''
+
+    min_wv = np.array([-1.0])
+    max_wv = np.array([1000000.0])
+    delta_wv = np.median(np.diff(sp_list[0].wv))
+
+    for s in sp_list:
+      mintmp = np.min(s.wv[0])
+      maxtmp = np.max(s.wv[0])
+      diftmp = np.median(np.diff(s.wv[0]))
+
+      if mintmp > min_wv:
+          min_wv = mintmp
+      if maxtmp < max_wv:
+          max_wv = maxtmp
+      if diftmp < delta_wv:
+          delta_wv = diftmp
+
+    return np.arange(start=min_wv, stop=max_wv, step=delta_wv*factor)
+
+
+# =============================================================================
+# =============================================================================
+
+def resample_spec_to_common_grid(sp_list, factor):
+    wv_grid   = get_wv_grid(sp_list, factor)
+    sp_matrix = np.zeros((len(wv_grid), len(sp_list)))
+    for i, s in enumerate(sp_list):
+        sp_tmp  = np.interp(wv_grid, s.wv[0], s.sp[0])
+        sp_tmp  = sp_tmp - np.mean(sp_tmp)
+        sp_tmp  = sp_tmp/np.sqrt( (sp_tmp**2).sum())
+        sp_matrix[:, i] = sp_tmp
+    return sp_matrix
+
 
 
 # =============================================================================
