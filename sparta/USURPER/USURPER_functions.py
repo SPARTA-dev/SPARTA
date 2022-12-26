@@ -78,7 +78,7 @@ def unbiased_u_centering(a, n):
 
     # Sum of cols
     v3_vec = np.array([np.sum(x) / (n - 2) for x in a.T])
-    v3 = v3_vec.repeat(n).reshape((-1, n))
+    v3 = v3_vec.repeat(n).reshape((-1, n)).T
 
     # Total sum
     tot_sum = np.sum(v3_vec)/(n-1)
