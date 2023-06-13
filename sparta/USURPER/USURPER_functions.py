@@ -189,7 +189,7 @@ def calc_PDC_unbiased(periodicity_detector, f, fast=False):
 
 # =============================================================================
 # =============================================================================
-def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbiased_flag, reverse_existing=False, fast=False, Errors=False):
+def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbiased_flag, reverse_existing=False, fast=False, errors=False):
     '''
     This function calculates the distance matrix used for the PDC calculation.
     Input:
