@@ -189,7 +189,7 @@ def calc_PDC_unbiased(periodicity_detector, f, fast=False):
 
 # =============================================================================
 # =============================================================================
-def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbiased_flag, reverse_existing=False, fast=False):
+def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbiased_flag, reverse_existing=False, fast=False, Errors=False):
     '''
     This function calculates the distance matrix used for the PDC calculation.
     Input:
@@ -221,7 +221,23 @@ def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbias
                     pass
                 else:
                     if periodicity_detector.method == 'PDC':
-                        a[i,j] = abs(i_val - j_val)
+                        if errors:
+                            from scipy import special
+                            y1 = i_val
+                            y2 = j_val
+                            e1 = periodicity_detector.time_series.errors[i]
+                            e2 = periodicity_detector.time_series.errors[j]
+
+                            den = np.sqrt(2 * (e1 ** 2 + e2 ** 2))
+
+                            x = (y1 - y2) / den
+                            y = (e1 + e2) / den
+
+                            e = np.sqrt(e1 ** 2 + e2 ** 2) * (math.exp(-x ** 2) + x * special.erf(x) - y)
+
+                            a[i][j] = np.sqrt(e)
+                        else:
+                            a[i,j] = abs(i_val - j_val)
 
                     elif periodicity_detector.method == 'USURPER':
                         ccf_val = np.sum(sp_matrix[:,i]*sp_matrix[:,j])
