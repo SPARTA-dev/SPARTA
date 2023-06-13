@@ -75,7 +75,7 @@ class PeriodicityDetector:
 
     # =============================================================================
     # =============================================================================
-    def calc_PDC(self, calc_biased_flag=False, calc_unbiased_flag=True, fast=False):
+    def calc_PDC(self, calc_biased_flag=False, calc_unbiased_flag=True, fast=False, errors=False):
         '''
         This function runs the entire PDC calculation process.
         Input:
@@ -99,7 +99,7 @@ class PeriodicityDetector:
         self.biased_PDC_flag = calc_biased_flag
         self.unbiased_PDC_flag = calc_unbiased_flag
 
-        calc_pdc_distance_matrix(self, calc_biased_flag, calc_unbiased_flag, fast=fast)
+        calc_pdc_distance_matrix(self, calc_biased_flag, calc_unbiased_flag, fast=fast, errors=errors)
 
         for index, f in enumerate(self.pdc_res_freqs):
             if calc_biased_flag:
