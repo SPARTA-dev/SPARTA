@@ -56,6 +56,12 @@ class TimeSeries:
             self.fold_period = kwargs['fold_period']
         else:
             self.fold_period = []
+        
+        if 'errors' in kwargs:
+            self.errors = kwargs['errors']
+        else:
+            self.errors = []
+
 
         self.calculated_ccf_peaks = []
 
@@ -151,11 +157,18 @@ class TimeSeries:
             return
 
         fig, axs = plt.subplots(2, figsize=figsize)
-        axs[0].plot(self.times, self.vals,sty)
+        if self.errors == []:
+            axs[0].plot(self.times, self.vals,sty)
+        else:
+            axs[0].errorbar(self.times, self.vals, self.errors, fmt='o')
+
         axs[0].set_title("Time VS. Value")
         if self.fold_period:
             times_phased = [t % self.fold_period for t in self.times]
-            axs[1].plot(times_phased, self.vals,sty)
+            if self.errors == []:
+                axs[1].plot(times_phased, self.vals, sty)
+            else:
+                axs[1].errorbar(times_phased, self.vals, self.errors, fmt='o')
             axs[1].set_title("Phase Folded Values")
         else:
             axs[1] = None
