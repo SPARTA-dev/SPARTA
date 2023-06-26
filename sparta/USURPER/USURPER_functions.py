@@ -156,7 +156,7 @@ def calc_PDC_unbiased(periodicity_detector, f, fast=False):
         varx = calc_fast_dcov(distx, distx)
         vary = calc_fast_dcov(disty, disty)
 
-        return covar / np.real(np.sqrt(varx * vary))
+        return np.sqrt(covar / np.real(np.sqrt(varx * vary)))
 
 
     mat_A_unbiased = periodicity_detector.pdc_mat_A_unbiased
