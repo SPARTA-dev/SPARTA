@@ -134,7 +134,7 @@ def calc_PDC(periodicity_detector, f):
 
 # =============================================================================
 # =============================================================================
-def calc_PDC_unbiased(periodicity_detector, f, fast=False):
+def calc_PDC_unbiased(periodicity_detector, f):
     '''
     This function calculates the unbiased PDC value for a given frequency.
     Input:
@@ -147,17 +147,6 @@ def calc_PDC_unbiased(periodicity_detector, f, fast=False):
     mat_phase_delta = mat_phase_delta % (1 / f)
 
     b = mat_phase_delta * (1 / f - mat_phase_delta)
-
-    if fast and periodicity_detector.method.split('_')[0] != "shift" and periodicity_detector.method.split('_')[0] != "shape":
-        distx = np.array(periodicity_detector.pdc_mat_A_unbiased)
-        disty = np.array(b)
-
-        covar = calc_fast_dcov(distx, disty)
-        varx = calc_fast_dcov(distx, distx)
-        vary = calc_fast_dcov(disty, disty)
-
-        return np.sqrt(covar / np.real(np.sqrt(varx * vary)))
-
 
     mat_A_unbiased = periodicity_detector.pdc_mat_A_unbiased
     mat_B_unbiased = unbiased_u_centering(b, periodicity_detector.time_series.size)
@@ -189,7 +178,7 @@ def calc_PDC_unbiased(periodicity_detector, f, fast=False):
 
 # =============================================================================
 # =============================================================================
-def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbiased_flag, reverse_existing=False, fast=False, errors=False):
+def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbiased_flag, reverse_existing=False, errors=False):
     '''
     This function calculates the distance matrix used for the PDC calculation.
     Input:
@@ -264,11 +253,6 @@ def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbias
     periodicity_detector.pdc_a = a
     periodicity_detector.pdc_c = c
 
-    if fast:
-        periodicity_detector.pdc_mat_A_unbiased = a
-        return a
-
-
     # U - centering
 
     if calc_biased_flag:
@@ -284,119 +268,6 @@ def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbias
             periodicity_detector.pdc_mat_A_unbiased = mat_A_unbiased
     return a
 
-
-@njit
-def cpu_cumsum_cpy(data):  # pragma: no cover
-    """Create cumulative sum since numba doesn't sum over axes."""
-    cumsum = data.copy()
-    for i in range(1, data.shape[0]):
-        cumsum[i, :] = data[i, :] + cumsum[i - 1, :]
-    return cumsum
-
-
-@njit
-def fast_1d_dcov_cpy(x, y, bias=False):
-    """
-    This function is taken from the Hyppo package https://github.com/neurodata/hyppo
-
-    Calculate the Dcorr test statistic.
-
-    See: https://www.sciencedirect.com/science/article/abs/pii/S0167947319300313
-    """
-
-    n = x.shape[0] ** 2
-
-    # sort inputs
-    x_orig = x.ravel()
-    x = np.sort(x_orig)
-    y = y.reshape(-1, 1)
-    y = y[np.argsort(x_orig)]
-    x = x.reshape(-1, 1)  # for numba
-
-    # cumulative sum
-    si = cpu_cumsum_cpy(x)
-
-    ax = (np.arange(-(n - 2), n + 1, 2) * x.ravel()).reshape(-1, 1) + (si[-1] - 2 * si)
-
-    v = np.hstack((x, y, x * y))
-    nw = v.shape[1]
-
-    idx = np.vstack((np.arange(n), np.zeros(n))).astype(np.int64).T
-    iv1 = np.zeros((n, 1))
-    iv2 = np.zeros((n, 1))
-    iv3 = np.zeros((n, 1))
-    iv4 = np.zeros((n, 1))
-
-    i = 1
-    r = 0
-    s = 1
-    while i < n:
-        gap = 2 * i
-        k = 0
-        idx_r = idx[:, r]
-        csumv = np.vstack((np.zeros((1, nw)), cpu_cumsum_cpy(v[idx_r, :])))
-
-        for j in range(1, n + 1, gap):
-            st1 = j - 1
-            e1 = min(st1 + i - 1, n - 1)
-            st2 = j + i - 1
-            e2 = min(st2 + i - 1, n - 1)
-
-            while (st1 <= e1) and (st2 <= e2):
-                idx1 = idx_r[st1]
-                idx2 = idx_r[st2]
-
-                if y[idx1] >= y[idx2]:
-                    idx[k, s] = idx1
-                    st1 += 1
-                else:
-                    idx[k, s] = idx2
-                    st2 += 1
-                    iv1[idx2] += e1 - st1 + 1
-                    iv2[idx2] += csumv[e1 + 1, 0] - csumv[st1, 0]
-                    iv3[idx2] += csumv[e1 + 1, 1] - csumv[st1, 1]
-                    iv4[idx2] += csumv[e1 + 1, 2] - csumv[st1, 2]
-                k += 1
-
-            if st1 <= e1:
-                kf = k + e1 - st1 + 1
-                idx[k:kf, s] = idx_r[st1 : e1 + 1]
-                k = kf
-            elif st2 <= e2:
-                kf = k + e2 - st2 + 1
-                idx[k:kf, s] = idx_r[st2 : e2 + 1]
-                k = kf
-
-        i = gap
-        r = 1 - r
-        s = 1 - s
-
-    covterm = np.sum(n * (x - np.mean(x)).T @ (y - np.mean(y)))
-    c1 = np.sum(iv1.T @ v[:, 2].copy())
-    c2 = np.sum(iv4)
-    c3 = np.sum(iv2.T @ y)
-    c4 = np.sum(iv3.T @ x)
-    d = 4 * ((c1 + c2) - (c3 + c4)) - 2 * covterm
-
-    y_sorted = y[idx[n::-1, r], :]
-    si = cpu_cumsum_cpy(y_sorted)
-    by = np.zeros((n, 1))
-    by[idx[::-1, r]] = (np.arange(-(n - 2), n + 1, 2) * y_sorted.ravel()).reshape(
-        -1, 1
-    ) + (si[-1] - 2 * si)
-
-    if bias:
-        denom = [n**2, n**3, n**4]
-    else:
-        denom = [n * (n - 3), n * (n - 3) * (n - 2), n * (n - 3) * (n - 2) * (n - 1)]
-
-    stat = np.sum(
-        (d / denom[0])
-        + (np.sum(ax) * np.sum(by) / denom[2])
-        - (2 * (ax.T @ by) / denom[1])
-    )
-
-    return stat
 
 
 # =============================================================================
@@ -440,14 +311,3 @@ def resample_spec_to_common_grid(sp_list, factor):
         sp_matrix[:, i] = sp_tmp
     return sp_matrix
 
-
-
-# =============================================================================
-# =============================================================================
-def calc_fast_dcov(distx, disty):
-    '''
-    '''
-
-    res = fast_1d_dcov_cpy(distx, disty, bias=False)
-
-    return res
