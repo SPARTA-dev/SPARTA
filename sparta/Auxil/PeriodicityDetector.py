@@ -75,7 +75,7 @@ class PeriodicityDetector:
 
     # =============================================================================
     # =============================================================================
-    def calc_PDC(self, calc_biased_flag=False, calc_unbiased_flag=True, fast=False, errors=False):
+    def calc_PDC(self, calc_biased_flag=False, calc_unbiased_flag=True, errors=False):
         '''
         This function runs the entire PDC calculation process.
         Input:
@@ -99,13 +99,13 @@ class PeriodicityDetector:
         self.biased_PDC_flag = calc_biased_flag
         self.unbiased_PDC_flag = calc_unbiased_flag
 
-        calc_pdc_distance_matrix(self, calc_biased_flag, calc_unbiased_flag, fast=fast, errors=errors)
+        calc_pdc_distance_matrix(self, calc_biased_flag, calc_unbiased_flag, errors=errors)
 
         for index, f in enumerate(self.pdc_res_freqs):
             if calc_biased_flag:
                 self.pdc_res_power_biased[index] = calc_PDC(self, f)
             if calc_unbiased_flag:
-                self.pdc_res_power_unbiased[index] = calc_PDC_unbiased(self, f, fast=fast)
+                self.pdc_res_power_unbiased[index] = calc_PDC_unbiased(self, f)
 
 
         if calc_biased_flag:
@@ -121,7 +121,7 @@ class PeriodicityDetector:
 
     # =============================================================================
     # =============================================================================
-    def calc_USURPER(self, calc_biased_flag=False, calc_unbiased_flag=True, fast=False):
+    def calc_USURPER(self, calc_biased_flag=False, calc_unbiased_flag=True):
         '''
         This function runs the entire USURPER calculation process.
         Input:
@@ -138,13 +138,13 @@ class PeriodicityDetector:
         self.biased_PDC_flag = calc_biased_flag
         self.unbiased_PDC_flag = calc_unbiased_flag
 
-        calc_pdc_distance_matrix(self, calc_biased_flag, calc_unbiased_flag, fast=fast)
+        calc_pdc_distance_matrix(self, calc_biased_flag, calc_unbiased_flag)
 
         for index, f in enumerate(self.pdc_res_freqs):
             if calc_biased_flag:
                 self.pdc_res_power_biased[index] = calc_PDC(self, f)
             if calc_unbiased_flag:
-                self.pdc_res_power_unbiased[index] = calc_PDC_unbiased(self, f, fast=fast)
+                self.pdc_res_power_unbiased[index] = calc_PDC_unbiased(self, f)
 
         if calc_biased_flag:
             self.results_power.update({self.method + "_biased": self.pdc_res_power_biased.copy()})
@@ -156,7 +156,7 @@ class PeriodicityDetector:
 
     # =============================================================================
     # =============================================================================
-    def calc_partial_periodogram(self, partial_type="shift", reverse_existing=False, fast=False):
+    def calc_partial_periodogram(self, partial_type="shift", reverse_existing=False):
         '''
         Currently under development.
         Input:
