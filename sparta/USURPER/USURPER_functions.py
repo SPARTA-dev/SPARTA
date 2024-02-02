@@ -210,23 +210,38 @@ def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbias
                     pass
                 else:
                     if periodicity_detector.method == 'PDC':
-                        if errors:
-                            from scipy import special
-                            y1 = i_val
-                            y2 = j_val
-                            e1 = periodicity_detector.time_series.errors[i]
-                            e2 = periodicity_detector.time_series.errors[j]
+                        if type(i_val) == tuple:
+                            l = j_val[3]
+                            
+                            temp = 0
+                            temp = temp + np.sqrt(i_val[2]**2 - 2 * i_val[2]*j_val[2]*np.cos((i_val[1] - j_val[1])) + j_val[2]**2
+                                                  + l*(i_val[2] + j_val[2])*np.sin((i_val[1] - j_val[1])) + 0.5 * l * l * (1 + np.cos((i_val[1] - j_val[1]))))
+                            temp = temp + np.sqrt(i_val[2]**2 - 2 * i_val[2]*j_val[2]*np.cos((i_val[1] - j_val[1])) + j_val[2]**2
+                                                  + l*(i_val[2] - j_val[2])*np.sin((i_val[1] - j_val[1])) + 0.5 * l * l * (1 - np.cos((i_val[1] - j_val[1]))))
+                            temp = temp + np.sqrt(i_val[2]**2 - 2 * i_val[2]*j_val[2]*np.cos((i_val[1] - j_val[1])) + j_val[2]**2
+                                                  - l*(i_val[2] - j_val[2])*np.sin((i_val[1] - j_val[1])) + 0.5 * l * l * (1 - np.cos((i_val[1] - j_val[1]))))
+                            temp = temp + np.sqrt(i_val[2]**2 - 2 * i_val[2]*j_val[2]*np.cos((i_val[1] - j_val[1])) + j_val[2]**2
+                                                  - l*(i_val[2] + j_val[2])*np.sin((i_val[1] - j_val[1])) + 0.5 * l * l * (1 + np.cos((i_val[1] - j_val[1]))))
 
-                            den = np.sqrt(2 * (e1 ** 2 + e2 ** 2))
-
-                            x = (y1 - y2) / den
-                            y = (e1 + e2) / den
-
-                            e = np.sqrt(e1 ** 2 + e2 ** 2) * (math.exp(-x ** 2) + x * special.erf(x) - y)
-
-                            a[i][j] = np.sqrt(e)
+                            a[i][j] = temp / 2 - l
                         else:
-                            a[i,j] = abs(i_val - j_val)
+                            if errors:
+                                from scipy import special
+                                y1 = i_val
+                                y2 = j_val
+                                e1 = periodicity_detector.time_series.errors[i]
+                                e2 = periodicity_detector.time_series.errors[j]
+    
+                                den = np.sqrt(2 * (e1 ** 2 + e2 ** 2))
+    
+                                x = (y1 - y2) / den
+                                y = (e1 + e2) / den
+    
+                                e = np.sqrt(e1 ** 2 + e2 ** 2) * (math.exp(-x ** 2) + x * special.erf(x) - y)
+    
+                                a[i][j] = np.sqrt(e)
+                            else:
+                                a[i,j] = abs(i_val - j_val)
 
                     elif periodicity_detector.method == 'USURPER':
                         ccf_val = np.sum(sp_matrix[:,i]*sp_matrix[:,j])
