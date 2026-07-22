@@ -13,14 +13,15 @@
 # 2) retrieve_all_spectrum_parameters - returns the visit parameters read.
 # 3) APOGEE_masking - removes bad pixels from an APOGEE spectra.
 #
-# Dependencies: numpy, astropy, easygui, pandas and datetime.
+# Dependencies: numpy, astropy, specutils, pandas and datetime.
 # Last update: Avraham Binnenfeld, 20210510.
 
 import numpy as np
-import easygui
 from astropy.io import fits
+from astropy import units as u
 from datetime import datetime
 import pandas as pd
+from specutils import Spectrum as Spec1D, SpectrumList
 
 
 class ReadSpec:
@@ -42,7 +43,7 @@ class ReadSpec:
 
         self.survey = survey
 
-        if 's' and 'w' and 'bool_mask' and 'DATE-OBS' and 'vrad' and 'segment' in kwargs:
+        if all(k in kwargs for k in ('s', 'w', 'bool_mask', 'DATE-OBS', 'vrad', 'segment')):
             self.s = kwargs['s']
             self.w = kwargs['w']
             self.bool_mask = kwargs['bool_mask']
@@ -65,20 +66,65 @@ class ReadSpec:
 
 # =============================================================================
 # =============================================================================
+    def _load_harps(self, hdul, min_wv, max_wv):
+        '''
+        HARPS loader -- ESO Phase-3 SDP 1-D spectrum (HDU1 binary table with
+        WAVE / FLUX / ERR columns). Reads the spectrum as a specutils
+        Spectrum1D (wavelengths in Angstrom, dimensionless flux), trims to
+        [min_wv, max_wv], and stores the legacy single-order arrays.
+        '''
+        self.n_orders = 1
+        wave = np.asarray(hdul[1].data['WAVE'][0], float)
+        flux = np.asarray(hdul[1].data['FLUX'][0], float)
+        spec = Spec1D(flux=flux * u.dimensionless_unscaled,
+                      spectral_axis=wave * u.Angstrom)
+
+        axis = spec.spectral_axis.to_value(u.Angstrom)
+        min_index = np.where(axis > min_wv)[0][0]
+        max_index = np.where(axis > max_wv)[0][0]
+        self.w = np.reshape(axis[min_index:max_index], (1, -1))
+        self.s = np.reshape(spec.flux.value[min_index:max_index], (1, -1))
+
+        self.DATE_OBS = hdul[0].header['HIERARCH ESO DRS BJD']
+        self.snr = hdul[0].header['SNR']
+        try:
+            self.air_mass = (hdul[0].header['HIERARCH ESO TEL AIRM START']
+                             + hdul[0].header['HIERARCH ESO TEL AIRM END']) / 2
+        except KeyError:
+            self.air_mass = 0
+
+# =============================================================================
+# =============================================================================
+    def _load_nres(self, hdul, min_wv, max_wv):
+        '''
+        NRES loader (Las Cumbres) -- 67 echelle orders; flux in HDU2 and
+        wavelength (nm) in HDU6. Reads each order as a specutils Spectrum1D
+        (nm converted to Angstrom) and stores the legacy per-order lists.
+        '''
+        self.n_orders = 67
+        orders = SpectrumList([
+            Spec1D(flux=np.asarray(hdul[2].data[k], float) * u.dimensionless_unscaled,
+                   spectral_axis=(10.0 * np.asarray(hdul[6].data[k], float)) * u.Angstrom)
+            for k in range(self.n_orders)])
+        self.w = [o.spectral_axis.to_value(u.Angstrom) for o in orders]
+        self.s = [o.flux.value for o in orders]
+
+        self.bcv = hdul[0].header['RVCC'] - hdul[0].header['RCC'] * 299792.458
+        self.DATE_OBS = hdul[0].header['BJD']
+
+# =============================================================================
+# =============================================================================
     def load_spectrum_from_fits(self, path=None, APOGEE_segment=1, min_wv=4900, max_wv=5150, output=False):
         '''
         This function loads visit FITS file and parses it to fit the UNICOR Spectrum class.
 
         INPUT:
-        path: visit FITS file path, optional.
-        In case no path was provided, th file can be selected using easygui.
+        path: visit FITS file path (required).
         '''
         #  loading a spectrum
-        if path:
-            fits_fname = path
-        else:
-            fits_fname = easygui.fileopenbox(msg=None, title='Select data:',
-                                               filetypes=None, multiple=False)
+        if not path:
+            raise ValueError("path is required: pass the FITS file path to load.")
+        fits_fname = path
 
         self.APOGEE_segment = APOGEE_segment
 
@@ -87,393 +133,376 @@ class ReadSpec:
 
         hdul_sp = fits.open(fits_fname)
 
-        if self.survey == "APOGEE":
-            self.n_orders = 1
-            s = hdul_sp[1].data[self.APOGEE_segment]
-            w = hdul_sp[4].data[self.APOGEE_segment]
+        # One loader method per instrument, dispatched by survey name. HARPS and
+        # NRES are specutils-based; the rest are the legacy readers, extracted
+        # verbatim from the old if/elif so they can migrate individually later.
+        loaders = {
+            "HARPS": self._load_harps, "NRES": self._load_nres, "APOGEE": self._load_apogee,
+            "LAMOST": self._load_lamost, "ELODIE": self._load_elodie, "NRES-BANZAI": self._load_nres_banzai,
+            "TRES": self._load_tres, "UVES": self._load_uves, "FEROS": self._load_feros,
+            "HARPS_15": self._load_harps_15, "FEROS_15": self._load_feros_15, "CORALIE": self._load_coralie,
+            "SRG": self._load_srg, "KEK": self._load_kek, "PEPSI": self._load_pepsi,
+        }
+        if self.survey not in loaders:
+            raise ValueError(f"Unsupported survey: {self.survey!r}")
+        loaders[self.survey](hdul_sp, min_wv, max_wv)
 
-            self.s = np.reshape(s, (1, -1))
-            self.w = np.reshape(w, (1, -1))
+    # =============================================================================
+    # =============================================================================
+    def _load_apogee(self, hdul_sp, min_wv, max_wv):
+        self.n_orders = 1
+        s = hdul_sp[1].data[self.APOGEE_segment]
+        w = hdul_sp[4].data[self.APOGEE_segment]
 
-            # self.DATE_OBS = hdul_sp[0].header['DATE-OBS']
-            # self.DATE_OBS = datetime.strptime(self.DATE_OBS, '%Y-%m-%dT%H:%M:%S.%f')
-            self.DATE_OBS = hdul_sp[0].header['JD-MID']
+        self.s = np.reshape(s, (1, -1))
+        self.w = np.reshape(w, (1, -1))
 
-            self.vrad = hdul_sp[0].header['VRAD']
+        # self.DATE_OBS = hdul_sp[0].header['DATE-OBS']
+        # self.DATE_OBS = datetime.strptime(self.DATE_OBS, '%Y-%m-%dT%H:%M:%S.%f')
+        self.DATE_OBS = hdul_sp[0].header['JD-MID']
 
-            # loading its bool mask data
-            flag_s = hdul_sp[3].data[self.APOGEE_segment]
-            get_bin_s = lambda x, n: format(x, 'b').zfill(n)
-            bool_mask_s = ['0000000000000000' for _ in range(len(flag_s))]
-            for i, b in enumerate(flag_s):
-                x = get_bin_s(b, 16)
-                bool_mask_s[i] = x
+        self.vrad = hdul_sp[0].header['VRAD']
 
-            self.bool_mask = bool_mask_s
+        # loading its bool mask data
+        flag_s = hdul_sp[3].data[self.APOGEE_segment]
+        get_bin_s = lambda x, n: format(x, 'b').zfill(n)
+        bool_mask_s = ['0000000000000000' for _ in range(len(flag_s))]
+        for i, b in enumerate(flag_s):
+            x = get_bin_s(b, 16)
+            bool_mask_s[i] = x
 
-            self.APOGEE_masking()
+        self.bool_mask = bool_mask_s
 
-        elif self.survey == "HARPS":
-            self.n_orders = 1
+        self.APOGEE_masking()
 
-            s = hdul_sp[1].data['FLUX']
-            w = hdul_sp[1].data['WAVE']
+    # =============================================================================
+    # =============================================================================
+    def _load_lamost(self, hdul_sp, min_wv, max_wv):
+        self.n_orders = 1
 
-            bcv = hdul_sp[0].header["HIERARCH ESO DRS BERV"]
-            try:
-                self.air_mass = (hdul_sp[0].header["HIERARCH ESO TEL AIRM START"] + hdul_sp[0].header["HIERARCH ESO TEL AIRM END"]) / 2
-            except:
-                self.air_mass = 0
+        # http://dr1.lamost.org/doc/data-production-description#toc_3
 
-            self.s = s - s.min() + 1
-            self.w = w
+        s = hdul_sp[0].data[0]
 
-            # self.DATE_OBS = hdul_sp[0].header['DATE-OBS']
-            # self.DATE_OBS = datetime.strptime(self.DATE_OBS, '%Y-%m-%dT%H:%M:%S.%f')
-            self.DATE_OBS = hdul_sp[0].header['HIERARCH ESO DRS BJD']
+        w = s.copy()
+        w[0] = 10 ** hdul_sp[0].header["COEFF0"]
+        beta = hdul_sp[0].header["COEFF1"]
 
-            min_index = np.where(w[0] > min_wv)[0][0]
-            max_index = np.where(w[0] > max_wv)[0][0]
+        for i in range(len(w) - 1):
+            w[i + 1] = w[0] * (1 + beta) ** i
 
-            self.s = s[0, min_index:max_index]
-            self.w = w[0, min_index:max_index]
+        HELIO_RV = hdul_sp[0].header["HELIO_RV"]
 
-            self.s = np.reshape(self.s, (1, -1))
-            self.w = np.reshape(self.w, (1, -1))
+        self.s = s # - s.min() + 1
+        self.w = w
 
-            # self.bcv = hdul_sp[0].header["HIERARCH ESO DRS BERV"] # 0
+        self.DATE_OBS = hdul_sp[0].header["DATE-OBS"]
+        self.DATE_OBS = datetime.strptime(self.DATE_OBS, '%Y-%m-%dT%H:%M:%S')
 
-            self.snr = hdul_sp[0].header["SNR"]
+        min_index = np.where(w > 4000)[0][0]
+        max_index = np.where(w > 5000)[0][0]
 
-            # self.vrad = hdul_sp[0].header["HIERARCH ESO TEL TARG RADVEL"]
+        self.s = s[min_index:max_index]
+        self.w = w[min_index:max_index]
 
-        elif self.survey == "LAMOST":
-            self.n_orders = 1
+        self.s = np.reshape(self.s, (1, -1))
+        self.w = np.reshape(self.w, (1, -1))
 
-            # http://dr1.lamost.org/doc/data-production-description#toc_3
+    # =============================================================================
+    # =============================================================================
+    def _load_elodie(self, hdul_sp, min_wv, max_wv):
+        self.n_orders = 1
 
-            s = hdul_sp[0].data[0]
+        s = hdul_sp[0].data
 
-            w = s.copy()
-            w[0] = 10 ** hdul_sp[0].header["COEFF0"]
-            beta = hdul_sp[0].header["COEFF1"]
+        w = s.copy()
+        w[0] = hdul_sp[0].header["CRVAL1"]
+        beta = hdul_sp[0].header["CDELT1"]
 
-            for i in range(len(w) - 1):
-                w[i + 1] = w[0] * (1 + beta) ** i
+        self.snr = hdul_sp[0].header["SN"]
 
-            HELIO_RV = hdul_sp[0].header["HELIO_RV"]
+        for i in range(len(w) - 1):
+            w[i + 1] = w[i] + beta
 
-            self.s = s # - s.min() + 1
-            self.w = w
 
-            self.DATE_OBS = hdul_sp[0].header["DATE-OBS"]
-            self.DATE_OBS = datetime.strptime(self.DATE_OBS, '%Y-%m-%dT%H:%M:%S')
+        self.s = s
+        self.w = w
 
-            min_index = np.where(w > 4000)[0][0]
-            max_index = np.where(w > 5000)[0][0]
+        self.DATE_OBS = hdul_sp[0].header["DATE-OBS"]
+        self.DATE_OBS = datetime.strptime(self.DATE_OBS, '%Y-%m-%dT%H:%M:%S')
 
-            self.s = s[min_index:max_index]
-            self.w = w[min_index:max_index]
+        self.s = np.reshape(self.s, (1, -1))
+        self.w = np.reshape(self.w, (1, -1))
 
-            self.s = np.reshape(self.s, (1, -1))
-            self.w = np.reshape(self.w, (1, -1))
+    # =============================================================================
+    # =============================================================================
+    def _load_nres_banzai(self, hdul_sp, min_wv, max_wv):
+        sci_fiber_mask = hdul_sp[1].data['fiber'] == hdul_sp[0].header['SCIFIBER']
+        self.n_orders = 68      # Not sure why this is 68 rather than 67
+        s = []
+        w = []
+        for ordind in np.arange(self.n_orders):
+            s.append(np.array(hdul_sp[1].data['normflux'][sci_fiber_mask][ordind]))
+            w.append(np.array(hdul_sp[1].data['wavelength'][sci_fiber_mask][ordind]))
 
-        elif self.survey == "ELODIE":
-            self.n_orders = 1
+        self.bcv = float(hdul_sp[0].header['BARYCORR']) / 1000      # Convert from m/s to km/s
 
-            s = hdul_sp[0].data
+        self.s = s
+        self.w = w
 
-            w = s.copy()
-            w[0] = hdul_sp[0].header["CRVAL1"]
-            beta = hdul_sp[0].header["CDELT1"]
+        self.DATE_OBS = hdul_sp[0].header["TCORR"]  # Barycentre-corrected time, in BJD_TDB
 
-            self.snr = hdul_sp[0].header["SN"]
+    # =============================================================================
+    # =============================================================================
+    def _load_tres(self, hdul_sp, min_wv, max_wv):
+        self.n_orders = 1
 
-            for i in range(len(w) - 1):
-                w[i + 1] = w[i] + beta
+        s = hdul_sp[0].data[36]
+        w = [i for i in range(len(s))]
 
+        self.s = s
+        self.w = w
 
-            self.s = s
-            self.w = w
+        self.DATE_OBS = hdul_sp[0].header["WS_BJD"]
+        self.bcv = hdul_sp[0].header["BCV"]
 
-            self.DATE_OBS = hdul_sp[0].header["DATE-OBS"]
-            self.DATE_OBS = datetime.strptime(self.DATE_OBS, '%Y-%m-%dT%H:%M:%S')
+        min_index = np.where(np.array(w) > 500)[0][0]
+        max_index = np.where(np.array(w) > 1000)[0][0]
 
-            self.s = np.reshape(self.s, (1, -1))
-            self.w = np.reshape(self.w, (1, -1))
+        self.s = s[min_index:max_index]
+        self.w = w[min_index:max_index]
 
-        elif self.survey == "NRES":
-            self.n_orders = 67
+        self.s = np.reshape(self.s, (1, -1))
+        self.w = np.reshape(self.w, (1, -1))
 
-            s = []
-            w = []
-            for ordind in np.arange(self.n_orders):
-                s.append(np.array(hdul_sp[2].data[ordind]))
-                w.append(10* np.array(hdul_sp[6].data[ordind])) # NRES gives the data in nm. Convert to Ang.
+    # =============================================================================
+    # =============================================================================
+    def _load_uves(self, hdul_sp, min_wv, max_wv):
 
-            self.bcv = hdul_sp[0].header["RVCC"] - hdul_sp[0].header["RCC"]*299792.458
+        self.n_orders = 1
 
-            self.s = s
-            self.w = w
+        s = hdul_sp[1].data[0][4]
 
-            self.DATE_OBS = hdul_sp[0].header["BJD"]
+        w = hdul_sp[1].data[0][0]
 
-        elif self.survey == "NRES-BANZAI":
-            sci_fiber_mask = hdul_sp[1].data['fiber'] == hdul_sp[0].header['SCIFIBER']
-            self.n_orders = 68      # Not sure why this is 68 rather than 67
-            s = []
-            w = []
-            for ordind in np.arange(self.n_orders):
-                s.append(np.array(hdul_sp[1].data['normflux'][sci_fiber_mask][ordind]))
-                w.append(np.array(hdul_sp[1].data['wavelength'][sci_fiber_mask][ordind]))
+        self.snr = hdul_sp[0].header["SNR"]
 
-            self.bcv = float(hdul_sp[0].header['BARYCORR']) / 1000      # Convert from m/s to km/s
+        self.s = s
+        self.w = w
 
-            self.s = s
-            self.w = w
+        self.DATE_OBS = hdul_sp[0].header["MJD-OBS"]
 
-            self.DATE_OBS = hdul_sp[0].header["TCORR"]  # Barycentre-corrected time, in BJD_TDB
+        min_index = np.where(np.array(w) > min_wv)[0][0]
+        max_index = np.where(np.array(w) > max_wv)[0][0]
 
-        elif self.survey == "TRES":
-            self.n_orders = 1
+        self.s = s[min_index:max_index]
+        self.w = w[min_index:max_index]
 
-            s = hdul_sp[0].data[36]
-            w = [i for i in range(len(s))]
+        self.s = np.reshape(self.s, (1, -1))
+        self.w = np.reshape(self.w, (1, -1))
 
-            self.s = s
-            self.w = w
+    # =============================================================================
+    # =============================================================================
+    def _load_feros(self, hdul_sp, min_wv, max_wv):
+        self.n_orders = 1
 
-            self.DATE_OBS = hdul_sp[0].header["WS_BJD"]
-            self.bcv = hdul_sp[0].header["BCV"]
+        s = hdul_sp[1].data['FLUX']
+        w = hdul_sp[1].data['WAVE']
 
-            min_index = np.where(np.array(w) > 500)[0][0]
-            max_index = np.where(np.array(w) > 1000)[0][0]
+        bcv = hdul_sp[0].header["HIERARCH ESO DRS BARYCORR"]
 
-            self.s = s[min_index:max_index]
-            self.w = w[min_index:max_index]
+        self.DATE_OBS = (hdul_sp[0].header["MJD-OBS"] + hdul_sp[0].header["MJD-END"])/ 2
 
-            self.s = np.reshape(self.s, (1, -1))
-            self.w = np.reshape(self.w, (1, -1))
+        min_index = np.where(w[0] > min_wv)[0][0]
+        max_index = np.where(w[0] > max_wv)[0][0]
 
-        elif self.survey == "UVES":
+        self.s = s[0, min_index:max_index]
+        self.w = w[0, min_index:max_index]
 
-            self.n_orders = 1
+        self.s = np.reshape(self.s, (1, -1))
+        self.w = np.reshape(self.w, (1, -1))
 
-            s = hdul_sp[1].data[0][4]
+        self.bcv = bcv
 
-            w = hdul_sp[1].data[0][0]
+        self.snr = hdul_sp[0].header["SNR"]
 
-            self.snr = hdul_sp[0].header["SNR"]
+    # =============================================================================
+    # =============================================================================
+    def _load_harps_15(self, hdul_sp, min_wv, max_wv):
 
-            self.s = s
-            self.w = w
+        self.n_orders = 1
 
-            self.DATE_OBS = hdul_sp[0].header["MJD-OBS"]
+        s = np.array([hdul_sp[0].data[3][28]])
+        w = np.array([hdul_sp[0].data[0][28]])
 
-            min_index = np.where(np.array(w) > min_wv)[0][0]
-            max_index = np.where(np.array(w) > max_wv)[0][0]
+        bcv = hdul_sp[0].header["HIERARCH BARYCENTRIC CORRECTION (KM/S)"]
 
-            self.s = s[min_index:max_index]
-            self.w = w[min_index:max_index]
+        self.DATE_OBS = hdul_sp[0].header['HIERARCH MBJD']
 
-            self.s = np.reshape(self.s, (1, -1))
-            self.w = np.reshape(self.w, (1, -1))
+        min_index = np.where(w[0] > 5160)[0][0]
+        max_index = np.where(w[0] > 5210)[0][0]
 
-        elif self.survey == "FEROS":
-            self.n_orders = 1
+        self.s = s[0, min_index:max_index]
+        self.w = w[0, min_index:max_index]
 
-            s = hdul_sp[1].data['FLUX']
-            w = hdul_sp[1].data['WAVE']
+        self.s = np.reshape(self.s, (1, -1))
+        self.w = np.reshape(self.w, (1, -1))
 
-            bcv = hdul_sp[0].header["HIERARCH ESO DRS BARYCORR"]
+        self.bcv = 0
 
-            self.DATE_OBS = (hdul_sp[0].header["MJD-OBS"] + hdul_sp[0].header["MJD-END"])/ 2
+        self.snr = hdul_sp[0].header["SNR"]
 
-            min_index = np.where(w[0] > min_wv)[0][0]
-            max_index = np.where(w[0] > max_wv)[0][0]
+        self.vrad = hdul_sp[0].header["RV"]
 
-            self.s = s[0, min_index:max_index]
-            self.w = w[0, min_index:max_index]
+    # =============================================================================
+    # =============================================================================
+    def _load_feros_15(self, hdul_sp, min_wv, max_wv):
+        self.n_orders = 1
 
-            self.s = np.reshape(self.s, (1, -1))
-            self.w = np.reshape(self.w, (1, -1))
+        s = np.array([hdul_sp[0].data[3][9]])
+        w = np.array([hdul_sp[0].data[0][9]])
 
-            self.bcv = bcv
+        bcv = hdul_sp[0].header["HIERARCH BARYCENTRIC CORRECTION (KM/S)"]
 
-            self.snr = hdul_sp[0].header["SNR"]
+        self.s = s - s.min() + 1
+        self.w = w
 
-        elif self.survey == "HARPS_15":
+        self.DATE_OBS = hdul_sp[0].header['HIERARCH MBJD']
 
-            self.n_orders = 1
+        # 5
+        # min_index = np.where(w[0] > 5705)[0][0]
+        # max_index = np.where(w[0] > 5900)[0][0]
 
-            s = np.array([hdul_sp[0].data[3][28]])
-            w = np.array([hdul_sp[0].data[0][28]])
+        # #9
+        min_index = np.where(w[0] > 5175)[0][0]
+        max_index = np.where(w[0] > 5350)[0][0]
 
-            bcv = hdul_sp[0].header["HIERARCH BARYCENTRIC CORRECTION (KM/S)"]
+        self.s = s[0, min_index:max_index]
+        self.w = w[0, min_index:max_index]
 
-            self.DATE_OBS = hdul_sp[0].header['HIERARCH MBJD']
+        self.s = np.reshape(self.s, (1, -1))
+        self.w = np.reshape(self.w, (1, -1))
 
-            min_index = np.where(w[0] > 5160)[0][0]
-            max_index = np.where(w[0] > 5210)[0][0]
+        self.bcv = 0
 
-            self.s = s[0, min_index:max_index]
-            self.w = w[0, min_index:max_index]
+        self.snr = hdul_sp[0].header["SNR"]
 
-            self.s = np.reshape(self.s, (1, -1))
-            self.w = np.reshape(self.w, (1, -1))
+        self.vrad = hdul_sp[0].header["RV"]
 
-            self.bcv = 0
+    # =============================================================================
+    # =============================================================================
+    def _load_coralie(self, hdul_sp, min_wv, max_wv):
 
-            self.snr = hdul_sp[0].header["SNR"]
+        self.n_orders = 1
 
-            self.vrad = hdul_sp[0].header["RV"]
+        s = hdul_sp[0].data
+        x = hdul_sp[0].header["CRVAL1"]
+        d = hdul_sp[0].header["CDELT1"]
+        w = np.arange(x, x + d * (len(s)), d)[:-1]
 
-        elif self.survey == "FEROS_15":
-            self.n_orders = 1
+        bcv = hdul_sp[0].header["HIERARCH ESO OBS TARG CORBAORB"]
 
-            s = np.array([hdul_sp[0].data[3][9]])
-            w = np.array([hdul_sp[0].data[0][9]])
+        self.DATE_OBS = hdul_sp[0].header["HIERARCH ESO DRS BJD"]
 
-            bcv = hdul_sp[0].header["HIERARCH BARYCENTRIC CORRECTION (KM/S)"]
+        # SMUS
+        # min_index = np.where(w > 5800)[0][0]
+        # max_index = np.where(w > 6000)[0][0]
 
-            self.s = s - s.min() + 1
-            self.w = w
+        # betador
+        # min_index = np.where(w > 4900)[0][0]
+        # max_index = np.where(w > 5150)[0][0]
+        
+        min_index = np.where(w > min_wv)[0][0]
+        max_index = np.where(w > max_wv)[0][0]
 
-            self.DATE_OBS = hdul_sp[0].header['HIERARCH MBJD']
+        self.s = s[min_index:max_index]
+        self.w = w[min_index:max_index]
 
-            # 5
-            # min_index = np.where(w[0] > 5705)[0][0]
-            # max_index = np.where(w[0] > 5900)[0][0]
+        self.s = np.reshape(self.s, (1, -1))
+        self.w = np.reshape(self.w, (1, -1))
 
-            # #9
-            min_index = np.where(w[0] > 5175)[0][0]
-            max_index = np.where(w[0] > 5350)[0][0]
+        self.bcv = 0
 
-            self.s = s[0, min_index:max_index]
-            self.w = w[0, min_index:max_index]
+    # =============================================================================
+    # =============================================================================
+    def _load_srg(self, hdul_sp, min_wv, max_wv):
+        self.n_orders = 1
 
-            self.s = np.reshape(self.s, (1, -1))
-            self.w = np.reshape(self.w, (1, -1))
+        s = hdul_sp[0].data
+        x = hdul_sp[0].header["CRVAL1"]
+        d = hdul_sp[0].header["CDELT1"]
+        w = np.arange(x, x + d * (len(s)), d)[:-1]
 
-            self.bcv = 0
+        self.air_mass = hdul_sp[0].header["TEMPCCD"]
 
-            self.snr = hdul_sp[0].header["SNR"]
+        self.DATE_OBS = hdul_sp[0].header["BJD"]
 
-            self.vrad = hdul_sp[0].header["RV"]
 
+        min_index = np.where(w > 6000)[0][0]
+        max_index = np.where(w > 6250)[0][0]
 
-        elif self.survey == "CORALIE":
+        self.s = s[min_index:max_index]
+        self.w = w[min_index:max_index]
 
-            self.n_orders = 1
+        self.s = np.reshape(self.s, (1, -1))
+        self.w = np.reshape(self.w, (1, -1))
 
-            s = hdul_sp[0].data
-            x = hdul_sp[0].header["CRVAL1"]
-            d = hdul_sp[0].header["CDELT1"]
-            w = np.arange(x, x + d * (len(s)), d)[:-1]
+        self.bcv = 0
 
-            bcv = hdul_sp[0].header["HIERARCH ESO OBS TARG CORBAORB"]
+    # =============================================================================
+    # =============================================================================
+    def _load_kek(self, hdul_sp, min_wv, max_wv):
 
-            self.DATE_OBS = hdul_sp[0].header["HIERARCH ESO DRS BJD"]
+        self.n_orders = 1
 
-            # SMUS
-            # min_index = np.where(w > 5800)[0][0]
-            # max_index = np.where(w > 6000)[0][0]
 
-            # betador
-            # min_index = np.where(w > 4900)[0][0]
-            # max_index = np.where(w > 5150)[0][0]
-            
-            min_index = np.where(w > min_wv)[0][0]
-            max_index = np.where(w > max_wv)[0][0]
 
-            self.s = s[min_index:max_index]
-            self.w = w[min_index:max_index]
 
-            self.s = np.reshape(self.s, (1, -1))
-            self.w = np.reshape(self.w, (1, -1))
 
-            self.bcv = 0
+        s = hdul_sp[0].data
 
-        elif self.survey == "SRG":
-            self.n_orders = 1
+        x = hdul_sp[0].header["CRVAL1"]
 
-            s = hdul_sp[0].data
-            x = hdul_sp[0].header["CRVAL1"]
-            d = hdul_sp[0].header["CDELT1"]
-            w = np.arange(x, x + d * (len(s)), d)[:-1]
+        d = hdul_sp[0].header["CDELT1"]
 
-            self.air_mass = hdul_sp[0].header["TEMPCCD"]
+        w = np.arange(x, x + d * (len(s)), d)[:-1]
 
-            self.DATE_OBS = hdul_sp[0].header["BJD"]
+    # =============================================================================
+    # =============================================================================
+    def _load_pepsi(self, hdul_sp, min_wv, max_wv):
 
+        self.n_orders = 1
 
-            min_index = np.where(w > 6000)[0][0]
-            max_index = np.where(w > 6250)[0][0]
+        w = [a[0] for a in hdul_sp[1].data]
+        s = [a[1] for a in hdul_sp[1].data]
 
-            self.s = s[min_index:max_index]
-            self.w = w[min_index:max_index]
+        min_index = np.where(np.array(w) > min_wv)[0][0]
+        max_index = np.where(np.array(w) > max_wv)[0][0]
 
-            self.s = np.reshape(self.s, (1, -1))
-            self.w = np.reshape(self.w, (1, -1))
+        self.s = s[min_index:max_index]
+        self.w = w[min_index:max_index]
 
-            self.bcv = 0
+        self.s = np.reshape(self.s, (1, -1))
+        self.w = np.reshape(self.w, (1, -1))
 
-        elif self.survey == "KEK":
+        # print(self.w)
 
-            self.n_orders = 1
+        self.bcv = 0 #bcv
+        # print(hdul_sp[0].header)
+        self.DATE_OBS = hdul_sp[0].header["JD-OBS"]
 
-            print(hdul_sp[0].info())
+        # print(hdul_sp[0])
+        # print(hdul_sp[1].data)
+        # print(hdul_sp[1].data[0])
 
-            print(hdul_sp[0].header)
-
-            print(len(hdul_sp[1].data))
-
-            print(len(hdul_sp[1].data[0]))
-
-            s = hdul_sp[0].data
-
-            x = hdul_sp[0].header["CRVAL1"]
-
-            d = hdul_sp[0].header["CDELT1"]
-
-            w = np.arange(x, x + d * (len(s)), d)[:-1]
-
-        elif self.survey == "PEPSI":
-
-            self.n_orders = 1
-
-            w = [a[0] for a in hdul_sp[1].data]
-            s = [a[1] for a in hdul_sp[1].data]
-
-            print(min_wv, max_wv)
-            min_index = np.where(np.array(w) > min_wv)[0][0]
-            max_index = np.where(np.array(w) > max_wv)[0][0]
-
-            self.s = s[min_index:max_index]
-            self.w = w[min_index:max_index]
-
-            self.s = np.reshape(self.s, (1, -1))
-            self.w = np.reshape(self.w, (1, -1))
-
-            print(min_index, max_index)
-            # print(self.w)
-
-            self.bcv = 0 #bcv
-            # print(hdul_sp[0].header)
-            self.DATE_OBS = hdul_sp[0].header["JD-OBS"]
-
-            # print(hdul_sp[0])
-            print(hdul_sp[0].header["OBJECT"])
-            # print(hdul_sp[1].data)
-            # print(hdul_sp[1].data[0])
-
-            # s = hdul_sp[0].data
-            # x = hdul_sp[0].header["CRVAL1"]
-            # d = hdul_sp[0].header["CDELT1"]
-            # w = np.arange(x, x + d * (len(s)), d)[:-1]
+        # s = hdul_sp[0].data
+        # x = hdul_sp[0].header["CRVAL1"]
+        # d = hdul_sp[0].header["CDELT1"]
+        # w = np.arange(x, x + d * (len(s)), d)[:-1]
 
 # =============================================================================
 # =============================================================================
+
     def retrieve_all_spectrum_parameters(self):
         """
         This function returns the visit parameters read.

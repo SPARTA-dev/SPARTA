@@ -2,20 +2,20 @@
 #                    Template.py (SPARTA UNICOR class)
 #                   ----------------------------
 # This file defines the "Template" class. An object of this class stores
-# a Spectrum object, saved in the self.model filed. This class has some
+# a Spectrum object, saved in the self.model field. This class has some
 # additional attributes added to the ones of the Spectrum class, including
-# the ability to downolad, process and store PHOENIX synthetic spectrum.
+# the ability to download, process and store PHOENIX synthetic spectrum.
 #
-# A syntheticSpectrum class stores the following methods:
+# A Template class stores the following methods:
 # ---------------------------------------------
 #
 # 1) create_PHOENIX_fname - Prepare the needed spectra files names and paths for downloading
-# 2) download_PHOENIX_files - Downloads the synthetic spectrum files from the Goettingen ftp
+# 2) download_PHOENIX_files - Downloads the synthetic spectrum files over HTTPS from Goettingen
 # 3) doppler - Shifts the synthetic spectrum according to a given velocity (Doppler effect)
 # 4) add_noise - Adds simulated noise to the synthetic spectrum according to a given snr
 # 5) GaussianBroadening - broadens the template with a Gaussian window,
 #                      to account for the instrumental broadening.
-# 6) RotationalBroadening - broadens the template with a rotaional profile
+# 6) RotationalBroadening - broadens the template with a rotational profile
 #                        to account for stellar rotation.
 # 7) integrate_spec - sums up consecutive pixels in the given Template model,
 #                           to lower the resolution for computational needs
@@ -23,18 +23,18 @@
 # 9) cut_multiorder - cuts the template according to a given wavelength bound.
 # 10) cut_multiorder_like - cuts the template to the shape of a given Spectrum object.
 #
-# Dependencies: numpy, astropy, ftplib, pathlib, random, PyAstronomy, os and pandas.
+# Dependencies: numpy, astropy, shutil, pathlib, os and pandas.
 # Last update: Avraham Binnenfeld, 20210510.
 
 
 from astropy.io import fits
+from astropy.utils.data import download_file
 from sparta.UNICOR.Spectrum import Spectrum
+from sparta import spectral_ops
 import numpy as np
-from ftplib import FTP
 from pathlib import Path
-import random
 import os
-from PyAstronomy import pyasl
+import shutil
 import pandas as pd
 from astropy import units as u
 from astropy.table import Table
@@ -71,26 +71,30 @@ class Template:
             else:
                 self.vel = []
 
-        elif 'temp' and 'log_g' and 'metal' and 'alpha' in kwargs:
+        elif all(k in kwargs for k in ('temp', 'log_g', 'metal', 'alpha')):
             self.temp = kwargs['temp']
             self.log_g = kwargs['log_g']
             self.metal = kwargs['metal']
             self.alpha = kwargs['alpha']
             self.min_val = kwargs['min_val']
             self.max_val = kwargs['max_val']
-            self.server_path = r"phoenix.astro.physik.uni-goettingen.de"
+            self.server_url = "https://phoenix.astro.physik.uni-goettingen.de/data/"
             self.wl_f_n = 'WAVE_PHOENIX-ACES-AGSS-COND-2011.fits'
 
             p, f_n = self.create_PHOENIX_fname(self.temp, self.log_g, self.metal, self.alpha)
 
-            if not os.path.exists(r'template_files'):
-                os.makedirs(r'template_files')
-
-            if not Path(TEMPLATE_FILES_PATH + self.wl_f_n).exists():
-                self.download_PHOENIX_files(p='HiResFITS/', f_n=self.wl_f_n)
-
-            if not Path(TEMPLATE_FILES_PATH + f_n).exists():
-                self.download_PHOENIX_files(p, f_n)
+            # Fetch the wavelength grid and the requested spectrum if they are
+            # not already cached locally. Downloads can be disabled with
+            # allow_download=False (then a missing file raises instead of
+            # silently reaching out to the network).
+            allow_download = kwargs.get('allow_download', True)
+            for sub_path, fname in [('HiResFITS/', self.wl_f_n), (p, f_n)]:
+                if not os.path.exists(os.path.join(TEMPLATE_FILES_PATH, fname)):
+                    if not allow_download:
+                        raise FileNotFoundError(
+                            f"PHOENIX file '{fname}' is not in {TEMPLATE_FILES_PATH} "
+                            "and downloads are disabled (allow_download=False).")
+                    self.download_PHOENIX_files(sub_path, fname)
 
             # Open the fits file using fits module from astropy.
             wl_fname = self.wl_f_n
@@ -166,10 +170,10 @@ class Template:
 
             self.model = Spectrum(wv=wavelengths, sp=spectrum)
 
-        elif 'spectrum' and 'wavelengths' in kwargs:
+        elif all(k in kwargs for k in ('spectrum', 'wavelengths')):
             spectrum = kwargs['spectrum']
             wavelengths = kwargs['wavelengths']
-            if 'min_val' and 'max_val' in kwargs:
+            if all(k in kwargs for k in ('min_val', 'max_val')):
                 self.min_val = kwargs['min_val']
                 self.max_val = kwargs['max_val']
 
@@ -188,7 +192,6 @@ class Template:
         if 'PHXMASS' in kwargs:
             self.PHXREFF = kwargs['PHXREFF']
 
-        # return self
 
     # =============================================================================
     def GaussianBroadening(self, **kwargs):
@@ -199,12 +202,15 @@ class Template:
 
         resolution = kwargs["resolution"]
 
-        if 'wv' and 'sp' in kwargs:
-            flux = pyasl.instrBroadGaussFast(np.reshape(kwargs["wv"][0], (1, -1))[0],
-                                             kwargs["sp"][0], resolution)
+        if 'wv' in kwargs and 'sp' in kwargs:
+            wv = np.reshape(kwargs["wv"][0], (1, -1))[0]
+            sp = kwargs["sp"][0]
         else:
-            flux = pyasl.instrBroadGaussFast(np.reshape(self.model.wv[0], (1, -1))[0],
-                                    self.model.sp[0], resolution)
+            wv = np.reshape(self.model.wv[0], (1, -1))[0]
+            sp = self.model.sp[0]
+
+        dv = spectral_ops.dv_from_wave(wv)
+        flux = spectral_ops.broaden_gaussian(sp, dv, spectral_ops.C_KMS / resolution)
 
         flux = np.reshape(flux, (1, -1))
 
@@ -227,10 +233,10 @@ class Template:
         w = np.reshape(self.model.wv[0], (1, -1))[0]
         s = self.model.sp[0]
 
-        flux = pyasl.rotBroad(w, s, epsilon, vsini)
+        dv = spectral_ops.dv_from_wave(w)
+        flux = spectral_ops.broaden_rotational(s, dv, vsini, epsilon)
 
         self.model.sp = np.reshape(flux, (1, -1))
-        # self.model.wv = np.reshape(flux, (1, -1))
         return self
 
         # =============================================================================
@@ -257,26 +263,34 @@ class Template:
 
     # =============================================================================
     # =============================================================================
-    def download_PHOENIX_files(self, p, f_n):
+    def download_PHOENIX_files(self, p, f_n, timeout=120):
         '''
-        This function downloads the synthetic spectrum files from the Goettingen ftp
-        :param: p - str, an ftp path
-        :param: f_n: str, file name to be downloaded
+        Download one synthetic-spectrum file from the Goettingen PHOENIX server
+        into TEMPLATE_FILES_PATH, over HTTPS.
+
+        Uses astropy.utils.data.download_file (TLS, timeout, atomic
+        temp-then-move), so there is no process-CWD mutation, no leaked file
+        handle, and no partial file left behind on failure. Any download error
+        propagates to the caller.
+
+        :param: p       - str, server sub-path (as built by create_PHOENIX_fname).
+        :param: f_n     - str, file name to fetch.
+        :param: timeout - float, per-request timeout in seconds.
+        :return: str, the local path of the downloaded file.
         '''
-        tmp_dir = os.getcwd()
-        os.chdir(TEMPLATE_FILES_PATH)
+        os.makedirs(TEMPLATE_FILES_PATH, exist_ok=True)
+        url = self.server_url + p.strip('/') + '/' + f_n
+        target = os.path.join(TEMPLATE_FILES_PATH, f_n)
 
-        path = p
-        filename = f_n
-
-        ftp = FTP(self.server_path)
-        ftp.login()
-
-        ftp.cwd(path)
-        ftp.retrbinary("RETR " + filename, open(filename, 'wb').write)
-        ftp.quit()
-
-        os.chdir(tmp_dir)
+        cached = download_file(url, cache=False, timeout=timeout,
+                               show_progress=False)
+        try:
+            shutil.move(cached, target)
+        except BaseException:
+            if os.path.exists(cached):
+                os.remove(cached)
+            raise
+        return target
 
     # =============================================================================
     # =============================================================================
@@ -295,7 +309,7 @@ class Template:
 
         beta = ((vel/self.model.c).decompose()).value
 
-        if wv == []:
+        if len(wv) == 0:
             return np.array(self.model.wv).astype("float64") * (1 + beta)
         else:
             return (wv * (1 + beta)).astype("float64")
@@ -310,7 +324,7 @@ class Template:
         :return: Noised spectrum model.
         '''
 
-        if sp!=[]:
+        if len(sp) != 0:
             self.model.sp = sp
 
         if snr == -1:
@@ -318,12 +332,11 @@ class Template:
         else:
             NormFac = np.quantile(self.model.sp[0], 0.98)
 
-            if rndseed is None:
-                random.seed()
-            else:
-                random.seed(rndseed)
-
-            noise = np.random.normal(0, 1, len(self.model.sp[0])) * NormFac / snr
+            # A dedicated numpy Generator; seeding it (rndseed) makes the noise
+            # reproducible. The old code seeded the `random` module, which does
+            # not affect numpy, so rndseed had no effect.
+            rng = np.random.default_rng(rndseed)
+            noise = rng.normal(0, 1, len(self.model.sp[0])) * NormFac / snr
 
             return self.model.sp + noise
 
@@ -340,7 +353,7 @@ class Template:
         new_sp = []
         new_wv = []
 
-        if wv==[]:
+        if len(wv) == 0:
             wv = self.model.wv
             sp = self.model.sp
 

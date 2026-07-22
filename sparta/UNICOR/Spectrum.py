@@ -1,32 +1,38 @@
 #                   ------------------------------
 #                     Spectrum.py (SPARTA UNICOR class)
 #                   ------------------------------
-# This file defines the "Spectrum" class. An object of this class stores
-# the measured spectrum (wavelength values and their corresponding fluxes)
-# and some basic information about the measurement: time of observation,
-# baricentric velocity correction, etc. See more details under __init__.
-# The spectrum can be single- or multi-order.
+# This file defines the "Spectrum" class: a container for one observed
+# spectrum -- wavelengths and their fluxes -- plus basic metadata (time of
+# observation, barycentric velocity correction, etc.; see __init__). A spectrum
+# may be single- or multi-order: ``wv`` and ``sp`` are lists holding one 1-D
+# array per order, and different orders may have different lengths.
+#
+# Conventions: wavelengths in Angstrom, velocities in km/s, times in BJD (days).
+# Cross-correlation runs on a log-lambda (velocity-even) grid -- see
+# InterpolateSpectrum(InterpMethod='log').
 #
 # A Spectrum class stores the following methods:
 # ---------------------------------------------
+#  1) InterpolateSpectrum   - resample onto a linear or log-lambda grid.
+#  2) TrimSpec              - trim the edges (drop NaNs / zero padding).
+#  3) FilterSpectrum        - Butterworth bandpass filter.
+#  4) ApplyCosineBell       - apply a Tukey window.
+#  5) RemoveCosmics         - clip positive outliers (cosmic rays).
+#  6) BarycentricCorrection - apply the barycentric velocity correction.
+#  7) SelectOrders          - keep or drop specific orders.
+#  8) SpecPreProccess       - run the above in a recommended order.
+# The ``orders`` property and ``from_spectrum1d`` classmethod convert to/from
+# specutils Spectrum1D, the interchange representation.
 #
-# 1) InterpolateSpectrum - resamples the spectrum on a linear or logarithmic scale
-# 2) TrimSpec - Cuts the edges of the spectrum (mostly to remove zero paddding)
-# 3) FilterSpectrum - A Butterworth bandpass filter
-# 4) ApplyCosineBell - Apllies a Tuckey window on the data
-# 5) RemoveCosmics - Removes outliers that deviate above the measured spectrum.
-# 6) BarycentricCorrection - Preforms a barycentric correction.
-# There is also an 'overall' procedure, that calls all the routines with
-# some default values:
-# 8) SpecPreProccess - Calls all the above a suggested order.
-#
-# Dependencies: numpy, scipy and astropy.
+# Dependencies: numpy, scipy, astropy, specutils.
 # Last update: Avraham Binnenfeld, 20200607.
 
 import numpy as np
 from scipy import interpolate, signal
 from astropy.stats import sigma_clip, mad_std
 from astropy import constants as consts, units as u
+from specutils import Spectrum as Spec1D, SpectrumList
+from specutils.manipulation import SplineInterpolatedResampler
 
 
 class Spectrum:
@@ -36,12 +42,18 @@ class Spectrum:
     def __init__(self, wv=[], sp=[], wvUnits=1.0*u.Angstrom,
                  bjd=0.0, bcv=0.0, name='Anonymous'):
         '''
-        :param: wv, sp: lists data from a single observation.
-                       Each entry in the list represents a different order.
-        :param: name: str, the name of the target.
-        :param: bcv: float, barycentric correction to the velocity.
-        :param: bjd: barycentric julian day.
+        Build a Spectrum from per-order wavelength and flux lists.
 
+        :param: wv - list of 1-D wavelength arrays (Angstrom), one per order.
+        :param: sp - list of 1-D flux arrays, matching ``wv`` order by order.
+        :param: wvUnits - astropy unit of the wavelengths (default Angstrom).
+        :param: bjd - barycentric Julian date of the observation (days).
+        :param: bcv - barycentric velocity correction (km/s).
+        :param: name - str, the name of the target.
+
+        Stores the mutable per-order lists ``self.wv`` / ``self.sp``, the
+        grid/units bookkeeping ``self.Info``, the speed of light ``self.c``
+        (km/s), and the order count ``self.n_ord``.
         '''
         assert len(wv) == len(sp), "Dimensions mismatch (wv vs. sp)"
         self.c = consts.c.to('km/s') # The speed of light in km/sec
@@ -57,6 +69,51 @@ class Spectrum:
 
         if type(bcv) is not u.quantity.Quantity:
             self.bcv = self.bcv*u.kilometer/u.second
+
+    # =============================================================================
+    # =============================================================================
+    @property
+    def orders(self):
+        '''
+        The spectrum as a specutils ``SpectrumList`` -- one ``Spectrum1D`` per
+        order, with a real ``SpectralAxis`` (Angstrom) and (normalized,
+        dimensionless) flux. Per-order ``meta`` carries this Spectrum's ``Info``
+        plus ``bjd``/``bcv``/``name``.
+
+        This is the interchange representation for the specutils ecosystem. The
+        working ``.wv`` / ``.sp`` lists remain the mutable store used by the
+        preprocessing methods; ``orders`` is built from them on access.
+        '''
+        wunit = self.Info.get('WavelengthUnits', 1.0 * u.Angstrom)
+        wunit = getattr(wunit, 'unit', wunit)
+        out = []
+        for w, s in zip(self.wv, self.sp):
+            meta = dict(self.Info)
+            meta.update(bjd=self.bjd, bcv=self.bcv, name=self.name)
+            out.append(Spec1D(flux=np.asarray(s, float) * u.dimensionless_unscaled,
+                              spectral_axis=np.asarray(w, float) * wunit,
+                              meta=meta))
+        return SpectrumList(out)
+
+    # =============================================================================
+    # =============================================================================
+    @classmethod
+    def from_spectrum1d(cls, spectra, bjd=0.0, bcv=0.0, name='Anonymous'):
+        '''
+        Build a ``Spectrum`` from one or more specutils ``Spectrum1D`` objects
+        (a single object, a list, or a ``SpectrumList``). Each becomes one
+        order. ``bjd``/``bcv``/``name`` are taken from the first object's
+        ``meta`` when present, else from the arguments.
+        '''
+        if isinstance(spectra, Spec1D):
+            spectra = [spectra]
+        wv = [np.asarray(o.spectral_axis.to(u.Angstrom).value, float) for o in spectra]
+        sp = [np.asarray(o.flux.value, float) for o in spectra]
+        meta = getattr(spectra[0], 'meta', None) or {}
+        return cls(wv=wv, sp=sp,
+                   bjd=meta.get('bjd', bjd),
+                   bcv=meta.get('bcv', bcv),
+                   name=meta.get('name', name))
 
 # =============================================================================
 # =============================================================================
@@ -123,6 +180,10 @@ class Spectrum:
                 delta = float(delta) * u.kilometer / u.second
             betavel = ((delta/self.c).decompose()).value
 
+        # Resample the flux onto the new grid with specutils (cubic spline).
+        wunit = getattr(wnt, 'unit', u.Angstrom)
+        resampler = SplineInterpolatedResampler()
+
         # Interpolate per order
         for I, w in enumerate(self.wv):
 
@@ -142,9 +203,12 @@ class Spectrum:
                                      np.log(max(w)-medianDiff),
                                      dlam)))
 
-            # Inpterpolate the flux over the calculated grid
-            InterpF = interpolate.interp1d(w, self.sp[I], kind='quadratic')
-            spI.append(InterpF(wvI[I]))
+            # Resample the flux onto the new grid. The target grid lies strictly
+            # inside the input span (built with a one-median-step margin), so no
+            # extrapolation occurs.
+            src = Spec1D(flux=np.asarray(self.sp[I], float) * u.dimensionless_unscaled,
+                         spectral_axis=np.asarray(w, float) * wunit)
+            spI.append(resampler(src, wvI[I] * wunit).flux.value)
 
         # Replace the data with the interpolated wavelengths
         self.wv, self.sp = wvI, spI
@@ -276,7 +340,7 @@ class Spectrum:
 
         # Interpolate per order
         for I, w in enumerate(self.wv):
-            window = signal.tukey(len(w), alpha)
+            window = signal.windows.tukey(len(w), alpha)
             spC.append(
                     np.multiply(self.sp[I], window))
 
@@ -313,7 +377,7 @@ class Spectrum:
 
         # Interpolate per order
         for I, s in enumerate(self.sp):
-            filtered_data = sigma_clip(s, sigma_lower=np.Inf,
+            filtered_data = sigma_clip(s, sigma_lower=np.inf,
                                        sigma_upper=sigma_upper,
                                        masked=True, cenfunc='median',
                                        stdfunc=mad_std)
@@ -365,7 +429,7 @@ class Spectrum:
         assert (np.min(orders) >= 0), "Invalid order numbers"
 
         if remove:
-            x = np.setdiff(np.arange(self.n_ord), orders)
+            x = np.setdiff1d(np.arange(self.n_ord), orders)
         else:
             x = orders
 

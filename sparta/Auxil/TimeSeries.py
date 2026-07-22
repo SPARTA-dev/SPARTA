@@ -6,6 +6,8 @@
 # It is meant to be used by an Observations class, alongside a PeriodicityDetector class
 # which runs GLS and Zucker PDC and USuRPer on the data (arxiv.org/pdf/1711.06075.pdf).
 #
+# Conventions: velocities in km/s, times in BJD (days).
+#
 # A TimeSeries class stores the following methods:
 # ---------------------------------------------
 # 1) calc_rv_against_template - This function calculates radial velocity for the entire spectrum time series,
@@ -16,7 +18,7 @@
 #    given a ball-park RVs estimation.
 
 # ---------------------------------------------
-# Dependencies: os and easygui, tqdm, numpy, copy, scipy and matplotlib.
+# Dependencies: os, tqdm, numpy, copy, scipy and matplotlib.
 # Last update: Sahar Shahaf, 20220327.
 
 from sparta.UNICOR.CCF1d import CCF1d
@@ -80,8 +82,7 @@ class TimeSeries:
 
         '''
         if isinstance(spec_list[0], float):
-            assert 'RV calculation is available for spectrum time-series only'
-            return
+            raise ValueError('RV calculation is available for spectrum time-series only')
 
         calculated_vrad_list = []
         sample_size = len(spec_list)
@@ -138,26 +139,15 @@ class TimeSeries:
 
     # =============================================================================
     # =============================================================================
-    def multiorder_systematics(self, ccf_list, v0_switch=0, plot_switch=False):
-        '''
-        This function calculates radial velocity for the entire spectrum time series, using CCF against resting template.
-        Input:
-              template_spectrum: Spectrum object, a resting template of the target for CCF peak measurement
-
-        '''
-
-    # =============================================================================
-    # =============================================================================
     def plot_velocities(self, figsize=(7,7), sty='ok'):
         '''
         This function plots the time series.
         '''
         if not isinstance(self.vals[0], float):
-            assert 'plot_velocities is available for scalar values time-series only'
-            return
+            raise ValueError('plot_velocities is available for scalar values time-series only')
 
         fig, axs = plt.subplots(2, figsize=figsize)
-        if self.errors == []:
+        if len(self.errors) == 0:
             axs[0].plot(self.times, self.vals,sty)
         else:
             axs[0].errorbar(self.times, self.vals, self.errors, fmt='o')
@@ -165,7 +155,7 @@ class TimeSeries:
         axs[0].set_title("Time VS. Value")
         if self.fold_period:
             times_phased = [t % self.fold_period for t in self.times]
-            if self.errors == []:
+            if len(self.errors) == 0:
                 axs[1].plot(times_phased, self.vals, sty)
             else:
                 axs[1].errorbar(times_phased, self.vals, self.errors, fmt='o')

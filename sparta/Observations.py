@@ -1,12 +1,14 @@
 #                   ------------------------------------------
 #                     Observations.py (SPARTA Auxil class)
 #                   ------------------------------------------
-# This file defines the "Observations" class. An object of this class represents an astronomical observations
-# time series object.  It does that either by reading an entire object observation directory, or by receiving
-# a TimeSeries object when initiate.
-# This class also enables running GLS and Zucker PDC and USuRPer on the data (arxiv.org/pdf/1711.06075.pdf) using a
-# PeriodicityDetector class.
-# Directory fits reading is currently implemented for observations from HARPS, APOGEE, NRES, ELODIE and LAMOST and more.
+# This file defines the "Observations" class: an astronomical-observation time
+# series, built either by reading an entire observation directory or from an
+# existing TimeSeries object. It also drives GLS / Zucker PDC / USuRPER on the
+# data (arxiv.org/pdf/1711.06075.pdf) via a PeriodicityDetector.
+#
+# Per-instrument FITS reading lives in ReadSpec (HARPS, NRES, APOGEE, ELODIE,
+# LAMOST, and more). Conventions: wavelengths in Angstrom, velocities in km/s,
+# times in BJD (days), periodogram frequency in 1/day.
 #
 # Observations class stores the following methods:
 # ---------------------------------------------
@@ -19,21 +21,20 @@
 #                    initiate the object's PeriodicityDetector instance before using it to create periodograms.
 # 6) convert_times_to_relative_float_values -
 #                            converts the observation dates to float values, marking the days past the first visit.
-# 7) create_avg_template - This function creates a naive toy resting template, by averaging all spectrum observations.
-# 8) clean_time_series - enables systematically removing observation data.
+# 7) clean_time_series - enables systematically removing observation data.
 #
 #
-# Dependencies: os, sys, easygui, tqdm, numpy and matplotlib.
+# Dependencies: os, sys, tqdm, numpy and matplotlib.
 # Last update: Sahar Shahaf, 20220327.
 
-import os, sys
+import os
+import contextlib
 import numpy as np
 from sparta.UNICOR.Spectrum import Spectrum
 from sparta.Auxil.ReadSpec import ReadSpec
 from sparta.Auxil.TimeSeries import TimeSeries
 from sparta.Auxil.PeriodicityDetector import PeriodicityDetector
 import matplotlib.pyplot as plt
-import easygui
 from tqdm import tqdm
 
 class Observations:
@@ -44,15 +45,15 @@ class Observations:
         '''
         Input: All input is optional, and needs to be called along
                with its keyword. Below appears a list of the possible input
-               variables. In case no input was provided, the function loads
-               the directory path using easygui.
+               variables.
 
               survey: str, source name.
               min_snr: float, can be used to sort out noisy observations
               target_visits_lib: str, observation visit directory path
+                                 (required when time_series is not supplied).
               time_series: TimeSeries object, in case a direct load of TimeSeries (instead of file reading)
         '''
-        if time_series == []:
+        if not isinstance(time_series, TimeSeries):
             self.file_list = []
             self.spec_list = []
             self.time_list = []
@@ -62,10 +63,11 @@ class Observations:
             self.snr = []
             self.air_mass = []
 
-            if target_visits_lib:
-                path = target_visits_lib
-            else:
-                path = easygui.diropenbox(msg=None, title='Select ' + survey + ' dir:',)
+            if not target_visits_lib:
+                raise ValueError(
+                    "target_visits_lib is required: pass the path to the "
+                    f"{survey} visit directory.")
+            path = target_visits_lib
 
             count = 0
 
@@ -85,7 +87,7 @@ class Observations:
                 w, s, bool_mask_s, date_obs, vrad, bcv, snr, air_mass = visit.retrieve_all_spectrum_parameters()
 
                 if (snr >= min_snr or snr == -1 or min_snr == -1) and (min_avg_flux_val == -1 or min_avg_flux_val <= np.mean(s)):
-                    if visit.bcv==[]:
+                    if isinstance(visit.bcv, list):
                         bcv = 0.0
                     sp = Spectrum(wv=w, sp=s, bjd=date_obs, bcv=bcv, name=survey)
                     sp.BarycentricCorrection()
@@ -96,7 +98,7 @@ class Observations:
                     self.snr.append(snr)
                     self.air_mass.append(air_mass)
 
-                    if vrad != []:
+                    if not isinstance(vrad, list):
                         self.vrad_list.append(vrad)
 
             self.sample_size = len(self.bcv)
@@ -122,21 +124,18 @@ class Observations:
         '''
         This function conatains different pre-processing procedures applied on an observed spectrum.
         '''
-        if not verbose:
-            # Disable output
-            sys.stdout = open(os.devnull, 'w')
-
-        with tqdm(total=self.sample_size) as pbar:
-            for s in self.spec_list:
-
-                s.SpecPreProccess(Ntrim=Ntrim, CleanMargins=CleanMargins, RemoveNaNs=RemoveNaNs,
-                                delta=delta, RemCosmicNum=RemCosmicNum, FilterLC=FilterLC,
-                                FilterHC=FilterHC, alpha=alpha)
-                pbar.update(1)
-
-        if not verbose:
-            # Enable output:
-            sys.stdout = sys.__stdout__
+        # Optionally silence per-spectrum stdout via a context manager, so the
+        # real stdout is always restored (even on error) and no file handle
+        # leaks -- unlike the previous global sys.stdout reassignment.
+        with open(os.devnull, 'w') as devnull:
+            silence = contextlib.redirect_stdout(devnull) if not verbose \
+                else contextlib.nullcontext()
+            with silence, tqdm(total=self.sample_size) as pbar:
+                for s in self.spec_list:
+                    s.SpecPreProccess(Ntrim=Ntrim, CleanMargins=CleanMargins, RemoveNaNs=RemoveNaNs,
+                                      delta=delta, RemCosmicNum=RemCosmicNum, FilterLC=FilterLC,
+                                      FilterHC=FilterHC, alpha=alpha)
+                    pbar.update(1)
 
         return self
 
@@ -242,19 +241,6 @@ class Observations:
         """
         This function converts the observation dates to float values,
         marking the days past the first visit.
-        """
-        float_times = [0 for _ in range(self.sample_size)]
-        start_time = int(min(self.time_list))
-        self.first_time = start_time
-        for i, t in enumerate(self.time_list):
-            float_times[i] = (t - start_time)
-        self.time_list = float_times
-
-# =============================================================================
-# =============================================================================
-    def create_avg_template(self):
-        """
-        This function creates a naive toy resting template, by averaging all spectrum observations.
         """
         float_times = [0 for _ in range(self.sample_size)]
         start_time = int(min(self.time_list))

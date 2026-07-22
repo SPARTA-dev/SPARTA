@@ -8,36 +8,41 @@
 # ---------------------------------------------
 # A CCF1d class stores the following methods:
 # ---------------------------------------------
-# 1) CrossCorrelateSpec - Multi-order cross correlation.
-# 2) CombineCCFs - Sums the CCFs of a multi-order spectrum.
-# 3) extract_RV - Get the radial velocity and its uncertainty from maximum likelihood.
-# 4) calcBIS - Determine full-with-half-maximum of a peaked set of points, x and y.
-# 5) subpixel_CCF - Using a second order approximation to estimate the ccf at a given velocity.
-# 6) correlate1d - A wrapper of the jitted one-dimensional correlation
-# 7) plotCCFs - Produces plots of the calculated CCFs
+# 1) CrossCorrelateSpec - multi-order cross-correlation of a spectrum vs a template.
+# 2) CombineCCFs        - combine the per-order CCFs (Zucker 2003 maximum likelihood).
+# 3) extract_RV         - radial velocity + uncertainty from the CCF peak.
+# 4) calcBIS            - bisector span (BIS) of the (single-peaked) CCF.
+# 5) subpixel_CCF       - parabolic sub-pixel estimate of the CCF peak / value.
+# 6) plotCCFs           - plot the per-order and combined CCFs.
 #
+# The velocity-space cross-correlation itself lives in sparta.spectral_ops
+# (ccf_vs_velocity); this class handles multi-order orchestration, RV/error
+# extraction, combination, and BIS.
 #
-# Dependencies: scipy, numpy, astropy, numba, matplotlib and copy.
+# Conventions: radial velocities in km/s; the CCF is computed on a log-lambda
+# (velocity-even) grid.
+#
+# Dependencies: scipy, numpy, astropy, matplotlib and copy.
 # Last update: Avraham Binnenfeld, 20210510.
 
 
 from scipy import interpolate
-from scipy.signal import correlate
 import numpy as np
 from astropy import constants as consts, units as u
-from numba import njit
 import matplotlib.pyplot as plt
 from copy import deepcopy
+from sparta import spectral_ops
 
 class CCF1d:
     # =============================================================================
     # =============================================================================
     def __init__(self):
         '''
-        No input required.
-        Some defaults are set...
+        No input required. Sets the speed of light ``self.c`` (km/s) and the
+        default CCF velocity step ``self.default_dv`` (0.1 km/s), used when a
+        spectrum carries no log-lambda grid step of its own.
         '''
-        self.c = consts.c.to('km/s') # The speed of light in km/sec
+        self.c = consts.c.to('km/s')  # speed of light, km/s
         self.default_dv = 0.1 * u.kilometer / u.second
 
     # =============================================================================
@@ -78,93 +83,56 @@ class CCF1d:
         if dv is None:
             try:
                 dv = self.Info['GridDelta']
-            except:
+            except (AttributeError, KeyError):
                 dv = self.default_dv
-
         elif type(dv) is not u.quantity.Quantity:
             dv = float(dv) << u.kilometer / u.second
 
         if type(VelBound) is not u.quantity.Quantity:
             VelBound = np.array(VelBound) << dv.unit
 
-        if VelBound.size == 2:
-            Vi, Vrange = np.min(VelBound), np.abs(np.diff(VelBound))
-        elif VelBound.size == 1:
-            Vi, Vrange = -np.abs(VelBound), np.abs(2*VelBound)
+        # Symmetric velocity half-range for the CCF scan (both signs valid).
+        vmax = np.max(np.abs(VelBound))
 
-        # In case that the spectum is not logarithmically spaced,
-        # it must be interpolated to a logarithmically evenly-spaced
-        # grid. The parameter of the grid is dv [km/s].
-        if ('GridType' not in spec.Info) or ('GridDelta' not in spec.Info) or spec.Info['GridType'] == 'linear':
+        # Ensure the observed spectrum is on a log-lambda (velocity-even) grid.
+        if spec.Info.get('GridType') != 'log':
             spec.InterpolateSpectrum(delta=dv, InterpMethod='log')
+        dv = spec.Info['GridDelta']
 
-        # If the data is already logarithmically spaced, then read the dv
-        # of the wavelegth grid (used to set the velocity axis of the CCF)
-        elif spec.Info['GridType'] == 'log':
-            dv = spec.Info['GridDelta']
-        else:
-            if spec.Info['GridType'] == 'linear':
-                spec.InterpolateSpectrum(dv, InterpMethod='log')
-                spec.Info['GridDelta'] = dv
-                spec.Info['GridUnits'] = 'velocity'
-            elif spec.Info['GridDelta'] != dv:
-                spec.InterpolateSpectrum(dv, InterpMethod='log')
-                spec.Info['GridDelta'] = dv
-                spec.Info['GridUnits'] = 'velocity'
-
-        # The cross correlation is performed on a velociry range defined by
-        # the user. The range is converted to a number of CCF lags, using
-        # the velocity spacing dv. Default is 100 km/s.
-        Nlags = np.floor((Vrange/dv).decompose().value)
+        dv_kms = dv.to(u.km / u.s).value
+        vmax_kms = u.Quantity(vmax, dv.unit).to(u.km / u.s).value
 
         Nord = len(spec.wv)
-
-        # Calculate the velocity from the lags
-        V = Vi + dv * np.arange(Nlags+1)
-
-        # Initialize arrays
-        corr = np.full((len(spec.wv), len(V)), np.nan)
-        RV = np.full((len(spec.wv), 1), np.nan)
-        eRV = np.full((len(spec.wv), 1), np.nan)
-        SpecCorr = np.full((len(spec.wv), 1), np.nan)
+        RV = np.full((Nord, 1), np.nan)
+        eRV = np.full((Nord, 1), np.nan)
+        SpecCorr = np.full((Nord, 1), np.nan)
+        V, corr = None, None
 
         for I, w in enumerate(spec.wv):
-            # In order for the CCF to be normalized to the [-1,1] range
-            # the signals must be divided by their standard deviation.
             s = spec.sp[I]
 
-            # Interpolate the template to the wavelength scale of the
-            # observations. We assume here that the template is broadened
-            # to match the width of the observed line profiles.
-            interpX = (np.asarray(template.model.wv[I][:]) *
-                       (1+((Vi/self.c).decompose()).value))
+            # Resample the template onto the SAME grid as the observation, so
+            # the cross-correlation is equal-length and symmetric. The legacy
+            # code truncated the template to a shifted sub-grid, which made
+            # only negative velocities recoverable (see KNOWN_TRAPS.md).
+            spT = spectral_ops.resample(np.asarray(template.model.wv[I]),
+                                        np.asarray(template.model.sp[I]), w)
 
-            interpY = np.asarray(template.model.sp[I][:])
+            v_kms, C = spectral_ops.ccf_vs_velocity(spT, s, dv_kms, vmax_kms)
 
-            InterpF = interpolate.interp1d(interpX,
-                                           interpY,
-                                           kind='quadratic')
+            if V is None:
+                V = v_kms << (u.km / u.s)
+                corr = np.full((Nord, len(v_kms)), np.nan)
 
-            GridChoice = np.logical_and(w > np.min(interpX),
-                                        w < np.max(interpX))
-            wGrid = np.extract(GridChoice, w)
-            spT = InterpF(wGrid)
-
-            # The data and the template are cross-correlated.
-            # We assume that the wavelengths are logarithmically-evenly spaced
-            C = self.correlate1d(spT, s, Nlags+1, fastccf=fastccf)
-
-            # Find the radial velocity by fitting a parabola to the CCF peaks
+            # Find the radial velocity by fitting a parabola to the CCF peak.
             try:
                 if err_per_ord:
-                    # Calculate the uncertainty of each order (if required)
-                    vPeak, vPeakErr, ccfPeak, vUnit = self.extract_RV(V, C, n_ord=1)
+                    vPeak, vPeakErr, ccfPeak, _ = self.extract_RV(V, C, n_ord=1)
                 else:
                     vPeak, ccfPeak = self.subpixel_CCF(V, C)
-                    vPeakErr = np.NaN
-
-            except:
-                vPeak, vPeakErr, ccfPeak = np.NaN, np.NaN, np.NaN
+                    vPeakErr = np.nan
+            except Exception:
+                vPeak, vPeakErr, ccfPeak = np.nan, np.nan, np.nan
 
             corr[I, :] = C
             RV[I] = vPeak
@@ -200,8 +168,10 @@ class CCF1d:
         NOTE: the number of lags is assumed to be identical for all orders
         '''
 
-        # Arrage the correlation matrix
-        CorrMat = self.Corr['corr']
+        # Arrage the correlation matrix. Clip to [-1, 1] so a per-order value
+        # that overshoots numerically cannot drive 1 - C**2 negative (which
+        # would make the combined CCF NaN).
+        CorrMat = np.clip(self.Corr['corr'], -1.0, 1.0)
         velocities = self.Corr['vel']
 
         # Read the number of orders in the spectrum
@@ -222,7 +192,7 @@ class CCF1d:
                 'units': vUnit,
                 'peakCorr': CorrPeak}
 
-        except:
+        except Exception:
             self.CorrCombined = {
                 'vel': velocities,
                 'corr': CombinedCorr,
@@ -257,9 +227,13 @@ class CCF1d:
         spl = interpolate.UnivariateSpline(x.value, y, k=4, s=0)
         spl_vv = spl.derivative(n=2)
 
-        # Calculate the uncertainty:
+        # Calculate the uncertainty. The variance is -1 / (ml_factor*Nord*Nvels)
+        # and is only real at a true CCF maximum (ml_factor < 0); guard the
+        # degenerate cases rather than emitting a silent NaN from sqrt().
         ml_factor = spl_vv(RV) * spl(RV) / (1 - spl(RV)**2)
-        eRV = np.sqrt(-(ml_factor*Nord*Nvels)**(-1))
+        denom = ml_factor * Nord * Nvels
+        var = -1.0 / denom if denom != 0 else np.nan
+        eRV = np.sqrt(var) if (np.isfinite(var) and var > 0) else np.nan
 
         if type(x) is u.quantity.Quantity:
             xUnit = x.unit
@@ -355,27 +329,6 @@ class CCF1d:
 
     # =============================================================================
     # =============================================================================
-    def correlate1d(self, template, signal, maxlag=None, fastccf=False):
-        '''
-        This is a wrapper of the jitted one-dimensional correlation
-        :param template: template (model) that will be compared to the signal.
-        :param signal: measured signal.
-        :param maxlag: maximum number of lags to calculate.
-        :return: the correlation values.
-        '''
-
-        if maxlag is None:
-            maxlag = 1
-        maxlag = np.int(np.minimum(signal.shape[0], maxlag))
-        # maxlag = np.int(np.minimum(t.shape[0], maxlag))
-        if not fastccf:
-            C = __correlate1d__(template, signal, maxlag)
-        else:
-            C = __correlate1d_fast__(template, signal, maxlag)
-        return C
-
-    # =============================================================================
-    # =============================================================================
     def plotCCFs(self, PlotCombined=True, PlotSingleOrds=True, ords=None, alpha=0.125, **kwargs):
         '''
         Produce plots of the calculated CCFs.
@@ -410,46 +363,3 @@ class CCF1d:
         plt.grid()
 
         return fig
-
-
-@njit
-def __correlate1d__(template, signal, maxlag):
-    """
-    Compute correlation of two signals defined at uniformly-spaced points.
-
-    The correlation is defined only for positive lags. The zero shift is represented as 1 lag.
-    The input arrays represent signals sampled at evenly-spaced points.
-
-    Arguments:
-    :param template: the template (model) that is compared to the observed signal
-    :param signal: the observed signal
-    :param maxlag: maximum number of lags to calculate.
-    :return: an array with Pearsons correlation for each lag.
-    """
-
-    # Initialize an empty array
-    C = np.full(maxlag, np.nan)
-
-    # Calculate the cross-correlation
-    for lag in range(C.size):
-        template_max = np.minimum(signal.size - lag, template.size)
-        signal_max = np.minimum(signal.size, template.size + lag)
-        C[lag] = np.sum(template[:template_max] * signal[lag:signal_max])
-
-    # Calculate the normalization factor
-    normFac = np.sqrt((template**2).sum() * (signal**2).sum())
-    return C/normFac
-
-
-def __correlate1d_fast__(template, signal, maxlag):
-    """
-    :param template: the template (model) that is compared to the observed signal
-    :param signal: the observed signal
-    :param maxlag: maximum number of lags to calculate
-    :return: an array of Pearsons correlation for each lag
-    """
-    FC = correlate(signal, template, mode='full', method='fft')
-    normFac = np.sqrt((template**2).sum() * (signal**2).sum())
-    N = len(template) - 1
-    C = FC[N: N+maxlag]
-    return C/normFac

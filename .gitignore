@@ -21,3 +21,12 @@ Thumbs.db
 examples/Binni/
 examples/res/
 sparta/UNICOR/template_files/
+*.zip
+
+# Claude Code assistant scaffolding — private working context, not for the
+# public repo. Kept on disk locally; never committed/pushed.
+.claude/
+CLAUDE.md
+PROJECT_LOG.md
+KNOWN_TRAPS.md
+MEMORY.md

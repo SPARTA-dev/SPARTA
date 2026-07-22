@@ -1,100 +1,76 @@
 #                   -----------------------------------------------
 #                     USuRPer_functions.py (SPARTA USuRPer file)
 #                   -----------------------------------------------
-# This file defines the functions necessary for Zucker PDC / USuRPer calculation (arxiv.org/pdf/1711.06075.pdf).
-# It is being used inside an overall calculation method inside the PeriodicityDetector class.
+# Functions for the Zucker phase-distance-correlation (PDC) periodogram and its
+# unit-sphere representation, USuRPER (arxiv.org/pdf/1711.06075.pdf). Called by
+# the PeriodicityDetector class.
 #
-# This file stores the following methods:
-# ---------------------------------------------
+# Distance-correlation core:
+#   inner_prod               - U-centered inner product, normalized by 1/(n(n-3)).
+#   norm_z                   - part of one U-centered matrix orthogonal to another.
+#   unbiased_u_centering     - unbiased U-centering of a distance matrix (zero diagonal).
+#   calc_PDC                 - biased PDC value at one frequency.
+#   calc_PDC_unbiased        - unbiased PDC value at one frequency.
+#   calc_pdc_distance_matrix - build and U-center the value/phase distance matrices.
 #
-# 1) calc_pdc_distance_matrix - resamples the spectrum on a linear or logarithmic scale
-# 2) calc_PDC_unbiased - calculates the unbiased PDC value for a given frequency.
-# 3) calc_PDC - calculates the PDC value for a given frequency.
+# Spectrum helpers (USuRPER; single-order):
+#   get_wv_grid, resample_spec_to_common_grid, _gram.
 #
+# Conventions: times in days, frequency in 1/day. U-centering uses 1/(n(n-3))
+# and /(n-2), /(n-1) factors -- singular for n <= 3. The pairwise distance
+# matrices are vectorized (broadcasting / a BLAS Gram product).
+#
+# Dependencies: numpy, sparta.spectral_ops.
 # Last update: Sahar Shahaf, 20220915
 
 import numpy as np
-from sparta.UNICOR import Template
-from numba import njit
+from sparta import spectral_ops
 
 
 # =============================================================================
 # =============================================================================
-class USURPER:
-
-    def inner_prod(self, a, b):
-        return inner_prod(a, b)
-
-    def calc_PDC(self, periodicity_detector, f):
-        return calc_PDC(periodicity_detector, f)
-
-    def calc_PDC_unbiased(self, periodicity_detector, f):
-        return calc_PDC_unbiased(periodicity_detector, f)
-
-    def calc_pdc_distance_matrix(self, periodicity_detector, calc_biased_flag, calc_unbiased_flag):
-        return calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbiased_flag)
-
-
-# =============================================================================
-# =============================================================================
-@njit
 def inner_prod(a, b):
     '''
-    :param a: U-centered matrix (numpy)
-    :param b: U-centered matrix (numpy)
-    :return: calculate the inner product of two distance matrices.
+    Unbiased U-centered inner product of two distance matrices.
+
+    :param a: U-centered distance matrix (n x n numpy array).
+    :param b: U-centered distance matrix (n x n numpy array).
+    :return: float, sum(a*b) / (n*(n-3)).
     '''
-
     n = len(a)
-    mat = np.multiply(a,b)
-    sum_bin = np.sum(mat)
-    res = 1 / (n * (n - 3)) * sum_bin
-
-    return res
+    return np.sum(a * b) / (n * (n - 3))
 
 
-@njit
 def norm_z(a, b):
     '''
-    :param a: U-centered matrix (numpy)
-    :param b: U-centered matrix (numpy)
-    :return: the part of a which is orthogonal to b.
+    The component of ``a`` orthogonal to ``b`` under the U-centered inner
+    product (used to build the partial / semi-partial distance correlation).
+
+    :param a: U-centered distance matrix (n x n numpy array).
+    :param b: U-centered distance matrix (n x n numpy array).
+    :return: a - (<a,b>/<b,b>) * b.
     '''
     factor = inner_prod(a, b) / inner_prod(b, b)
-    return a - factor*b
+    return a - factor * b
 
 
-
-@njit
 def unbiased_u_centering(a, n):
     '''
-    :param a: U-centered matrix (numpy nXn array)
+    :param a: distance matrix (numpy nXn array)
     :param n: integer (length of a...)
-    :return: U-center a distance matrix
+    :return: U-centered distance matrix (unbiased; zero diagonal)
     '''
-    # Sum of rows
-    v2_vec = np.array([np.sum(x) / (n - 2) for x in a])
-    v2     = v2_vec.repeat(n).reshape((-1, n))
-
-    # Sum of cols
-    v3_vec = np.array([np.sum(x) / (n - 2) for x in a.T])
-    v3 = v3_vec.repeat(n).reshape((-1, n)).T
-
-    # Total sum
-    tot_sum = np.sum(v3_vec)/(n-1)
-    v4 = np.full((n, n), tot_sum)
-
-    # Do the U-centering and make sure that the diagonal is zero.
-    mat_unbiased = a - v2 - v3 + v4
-    for i in np.arange(n):
-        mat_unbiased[i,i] = 0
-
+    a = np.asarray(a, float)
+    row_sum = a.sum(axis=1) / (n - 2)
+    col_sum = a.sum(axis=0) / (n - 2)
+    tot_sum = col_sum.sum() / (n - 1)
+    mat_unbiased = a - row_sum[:, None] - col_sum[None, :] + tot_sum
+    np.fill_diagonal(mat_unbiased, 0.0)
     return mat_unbiased
 
 
 # =============================================================================
 # =============================================================================
-@njit
 def calc_PDC(periodicity_detector, f):
     '''
     This function calculates the PDC value for a given frequency.
@@ -104,32 +80,21 @@ def calc_PDC(periodicity_detector, f):
     '''
 
     z = np.array([periodicity_detector.time_series.times])
-    mat_phase_delta = z.T - z
-    mat_phase_delta = mat_phase_delta % (1 / f)
-
+    mat_phase_delta = (z.T - z) % (1 / f)
     b = mat_phase_delta * (1 / f - mat_phase_delta)
 
     b_mean_x = np.mean(b, axis=0)
     b_mean_y = np.mean(b, axis=1)
     b_mean_total = np.mean(b)
 
-    mat_B = [[b[i][j] - b_mean_x[i] - b_mean_y[j] + b_mean_total for i in range(periodicity_detector.time_series.size)] for j in
-             range(periodicity_detector.time_series.size)]
+    # Double-centering of b, arranged to match the original [j][i] indexing:
+    # B[j, i] = b[i, j] - b_mean_x[i] - b_mean_y[j] + b_mean_total.
+    A = np.asarray(periodicity_detector.pdc_mat_A)
+    B = b.T - b_mean_x[None, :] - b_mean_y[:, None] + b_mean_total
 
-    # numerator part
-    A = np.array(periodicity_detector.pdc_mat_A)
-    B = np.array(mat_B)
-    num = np.sum(np.multiply(A, B))
-
-    # denominators part
-    den_A = np.sum(A ** 2)
-    den_B = np.sum(B ** 2)
-
-    den = np.sqrt(den_A * den_B)
-
-    res = num / den
-
-    return res
+    num = np.sum(A * B)
+    den = np.sqrt(np.sum(A ** 2) * np.sum(B ** 2))
+    return num / den
 
 
 # =============================================================================
@@ -178,6 +143,17 @@ def calc_PDC_unbiased(periodicity_detector, f):
 
 # =============================================================================
 # =============================================================================
+def _gram(sp_matrix):
+    '''Pairwise inner products of the (L2-normalized, bounded) spectrum columns.
+
+    Apple's Accelerate BLAS raises spurious FP-exception flags during matmul
+    under numpy>=2 even for finite, small inputs; the Gram of unit vectors is
+    bounded in [-1, 1] so a real exception is impossible. Silence the flags.
+    '''
+    with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+        return sp_matrix.T @ sp_matrix
+
+
 def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbiased_flag, reverse_existing=False, errors=False):
     '''
     This function calculates the distance matrix used for the PDC calculation.
@@ -198,66 +174,60 @@ def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbias
         if (periodicity_detector.method.split('_')[0] == "shift") or (periodicity_detector.method.split('_')[0] == "shape"):
             for i, s in enumerate(periodicity_detector.time_series.vals):
                 vel_tmp = periodicity_detector.time_series.calculated_vrad_list[i]
-                periodicity_detector.time_series.vals[i].wv[0] = Template().doppler(-vel_tmp, s.wv[0])
+                periodicity_detector.time_series.vals[i].wv[0] = spectral_ops.doppler_shift_wave(s.wv[0], -vel_tmp)
             sp_matrix =  resample_spec_to_common_grid(periodicity_detector.time_series.vals, factor=1)
 
-        for i, i_val in enumerate(periodicity_detector.time_series.vals):
-            for j, j_val in enumerate(periodicity_detector.time_series.vals):
-                if i > j:
-                    a[i,j] = a[j,i]
-                    c[i,j] = c[j,i]
-                elif i == j:
-                    pass
-                else:
-                    if periodicity_detector.method == 'PDC':
-                        if type(i_val) == tuple:
-                            l = j_val[3]
-                            
-                            temp = 0
-                            temp = temp + np.sqrt(i_val[2]**2 - 2 * i_val[2]*j_val[2]*np.cos((i_val[1] - j_val[1])) + j_val[2]**2
-                                                  + l*(i_val[2] + j_val[2])*np.sin((i_val[1] - j_val[1])) + 0.5 * l * l * (1 + np.cos((i_val[1] - j_val[1]))))
-                            temp = temp + np.sqrt(i_val[2]**2 - 2 * i_val[2]*j_val[2]*np.cos((i_val[1] - j_val[1])) + j_val[2]**2
-                                                  + l*(i_val[2] - j_val[2])*np.sin((i_val[1] - j_val[1])) + 0.5 * l * l * (1 - np.cos((i_val[1] - j_val[1]))))
-                            temp = temp + np.sqrt(i_val[2]**2 - 2 * i_val[2]*j_val[2]*np.cos((i_val[1] - j_val[1])) + j_val[2]**2
-                                                  - l*(i_val[2] - j_val[2])*np.sin((i_val[1] - j_val[1])) + 0.5 * l * l * (1 - np.cos((i_val[1] - j_val[1]))))
-                            temp = temp + np.sqrt(i_val[2]**2 - 2 * i_val[2]*j_val[2]*np.cos((i_val[1] - j_val[1])) + j_val[2]**2
-                                                  - l*(i_val[2] + j_val[2])*np.sin((i_val[1] - j_val[1])) + 0.5 * l * l * (1 + np.cos((i_val[1] - j_val[1]))))
+        method = periodicity_detector.method
+        vals = periodicity_detector.time_series.vals
 
-                            a[i][j] = temp / 2 - l
-                        else:
-                            if errors:
-                                from scipy import special
-                                y1 = i_val
-                                y2 = j_val
-                                e1 = periodicity_detector.time_series.errors[i]
-                                e2 = periodicity_detector.time_series.errors[j]
-    
-                                den = np.sqrt(2 * (e1 ** 2 + e2 ** 2))
-    
-                                x = (y1 - y2) / den
-                                y = (e1 + e2) / den
-    
-                                e = np.sqrt(e1 ** 2 + e2 ** 2) * (math.exp(-x ** 2) + x * special.erf(x) - y)
-    
-                                a[i][j] = np.sqrt(e)
-                            else:
-                                a[i,j] = abs(i_val - j_val)
+        if method == 'USURPER':
+            # Pairwise zero-lag correlations at once: the Gram matrix of the
+            # (L2-normalized) resampled spectra. d = sqrt(2*(1-corr)).
+            gram = _gram(sp_matrix)
+            a = np.sqrt(np.clip(1.0 - gram, 0.0, None)) * np.sqrt(2)
+            np.fill_diagonal(a, 0.0)
 
-                    elif periodicity_detector.method == 'USURPER':
-                        ccf_val = np.sum(sp_matrix[:,i]*sp_matrix[:,j])
-                        a[i,j] = np.sqrt(1 - ccf_val) * np.sqrt(2)
+        elif method.split('_')[0] in ("shift", "shape"):
+            vr = np.asarray(periodicity_detector.time_series.calculated_vrad_list, float)
+            a = np.abs(vr[:, None] - vr[None, :])
+            gram = _gram(sp_matrix)
+            c = np.sqrt(np.clip(1.0 - gram, 0.0, None)) * np.sqrt(2)
+            np.fill_diagonal(c, 0.0)
 
-                    elif (periodicity_detector.method.split('_')[0] == "shift") or (periodicity_detector.method.split('_')[0] == "shape"):
-                        a[i,j] = abs(periodicity_detector.time_series.calculated_vrad_list[i] -
-                                            periodicity_detector.time_series.calculated_vrad_list[j])
-                        ccf_val = np.sum(sp_matrix[:, i] * sp_matrix[:, j])
-                        c[i,j] = np.sqrt(1 - ccf_val) * np.sqrt(2)
+        elif method == 'PDC':
+            if len(vals) and isinstance(vals[0], tuple):
+                # Partial distance correlation on (..., phase, amp, l) tuples.
+                # Kept as an explicit loop: complex, rarely used, and untested.
+                for i in range(n):
+                    for j in range(i + 1, n):
+                        i_val, j_val = vals[i], vals[j]
+                        l = j_val[3]
+                        dphi = i_val[1] - j_val[1]
+                        cos, sin = np.cos(dphi), np.sin(dphi)
+                        base = i_val[2] ** 2 - 2 * i_val[2] * j_val[2] * cos + j_val[2] ** 2
+                        temp = (np.sqrt(base + l * (i_val[2] + j_val[2]) * sin + 0.5 * l * l * (1 + cos))
+                                + np.sqrt(base + l * (i_val[2] - j_val[2]) * sin + 0.5 * l * l * (1 - cos))
+                                + np.sqrt(base - l * (i_val[2] - j_val[2]) * sin + 0.5 * l * l * (1 - cos))
+                                + np.sqrt(base - l * (i_val[2] + j_val[2]) * sin + 0.5 * l * l * (1 + cos)))
+                        a[i, j] = a[j, i] = temp / 2 - l
+            elif errors:
+                from scipy import special
+                y = np.asarray(vals, float)
+                err = np.asarray(periodicity_detector.time_series.errors, float)
+                y1, y2 = y[:, None], y[None, :]
+                e1, e2 = err[:, None], err[None, :]
+                den = np.sqrt(2 * (e1 ** 2 + e2 ** 2))
+                x = (y1 - y2) / den
+                yv = (e1 + e2) / den
+                ev = np.sqrt(e1 ** 2 + e2 ** 2) * (np.exp(-x ** 2) + x * special.erf(x) - yv)
+                a = np.sqrt(np.clip(ev, 0.0, None))
+                np.fill_diagonal(a, 0.0)
+            else:
+                y = np.asarray(vals, float)
+                a = np.abs(y[:, None] - y[None, :])
 
-
-        if periodicity_detector.method == 'shape_periodogram':
-            temp = a.copy()
-            a = c.copy()
-            c = temp.copy()
+        if method == 'shape_periodogram':
+            a, c = c.copy(), a.copy()
 
     else:
 
@@ -320,9 +290,7 @@ def resample_spec_to_common_grid(sp_list, factor):
     wv_grid   = get_wv_grid(sp_list, factor)
     sp_matrix = np.zeros((len(wv_grid), len(sp_list)))
     for i, s in enumerate(sp_list):
-        sp_tmp  = np.interp(wv_grid, s.wv[0], s.sp[0])
-        sp_tmp  = sp_tmp - np.mean(sp_tmp)
-        sp_tmp  = sp_tmp/np.sqrt( (sp_tmp**2).sum())
-        sp_matrix[:, i] = sp_tmp
+        sp_tmp = spectral_ops.resample(s.wv[0], s.sp[0], wv_grid)
+        sp_matrix[:, i] = spectral_ops.normalize(sp_tmp)
     return sp_matrix
 

@@ -6,15 +6,17 @@
 #
 # A PeriodicityDetector class stores the following methods:
 # ---------------------------------------------
-# 1) run_PDC_process - an 'overall' procedure runs the entire Zucker PDC calculation process
-#                      using USuRPer_functions.py functions.
-# 2) run_USURPER_process - an 'overall' procedure runs the entire Zucker USuRPer calculation process
-#                      using USuRPer_functions.py functions.
-# 3) calc_partial_periodogram - an 'overall' procedure runs the partial PDC.
-# 4) run_GLS_process - runs the GLS calculation process.
-# 5) plot_periodograms - plots the calculated periodograms.
+# 1) calc_PDC                 - run the full Zucker PDC over the frequency grid
+#                               (uses USURPER_functions).
+# 2) calc_USURPER             - run the full USuRPER (high-dimensional PDC).
+# 3) calc_partial_periodogram - run the partial (shift/shape) PDC.
+# 4) calc_GLS                 - run the generalized Lomb-Scargle periodogram.
+# 5) calc_pdc_pval            - PDC peak p-value and its inverse (Shen et al. 2019).
+# 6) plot_periodograms        - plot the calculated periodograms.
 #
-# Dependencies: numpy, astropy, matplotlib, copy and random.
+# Conventions: times in days, frequency grid in 1/day.
+#
+# Dependencies: numpy, astropy, scipy and matplotlib.
 # Last update: Sahar Shahaf, 20220327.
 
 import numpy as np
@@ -40,7 +42,7 @@ class PeriodicityDetector:
         '''
         if 'time_series' in kwargs:
             self.time_series = kwargs['time_series']
-        if 'freq_range' and 'periodogram_grid_resolution' in kwargs:
+        if all(k in kwargs for k in ('freq_range', 'periodogram_grid_resolution')):
             self.periodogram_grid_resolution = kwargs['periodogram_grid_resolution']
             self.freq_range = kwargs['freq_range']
             self.period_truth = None
@@ -87,13 +89,12 @@ class PeriodicityDetector:
 
         if isinstance(self.time_series.vals[0], float) or isinstance(self.time_series.vals[0], tuple) or isinstance(self.time_series.vals[0], list):
             self.method = "PDC"
-        elif self.time_series.calculated_vrad_list != []:
+        elif len(self.time_series.calculated_vrad_list) != 0:
             self.method = "PDC"
             temp = self.time_series.vals.copy()
             self.time_series.vals = self.time_series.calculated_vrad_list
         else:
-            assert 'PDC is available for scalar time-series only'
-            return
+            raise ValueError('PDC is available for scalar time-series only')
 
 
         self.biased_PDC_flag = calc_biased_flag
@@ -132,8 +133,7 @@ class PeriodicityDetector:
         if not isinstance(self.time_series.vals[0], float):
             self.method = "USURPER"
         else:
-            assert 'USURPER is available for spectrum time-series only'
-            return
+            raise ValueError('USURPER is available for spectrum time-series only')
 
         self.biased_PDC_flag = calc_biased_flag
         self.unbiased_PDC_flag = calc_unbiased_flag
@@ -172,8 +172,7 @@ class PeriodicityDetector:
             elif partial_type == "shape":
                 self.method = "shape_periodogram"
         else:
-            assert 'Partial_periodogram is available for spectrum time-series only'
-            return
+            raise ValueError('Partial_periodogram is available for spectrum time-series only')
 
         calc_pdc_distance_matrix(self, calc_biased_flag=False, calc_unbiased_flag=True, reverse_existing=reverse_existing)
 
@@ -193,11 +192,10 @@ class PeriodicityDetector:
         if isinstance(self.time_series.vals[0], float):
             self.GLS_power = LombScargle(self.time_series.times, self.time_series.vals).power(self.GLS_frequency)
         else:
-            if self.time_series.calculated_vrad_list != []:
+            if len(self.time_series.calculated_vrad_list) != 0:
                 self.GLS_power = LombScargle(self.time_series.times, self.time_series.calculated_vrad_list).power(self.GLS_frequency)
             else:
-                assert 'GLS is possible for scalar time-series only'
-                return
+                raise ValueError('GLS is possible for scalar time-series only')
 
         self.GLS_flag = True
 
@@ -269,7 +267,7 @@ class PeriodicityDetector:
             if isinstance(self.time_series.vals[0], float):
                 v_list = self.time_series.vals
             else:
-                if self.time_series.calculated_vrad_list != []:
+                if len(self.time_series.calculated_vrad_list) != 0:
                     v_list = self.time_series.calculated_vrad_list
 
             axs[index, 0].scatter(times_folded, v_list, alpha=0.6)

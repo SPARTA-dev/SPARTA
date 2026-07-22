@@ -97,8 +97,9 @@ setup(
 		# that you indicate you support Python 3. These classifiers are *not*
 		# checked by 'pip install'. See instead 'python_requires' below.
 		'Programming Language :: Python :: 3',
-		'Programming Language :: Python :: 3.7',
-		'Programming Language :: Python :: 3.8',
+		'Programming Language :: Python :: 3.9',
+		'Programming Language :: Python :: 3.10',
+		'Programming Language :: Python :: 3.11',
 		'Programming Language :: Python :: 3 :: Only',
 	],
 
@@ -128,7 +129,7 @@ setup(
 	# 'Programming Language' classifiers above, 'pip install' will check this
 	# and refuse to install the project if the version does not match. See
 	# https://packaging.python.org/guides/distributing-packages-using-setuptools/#python-requires
-	python_requires='>=3.7, <4',
+	python_requires='>=3.9, <4',
 
 	# This field lists other packages that your project depends on to run.
 	# Any package you put here will be installed by pip when your project is
@@ -137,14 +138,13 @@ setup(
 	# For an analysis of "install_requires" vs pip's requirements files see:
 	# https://packaging.python.org/en/latest/requirements.html
 	install_requires=[
-		'astropy>=4.0.1.post1',
-		'colorama>=0.4.3',
-		'numba>=0.48.0',
-		'numpy>=1.18.1',
-		'pandas>=1.0.3',
-		'PyAstronomy>=0.14.0',
-		'scipy>=1.4.1',
-		'tqdm'
+		'astropy>=5.0',
+		'matplotlib>=3.5',
+		'numpy>=1.24',
+		'pandas>=1.3',
+		'scipy>=1.10',
+		'specutils>=2.0',
+		'tqdm',
 	],  # Optional
 
 	# List additional groups of dependencies here (e.g. development
@@ -155,10 +155,9 @@ setup(
 	#
 	# Similar to `install_requires` above, these must be valid existing
 	# projects.
-	# extras_require={  # Optional
-	#	'dev': ['check-manifest'],
-	#	'test': ['coverage'],
-	#},
+	extras_require={  # Optional
+		'test': ['pytest'],
+	},
 
 	# If there are data files included in your packages that need to be
 	# installed, specify them here.
