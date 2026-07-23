@@ -12,23 +12,23 @@
 # ---------------------------------------------
 # 1) calc_rv_against_template - This function calculates radial velocity for the entire spectrum time series,
 #                               using CCF against resting template
-# 2) getBIS - Calculates the time series BIS, from the calculated CCFs.
-# 3) plot_velocities - plots the time series velocities.
-# 4) TIRAVEL - Implements Zucker & Mazeh 2006 TIRAVEL, enabling template-independent radial velocities measurement
-#    given a ball-park RVs estimation.
+# 2) calc_rv_against_two_templates - The double-lined (SB2) counterpart: TODCOR
+#    against two templates, one (v1, v2) fit per epoch.
+# 3) getBIS - Calculates the time series BIS, from the calculated CCFs.
+# 4) plot_velocities - plots the time series velocities.
+# 5) build_tiravel_template - Zucker & Mazeh 2006 TIRAVEL: builds a template out
+#    of the observations themselves, given a set of trial velocities.
 
 # ---------------------------------------------
-# Dependencies: os, tqdm, numpy, copy, scipy and matplotlib.
+# Dependencies: os, tqdm, numpy and matplotlib.
 # Last update: Sahar Shahaf, 20220327.
 
 from sparta.UNICOR.CCF1d import CCF1d
+from sparta.TODCOR.CCF2d import CCF2d
+from sparta.TIRAVEL.TIRAVEL import TIRAVEL
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-from sparta.UNICOR.Template import Template
-from numpy import linalg as LA
-from copy import deepcopy
-from scipy import interpolate
 
 
 class TimeSeries:
@@ -106,6 +106,53 @@ class TimeSeries:
 
     # =============================================================================
     # =============================================================================
+    def calc_rv_against_two_templates(self, spec_list, template1, template2,
+                                      dv=0.1, VelBound=150, dvel=None,
+                                      sigma=1.0, nonneg=True, **kwargs):
+        '''
+        Double-lined counterpart of calc_rv_against_template: a TODCOR fit of
+        both components against two resting templates, one per observation.
+
+        Each epoch is fitted independently -- orbital motion changes (v1, v2),
+        so epochs must never be pooled (only the orders *within* one epoch are,
+        which CCF2d does internally).
+
+        :param: spec_list - a list of Spectrum objects, with the observed data.
+        :param: template1, template2 - Template objects for the primary and the
+                                       secondary component.
+        :param: dv, VelBound, dvel, sigma, nonneg - parameters of the CCF2d
+                                       CrossCorrelateSpec routine, see the
+                                       documentation therein. Remaining keyword
+                                       arguments are passed through -- including
+                                       keep_windows, which defaults to False
+                                       here (retaining spectrum-sized arrays for
+                                       every epoch is what fills memory).
+
+        :return: ccfs - a list of CCF2d objects, one per observation.
+        '''
+        if isinstance(spec_list[0], float):
+            raise ValueError('RV calculation is available for spectrum time-series only')
+
+        kwargs.setdefault('keep_windows', False)
+
+        ccfs = []
+        with tqdm(total=len(spec_list)) as pbar:
+            for spec in spec_list:
+                ccfs.append(CCF2d().CrossCorrelateSpec(spec_in=spec,
+                                                       template1_in=template1,
+                                                       template2_in=template2,
+                                                       dv=dv,
+                                                       VelBound=VelBound,
+                                                       dvel=dvel,
+                                                       sigma=sigma,
+                                                       nonneg=nonneg,
+                                                       **kwargs))
+                pbar.update(1)
+
+        return ccfs
+
+    # =============================================================================
+    # =============================================================================
     def getBIS(self, ccf_list, bisect_val=[0.35, 0.95], use_combined=True):
         '''
         This function calculated the BIS, from the calculated CCFs
@@ -168,100 +215,27 @@ class TimeSeries:
 
     # =============================================================================
     # =============================================================================
-    def TIRAVEL_vel_test(self, velocities=[]):
+    def build_tiravel_template(self, spec_list, velocities, **kwargs):
         '''
-        This function is used by TIRAVEL() and should not be called independently.
+        Build a template out of the observations themselves, at given velocities.
+
+        The template-independent counterpart of calc_rv_against_template: rather
+        than correlating against a library template, TIRAVEL shifts every epoch
+        to rest, measures how well the set aligns, and co-adds the epochs with
+        maximum-likelihood weights. The returned template is then usable by the
+        UNICOR (CCF1d) or TODCOR (CCF2d) engines.
+
+        :param: spec_list  - a list of Spectrum objects, with the observed data.
+        :param: velocities - a list of radial velocities (km/s), one per epoch.
+                             Only their differences matter -- see the TIRAVEL
+                             class documentation on the zero-point degeneracy.
+        :param: kwargs     - passed through to TIRAVEL.BuildTemplate (orders,
+                             reference, margin, kind, keep_aligned).
+
+        :return: a TIRAVEL object, carrying .template (a Template), .rho (the
+                 alignment measure), .weights, .correlation and .diagnostics.
         '''
+        if isinstance(spec_list[0], float):
+            raise ValueError('TIRAVEL is available for spectrum time-series only')
 
-        a = [[None for _ in range(self.size)] for _ in
-             range(self.size)]
-
-        vals_cpy = deepcopy(self.vals)
-
-        for i, s in enumerate(vals_cpy):
-            vals_cpy[i].wv[0] = Template().doppler(-velocities[i], deepcopy(s.wv[0]))
-
-        grid_0 = deepcopy(vals_cpy[0])
-
-        # interpolate to the same grid
-        for i, s in enumerate(vals_cpy):
-            if i == 0:
-                new_spec = s.sp[0][100:-100]
-
-                new_wl = s.wv[0][100:-100]
-
-                vals_cpy[i].sp = [deepcopy(new_spec)]
-                vals_cpy[i].wv = [deepcopy(new_wl)]
-
-            else:
-                z1 = interpolate.interp1d(s.wv[0], s.sp[0], kind='quadratic')
-
-                new_spec = z1(grid_0.wv[0][100:-100])
-
-                new_wl = grid_0.wv[0][100:-100]
-
-                vals_cpy[i].sp = [deepcopy(new_spec)]
-                vals_cpy[i].wv = [deepcopy(new_wl)]
-
-
-        for i, i_val in enumerate(vals_cpy):
-            for j, j_val in enumerate(vals_cpy):
-                ccf = CCF1d()
-
-                ccf.CrossCorrelateSpec(spec_in=deepcopy(j_val).TrimSpec(Ntrim=50), template_in=Template(template=i_val), dv=0.01,
-                                                 VelBound=[-1, 1], fastccf=True)
-
-                ccf_val = ccf.subpixel_CCF(ccf.Corr['vel'], ccf.Corr['corr'][0], 0)
-
-                a[i][j] = ccf_val
-
-        # max eigen value, eigen vector
-        e_w, e_v = LA.eig(a)
-
-        lambda_m = max(e_w)
-
-        rho = (lambda_m - 1) / (self.size - 1)
-
-        return e_w, e_v, rho, vals_cpy
-
-    # =============================================================================
-    # =============================================================================
-    def TIRAVEL(self, velocities=[[]]):
-        '''
-        This function implements Zucker & Mazeh 2006 TIRAVEL, enabling template-independent
-        radial velocities measurement given a ball-park RVs estimation. See https://arxiv.org/abs/astro-ph/0607293
-
-        This function calculates radial velocity for the entire spectrum time series, using CCF against resting template.
-        :param: velocities - a list of floats, a ball-park RVs estimation.
-        :return: tiravel_res - A generated "template" that can be used to measure RV against.
-
-        '''
-
-        e_w_list = []
-        e_v_list = []
-        rho_list = []
-        vals_cpy_list = []
-
-        for v_list in velocities:
-            e_w, e_v, rho, vals_cpy = self.TIRAVEL_vel_test(v_list)
-            e_w_list.append(e_w)
-            e_v_list.append(e_v)
-            rho_list.append(rho)
-            vals_cpy_list.append(vals_cpy)
-
-        index_max = rho_list.index(max(rho_list))
-
-        template_wv = vals_cpy_list[index_max][0].wv[0]
-        template_sp = vals_cpy_list[index_max][0].sp[0]
-
-        for i, w in enumerate(e_v_list[index_max].transpose()[0]):
-            if i == 0:
-                template_sp = template_sp * w.real ** 2
-            else:
-                template_sp = template_sp + vals_cpy_list[index_max][i].sp[0] * w.real ** 2
-
-        tiravel_res = Template(wavelengths=[template_wv], spectrum=[template_sp])
-
-        tiravel_res.model.InterpolateSpectrum(delta=1)
-
-        return tiravel_res
+        return TIRAVEL().BuildTemplate(spec_list, velocities, **kwargs)

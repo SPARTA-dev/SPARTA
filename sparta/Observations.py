@@ -16,6 +16,10 @@
 # 2) SelectOrders - enables the user to keep or discard orders from the observed data.
 # 3) calc_rv_against_template - calculates radial velocity for the entire spectrum time series,
 #                               using CCF against resting template.
+# 3b) calc_rv_against_two_templates - the double-lined (SB2) counterpart: TODCOR
+#                               against two templates, per epoch.
+# 3c) build_tiravel_template - the template-independent counterpart: TIRAVEL
+#                               builds a template out of the observations.
 # 4) retrieve_BIS - computes BIS from the calculated CCF
 # 5) initialize_periodicity_detector -
 #                    initiate the object's PeriodicityDetector instance before using it to create periodograms.
@@ -200,6 +204,77 @@ class Observations:
         self.vels = vels
         self.evels = evels
         self.ccf_peaks = ccf_peaks
+
+        return self
+
+# =============================================================================
+# =============================================================================
+    def calc_rv_against_two_templates(self, template1, template2, dv=0.1,
+                                      VelBound=150, dvel=None, sigma=1.0,
+                                      nonneg=True, **kwargs):
+        '''
+        Double-lined (SB2) radial velocities for the whole time series, using
+        TODCOR against two resting templates.
+
+        The single-lined counterpart is calc_rv_against_template. Each epoch is
+        fitted independently; the orders within an epoch are pooled into one
+        joint (v1, v2) fit.
+
+        :param: template1, template2 - Template objects for the primary and the
+                                       secondary component.
+        :param: dv, VelBound, dvel, sigma, nonneg - parameters for the CCF2d
+                                       CrossCorrelateSpec routine, see the
+                                       documentation therein.
+
+        :return: self, with 'vels1'/'vels2' (km/s), their uncertainties
+                 'evels1'/'evels2' (km/s, Cramer-Rao), the amplitude pairs
+                 'amps1'/'amps2', and the list of CCF2d objects 'ccf2d_list'.
+        '''
+        ccfs = (self.time_series.
+                calc_rv_against_two_templates(self.spec_list,
+                                              template1, template2,
+                                              dv=dv,
+                                              VelBound=VelBound,
+                                              dvel=dvel,
+                                              sigma=sigma,
+                                              nonneg=nonneg,
+                                              **kwargs)
+                )
+
+        fields = ('RV1', 'RV2', 'eRV1', 'eRV2', 'a1_best', 'a2_best')
+        vels1, vels2, evels1, evels2, amps1, amps2 = (
+            np.array([c.Corr2d[f] for c in ccfs], dtype=float) for f in fields)
+
+        self.ccf2d_list = ccfs
+        self.vels1, self.vels2 = vels1, vels2
+        self.evels1, self.evels2 = evels1, evels2
+        self.amps1, self.amps2 = amps1, amps2
+
+        return self
+
+# =============================================================================
+# =============================================================================
+    def build_tiravel_template(self, velocities, **kwargs):
+        '''
+        Build a template out of the observations themselves (TIRAVEL), at a
+        given set of trial velocities.
+
+        The template-independent counterpart of calc_rv_against_template: no
+        library template is needed. Typical use is to bootstrap -- measure
+        ball-park velocities against any rough template, build the TIRAVEL
+        template from them, then re-measure against it.
+
+        :param: velocities - a list of radial velocities (km/s), one per epoch.
+                             Only their differences matter: the template's rest
+                             frame inherits this set's zero point.
+        :param: kwargs     - passed through to TIRAVEL.BuildTemplate.
+
+        :return: self, with 'tiravel' (the TIRAVEL object) and 'tiravel_template'
+                 (its Template, ready for calc_rv_against_template).
+        '''
+        self.tiravel = self.time_series.build_tiravel_template(
+            self.spec_list, velocities, **kwargs)
+        self.tiravel_template = self.tiravel.template
 
         return self
 
