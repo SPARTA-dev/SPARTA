@@ -17,6 +17,7 @@ PHOENIX templates come from the bundled cache, never the network).
 | [`05_finding_periods`](05_finding_periods.ipynb) | GLS, PDC (with and without error bars), USuRPER and the partial (shift/shape) periodograms; local p-values. |
 | [`06_end_to_end`](06_end_to_end.ipynb) | A simulated season of HARPS-like spectra → RVs → periodogram → orbit fit, with the 1-day alias. |
 | [`07_usurper_concept`](07_usurper_concept.ipynb) | USuRPER without RVs or a template: spectra as points on a unit sphere; a moving star, a temperature change with no motion, and an unresolved twin binary found at half its period. |
+| [`08_partial_pdc_concept`](08_partial_pdc_concept.ipynb) | Partial distance correlation: separating Doppler shifts from shape changes; a toy on three variables; a planet around an active star split by the shift and shape periodograms; their limits and local p-values. |
 
 ## Deep dives
 
