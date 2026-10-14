@@ -30,7 +30,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest"]
+# nbclient + ipykernel run the example notebooks (tests/test_notebooks.py, -m slow).
+test = ["pytest", "nbclient", "ipykernel"]
 
 [project.urls]
 Source = "https://github.com/SPARTA-dev/SPARTA"
@@ -52,3 +53,5 @@ where = ["src"]
 testpaths = ["tests", "packages/unicor/tests", "packages/todcor/tests"]
 # Always test this checkout, whatever happens to be installed in the env.
 pythonpath = ["src", "packages/unicor/src", "packages/todcor/src"]
+markers = ["slow: executes the example notebooks; deselected by default, run with -m slow"]
+addopts = "-m 'not slow'"
