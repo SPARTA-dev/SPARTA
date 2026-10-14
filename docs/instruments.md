@@ -23,10 +23,10 @@ Pass the survey key to `Observations(survey=...)` or `sparta.instruments.get(...
 
 ## HARPS
 
-- Resolving power: 115,000
-- Native step: 0.82 km/s per pixel
-- Notes: R = 115,000 is the nominal value (ESO overview; also SPEC_RES in the ADP headers); the ESO description page quotes R_S = 120,000 (measured) and 4.1 px per FWHM, which would imply ~0.6 km/s per pixel. The 0.82 km/s per pixel native step is the project's value and has not been re-derived from a HARPS document. Recommended settings are those of examples/TIRAVEL_Quickstart.ipynb, not instrument documentation.
-- References: <https://www.eso.org/sci/facilities/lasilla/instruments/harps/overview.html>, <https://www.eso.org/sci/facilities/lasilla/instruments/harps/inst/description.html>, <https://www.eso.org/sci/observing/phase3/p3sdpstd.pdf>
+- Resolving power: 120,000
+- Native step: 0.609334 km/s per pixel
+- Notes: R and the native step follow the ESO instrument description: R_S = 120,000 (measured) and 4.1 px per FWHM, i.e. ~0.609 km/s per detector pixel. The ESO overview page and the ADP SPEC_RES header quote the nominal R = 115,000. Recommended settings are those of examples/TIRAVEL_Quickstart.ipynb, not instrument documentation.
+- References: <https://www.eso.org/sci/facilities/lasilla/instruments/harps/inst/description.html>, <https://www.eso.org/sci/facilities/lasilla/instruments/harps/overview.html>, <https://www.eso.org/sci/observing/phase3/p3sdpstd.pdf>
 
 ### `HARPS`
 

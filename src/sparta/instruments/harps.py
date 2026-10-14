@@ -9,17 +9,18 @@ from sparta.instruments.base import Instrument, LoadedSpectrum, Product, Recomme
 
 HARPS = Instrument(
     name="HARPS",
-    resolving_power=115000.0,
-    native_step_kms=0.82,
+    # ESO instrument description: "RS=120,000 (measured)", sampled at
+    # "4.1 px per FWHM", so one detector pixel spans c / (R * 4.1) km/s.
+    resolving_power=120000.0,
+    native_step_kms=299792.458 / (120000.0 * 4.1),
     references=(
-        "https://www.eso.org/sci/facilities/lasilla/instruments/harps/overview.html",
         "https://www.eso.org/sci/facilities/lasilla/instruments/harps/inst/description.html",
+        "https://www.eso.org/sci/facilities/lasilla/instruments/harps/overview.html",
         "https://www.eso.org/sci/observing/phase3/p3sdpstd.pdf",
     ),
-    notes="R = 115,000 is the nominal value (ESO overview; also SPEC_RES in the ADP headers); "
-          "the ESO description page quotes R_S = 120,000 (measured) and 4.1 px per FWHM, "
-          "which would imply ~0.6 km/s per pixel. The 0.82 km/s per pixel native step is "
-          "the project's value and has not been re-derived from a HARPS document. "
+    notes="R and the native step follow the ESO instrument description: R_S = 120,000 "
+          "(measured) and 4.1 px per FWHM, i.e. ~0.609 km/s per detector pixel. The ESO "
+          "overview page and the ADP SPEC_RES header quote the nominal R = 115,000. "
           "Recommended settings are those of examples/TIRAVEL_Quickstart.ipynb, not "
           "instrument documentation.",
 )
