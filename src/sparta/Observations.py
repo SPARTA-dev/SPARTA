@@ -56,6 +56,11 @@ class Observations:
               target_visits_lib: str, observation visit directory path
                                  (required when time_series is not supplied).
               time_series: TimeSeries object, in case a direct load of TimeSeries (instead of file reading)
+
+        When reading files, ``time_system`` and ``wavelength_frame`` record
+        what ReadSpec returned (e.g. 'BJD-TDB', 'air'); a directory whose
+        visits disagree on either raises ValueError. Both are None for a
+        directly supplied TimeSeries.
         '''
         if not isinstance(time_series, TimeSeries):
             self.file_list = []
@@ -84,11 +89,13 @@ class Observations:
                     else:
                         pass
 
+            frames = set()
             for visit_path in self.file_list:
 
                 visit = ReadSpec(survey)
                 visit.load_spectrum_from_fits(path=visit_path, output=output, min_wv=min_wv, max_wv=max_wv)
                 w, s, bool_mask_s, date_obs, vrad, bcv, snr, air_mass = visit.retrieve_all_spectrum_parameters()
+                frames.add((visit.time_system, visit.wavelength_frame))
 
                 if (snr >= min_snr or snr == -1 or min_snr == -1) and (min_avg_flux_val == -1 or min_avg_flux_val <= np.mean(s)):
                     if isinstance(visit.bcv, list):
@@ -107,12 +114,21 @@ class Observations:
 
             self.sample_size = len(self.bcv)
 
+            # Relative times and a common CCF grid are meaningless across
+            # time systems or air/vacuum frames, so refuse a mixed directory.
+            if len(frames) > 1:
+                raise ValueError("visits disagree on (time_system, wavelength_frame): "
+                                 f"{sorted(frames, key=str)}")
+            self.time_system, self.wavelength_frame = frames.pop() if frames else (None, None)
+
             self.convert_times_to_relative_float_values()
 
             self.time_series = TimeSeries(size=self.sample_size, times=self.time_list,
                                           vals=self.spec_list)
         else:
             self.time_series = time_series
+            self.time_system = None
+            self.wavelength_frame = None
             self.spec_list = time_series.vals
             self.time_list = time_series.times
 
