@@ -14,7 +14,7 @@ import pytest
 
 import todcor as ops
 from todcor import (
-    combine_stats, composite_flux, crlb_from_map, model_flux,
+    chi2_from_stats, combine_stats, composite_flux, crlb_from_map, model_flux,
     profile_from_stats, todcor_map, window_stats,
 )
 
@@ -253,6 +253,57 @@ def test_combine_stats_rejects_mismatched_velocity_grids():
                       np.arange(-10, 11, 5.0))
     with pytest.raises(ValueError, match="same velocity grid"):
         combine_stats([sa, sb])
+
+
+def test_combine_stats_weights_rescale_each_windows_noise():
+    # The statistics are linear in the weights 1/sigma^2, so weighting a
+    # unit-noise window by 1/sigma^2 must equal computing it at sigma -- this
+    # is what lets CCF2d re-weight orders without new FFTs. nu, the expected
+    # chi2 at the window's own noise, does not change with that noise.
+    wave_grid, win, t1, t2, g1, g2, dv = _build_case()
+    v = np.arange(-10, 11, 2.0)
+    rng = np.random.default_rng(11)
+    sigmas = (0.02, 0.005)
+    flux = composite_flux(wave_grid, [t1, t2], [3.0, -4.0], [0.7, 0.5])
+    unit, ref = [], []
+    for s in sigmas:
+        data_g = (flux - 1.0 + rng.normal(0.0, s, flux.size)) * win
+        unit.append(window_stats(data_g, g1, g2, dv, v, v))
+        ref.append(window_stats(data_g, g1, g2, dv, v, v, sigma=s))
+    weighted = combine_stats(unit, weights=[1.0 / s ** 2 for s in sigmas])
+    expected = combine_stats(ref)
+    for k in ('S11', 'S22', 'SD', 'b1', 'b2', 'A12', 'nu'):
+        assert np.allclose(weighted[k], expected[k], rtol=1e-12, atol=0.0)
+
+
+@pytest.mark.parametrize('weights', [[1.0], [1.0, 0.0], [1.0, np.nan], [1.0, -2.0]])
+def test_combine_stats_rejects_bad_weights(weights):
+    wave_grid, win, t1, t2, g1, g2, dv = _build_case()
+    data_g = (composite_flux(wave_grid, [t1, t2], [0.0, 0.0], [0.7, 0.5]) - 1.0) * win
+    st = window_stats(data_g, g1, g2, dv, np.arange(-4, 5, 2.0), np.arange(-4, 5, 2.0))
+    with pytest.raises(ValueError, match="weights"):
+        combine_stats([st, st], weights=weights)
+
+
+def test_chi2_from_stats_splits_the_joint_chi2_by_window():
+    # Per-window chi2 at the joint amplitudes sums to the joint chi2: the
+    # per-window noise estimate of CCF2d rests on it.
+    t_prim, t_sec = _synthetic_templates()
+    dv, v = 2.0, np.arange(-20.0, 21.0, 2.0)
+    rng = np.random.default_rng(12)
+    stats = []
+    for lo, hi in [(4030, 4380), (4640, 4740)]:
+        grid, _ = ops.log_lambda_grid(lo, hi, dv)
+        win = ops.tukey_window(len(grid), alpha=0.2)
+        g1 = (ops.resample(*t_prim, grid, fill=1.0) - 1.0) * win
+        g2 = (ops.resample(*t_sec, grid, fill=1.0) - 1.0) * win
+        flux = composite_flux(grid, [t_prim, t_sec], [4.0, -6.0], [0.7, 0.4])
+        stats.append(window_stats((flux - 1.0 + rng.normal(0.0, 0.01, flux.size)) * win,
+                                  g1, g2, dv, v, v))
+    res = profile_from_stats(combine_stats(stats), v, v)
+    parts = [chi2_from_stats(st, res['a1'], res['a2']) for st in stats]
+    assert np.allclose(sum(parts), res['chi2'], rtol=1e-12, atol=0.0)
+    assert np.all(parts[0] > 0) and np.all(parts[1] > 0)
 
 
 def test_window_stats_rejects_grid_length_mismatch():

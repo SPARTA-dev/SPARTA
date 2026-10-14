@@ -113,7 +113,10 @@ its variance depends on the sub-pixel phases at which the analysis nodes
 sample the native pixels.  Pass the resampled-noise spectrum
 (:func:`resampled_noise_psd`, times ``mean(taper**2)`` for an apodised window)
 as ``noise_psd`` and ``chi2_red = chi2 / (sum nu - 4)`` is ~1 for honest
-noise; then ``sigma *= sqrt(chi2_red)`` is a calibrated noise estimate.
+noise; then ``sigma *= sqrt(chi2_red)`` is a calibrated noise estimate.  For
+windows of different noise, each window's share of the joint ``chi^2``
+(:func:`chi2_from_stats` at the joint amplitudes) over its own ``nu`` estimates
+its own noise, and :func:`combine_stats` re-weights the windows by it.
 
 Assumptions (exact only under these)
 ------------------------------------
@@ -331,13 +334,34 @@ def resampled_noise_psd(responses, n, ratio, weights=None):
 
 # =============================================================================
 # =============================================================================
-def combine_stats(stats_list):
+def combine_stats(stats_list, weights=None):
     """Sum sufficient statistics across windows -> one joint fit.
 
     Because each window's ``chi^2`` is linear in its six statistics and those
     are indexed by velocity (not Fourier mode), summing them pools the windows
     into a single fit with **shared ``(v1, v2, a1, a2)``**.  The windows may
     differ in ``dv`` / resolution / instrument.
+
+    The six statistics are linear in the Parseval weights ``1/sigma^2``, so
+    scaling a window's statistics by ``(sigma / sigma_new)^2`` is the same as
+    recomputing them at noise ``sigma_new`` -- a window can be re-weighted
+    without touching its spectra again.  ``nu`` is not scaled: it is the
+    expected ``chi^2`` of the window's noise *at the noise it is weighted
+    with*, whatever that noise is.
+
+    Parameters
+    ----------
+    stats_list : iterable of dict
+        :func:`window_stats` outputs.
+    weights : sequence of float or None
+        One finite, positive factor per window on its six statistics
+        (dimensionless), e.g. ``1 / sigma_i**2`` for windows computed at unit
+        noise.  Default None: all ones (a plain sum).
+
+    Returns
+    -------
+    dict
+        The pooled ``S11``, ``S22``, ``SD``, ``b1``, ``b2``, ``A12`` and ``nu``.
 
     Two usage constraints -- neither enforced at runtime beyond a shape check:
 
@@ -364,8 +388,47 @@ def combine_stats(stats_list):
                 "all windows must be evaluated on the same velocity grid "
                 f"(window 0 has A12 {shape}, window {I} has {st['A12'].shape})")
 
-    keys = ("S11", "S22", "SD", "b1", "b2", "A12", "nu")
-    return {k: sum(st[k] for st in stats_list) for k in keys}
+    if weights is None:
+        weights = np.ones(len(stats_list))
+    weights = np.asarray(weights, float)
+    if weights.shape != (len(stats_list),) or not np.all(np.isfinite(weights) & (weights > 0)):
+        raise ValueError(f"weights must be one finite, positive value per window "
+                         f"({len(stats_list)}), got {weights}")
+
+    combined = {k: sum(wt * st[k] for wt, st in zip(weights, stats_list))
+                for k in ("S11", "S22", "SD", "b1", "b2", "A12")}
+    combined["nu"] = sum(st["nu"] for st in stats_list)
+    return combined
+
+
+# =============================================================================
+# =============================================================================
+def chi2_from_stats(stats, a1, a2):
+    """The weighted ``chi^2`` of (one window's or combined) statistics at given
+    amplitudes, on every ``(v1, v2)`` node.
+
+    Evaluated at the *joint* best-fit amplitudes, one window's value is its
+    share of the joint ``chi^2`` (the shares sum to it) -- its own residual
+    power, from which its noise can be estimated.
+
+    Parameters
+    ----------
+    stats : dict
+        Output of :func:`window_stats` or :func:`combine_stats`.
+    a1, a2 : float or ndarray (n1, n2)
+        Amplitudes of the two components (dimensionless).
+
+    Returns
+    -------
+    ndarray (n1, n2)
+        ``SD - 2(a1 b1 + a2 b2) + a1^2 S11 + 2 a1 a2 A12 + a2^2 S22``
+        (dimensionless; ``chi^2`` at the noise the statistics carry).
+    """
+    b1 = stats["b1"][:, None]
+    b2 = stats["b2"][None, :]
+    return stats["SD"] - 2.0 * (b1 * a1 + b2 * a2) + (
+        a1 ** 2 * stats["S11"] + 2.0 * a1 * a2 * stats["A12"] + a2 ** 2 * stats["S22"]
+    )
 
 
 # =============================================================================
@@ -425,9 +488,7 @@ def profile_from_stats(stats, v1_grid, v2_grid, nonneg=False):
         a1 = np.where(infeasible, a1_edge, a1)
         a2 = np.where(infeasible, a2_edge, a2)
 
-    chi2 = SD - 2.0 * (b1g * a1 + b2g * a2) + (
-        a1 ** 2 * S11 + 2.0 * a1 * a2 * A12 + a2 ** 2 * S22
-    )
+    chi2 = chi2_from_stats(stats, a1, a2)
     logL_profile = -0.5 * chi2
     if nonneg:
         logL_marginal = logL_profile.copy()

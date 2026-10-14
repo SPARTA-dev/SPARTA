@@ -159,9 +159,9 @@ _LO, _HI = 4450.0, 4520.0
 _C_KMS = 299792.458
 
 
-def _line_list(seed, n=25):
+def _line_list(seed, n=25, lo=_LO, hi=_HI):
     rng = np.random.default_rng(seed)
-    return rng.uniform(_LO + 3.0, _HI - 3.0, n), rng.uniform(0.1, 0.6, n)
+    return rng.uniform(lo + 3.0, hi - 3.0, n), rng.uniform(0.1, 0.6, n)
 
 
 _LINES1, _LINES2 = _line_list(1), _line_list(2)
@@ -233,20 +233,23 @@ def test_ccf2d_records_effective_pixel_counts():
 
 
 def test_ccf2d_sigma_none_estimates_the_noise_from_the_fit():
-    # The default sigma=None fits a common noise level (sqrt(chi2_red) at unit
-    # sigma) and scales the errors with it: they must match the errors
-    # computed with the true sigma.
+    # The default sigma=None estimates each order's noise from its residual;
+    # with a single order that is sqrt(chi2_red) at unit sigma. The errors
+    # must match those computed with the true sigma.
     v1, v2, sigma = 37.3, -52.6, 0.01
     wave, flux0, tmpl1, tmpl2 = _narrow_case(v1, v2)
     g1, g2 = _local_grids(v1, v2)
     rng = np.random.default_rng(1)
     for _ in range(4):
         spec = Spectrum(wv=[wave], sp=[flux0 + rng.normal(0.0, sigma, wave.size)])
-        est = CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, v1_grid=g1, v2_grid=g2).Corr2d
+        fit = CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, v1_grid=g1, v2_grid=g2)
+        est = fit.Corr2d
         ref = CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, v1_grid=g1, v2_grid=g2,
                                          sigma=sigma).Corr2d
         assert est['sigma_from_fit'] and not ref['sigma_from_fit']
         assert est['sigma'] == pytest.approx(sigma, rel=0.1)
+        assert fit.windows[0]['sigma'] == est['sigma'][0]
+        assert not fit.windows[0]['sigma_fallback']
         assert est['RV1'] == pytest.approx(ref['RV1'], abs=1e-9)
         assert est['eRV1'] / ref['eRV1'] == pytest.approx(1.0, abs=0.15)
         assert est['eRV2'] / ref['eRV2'] == pytest.approx(1.0, abs=0.15)
@@ -376,11 +379,10 @@ def test_ccf2d_sigma_none_reports_chi2_at_the_estimated_noise():
     assert est['chi2_best'] == pytest.approx(ref['chi2_best'], rel=1e-6)
     assert est['eRV1'] == pytest.approx(ref['eRV1'], rel=1e-6)
     assert est['eRV2'] == pytest.approx(ref['eRV2'], rel=1e-6)
-    assert est['chi2_map'] == pytest.approx(est['chi2_best'] * est['sigma'] ** 2, rel=1e-9)
-    assert ref['chi2_map'] == ref['chi2_best']
-    # The maps sit on chi2_map's scale: their minimum is next to it.
+    # The maps sit on the noise scale of the reported sigma in both modes:
+    # their minimum is next to chi2_best.
     for r in (est, ref):
-        assert r['fine']['chi2'].min() == pytest.approx(r['chi2_map'], rel=1e-3)
+        assert r['fine']['chi2'].min() == pytest.approx(r['chi2_best'], rel=1e-3)
 
 
 def test_ccf2d_refuses_native_steps_that_do_not_match_the_orders():
@@ -388,3 +390,112 @@ def test_ccf2d_refuses_native_steps_that_do_not_match_the_orders():
     spec.Info['NativeStep'] = [1.0]
     with pytest.raises(ValueError, match="NativeStep"):
         CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, VelBound=120, dvel=4.0)
+
+
+# =============================================================================
+# Orders of different S/N under sigma=None
+# =============================================================================
+_ORDERS = ((4450.0, 4485.0), (4495.0, 4530.0))
+
+
+def _order_lines(seed):
+    """One component's lines in both orders, 3 A clear of every order edge: a
+    line shifted across an edge is a misfit that would pose as noise."""
+    parts = [_line_list(seed + 10 * k, n=12, lo=lo, hi=hi)
+             for k, (lo, hi) in enumerate(_ORDERS)]
+    return tuple(np.concatenate(x) for x in zip(*parts))
+
+
+def _two_order_case(v1, v2, a1=0.7, a2=0.4):
+    """Two noiseless orders on 1 km/s native grids, plus rest-frame templates
+    covering both."""
+    lines = (_order_lines(1), _order_lines(2))
+    waves = [log_lambda_grid(lo, hi, 1.0)[0] for lo, hi in _ORDERS]
+    fluxes = [1.0 + a1 * (_narrow_flux(w, lines[0], v1) - 1.0)
+              + a2 * (_narrow_flux(w, lines[1], v2) - 1.0) for w in waves]
+    wt, _ = log_lambda_grid(_ORDERS[0][0] - 5.0, _ORDERS[-1][1] + 5.0, 0.05)
+    return (waves, fluxes,
+            Template(wavelengths=wt, spectrum=_narrow_flux(wt, lines[0])),
+            Template(wavelengths=wt, spectrum=_narrow_flux(wt, lines[1])))
+
+
+def _per_order_noise_mc(sigmas, n_real, seed):
+    """Fit each noisy realisation with sigma=None and with the true per-order
+    sigma. Returns ({'none': ..., 'true': ...} arrays of (RV1, RV2, eRV1,
+    eRV2) per realisation, and the per-order sigma estimates)."""
+    v1, v2 = 37.3, -52.6
+    waves, fluxes, tmpl1, tmpl2 = _two_order_case(v1, v2)
+    g1, g2 = _local_grids(v1, v2)
+    rng = np.random.default_rng(seed)
+    out, sig_est = {'none': [], 'true': []}, []
+    for _ in range(n_real):
+        noisy = [f + rng.normal(0.0, s, f.size) for f, s in zip(fluxes, sigmas)]
+        for key, sigma in (('none', None), ('true', sigmas)):
+            ccf = CCF2d().CrossCorrelateSpec(Spectrum(wv=list(waves), sp=list(noisy)),
+                                             tmpl1, tmpl2, v1_grid=g1, v2_grid=g2,
+                                             sigma=sigma, keep_windows=False)
+            r = ccf.Corr2d
+            out[key].append([r['RV1'], r['RV2'], r['eRV1'], r['eRV2']])
+            if sigma is None:
+                sig_est.append([w['sigma'] for w in ccf.windows])
+    return {k: np.array(v) for k, v in out.items()}, np.array(sig_est)
+
+
+def test_ccf2d_sigma_none_weights_each_order_by_its_own_noise():
+    # Orders with noise 0.003 and 0.03 on their native pixels. One common
+    # noise level (the former sigma=None) weighted them equally: honest errors,
+    # but an RV scatter ~5x that of the fit with the true per-order sigma.
+    sigmas = np.array([0.003, 0.03])
+    rv, sig_est = _per_order_noise_mc(sigmas, n_real=60, seed=7)
+    # The cleaner order's residual at the unit-noise fit carries that fit's
+    # misfit too (it is pulled by the noisier order): its estimate runs ~3
+    # per cent high at this 10x contrast, on top of ~2 per cent scatter.
+    assert np.mean(sig_est / sigmas, axis=0) == pytest.approx([1.0, 1.0], abs=0.05)
+    assert np.all(np.abs(sig_est / sigmas - 1.0) < 0.15)
+    for c in (0, 1):
+        scatter = np.std(rv['none'][:, c])
+        assert scatter / np.std(rv['true'][:, c]) == pytest.approx(1.0, abs=0.15)
+        assert 0.8 < scatter / np.mean(rv['none'][:, 2 + c]) < 1.25
+
+
+def test_ccf2d_sigma_none_with_homogeneous_noise_matches_the_true_sigma():
+    # Equal noise in both orders: the per-order estimates differ only by their
+    # own statistical scatter (~1.5 per cent), so the fit must match the one at
+    # the true sigma to a small fraction of its error.
+    sigmas = np.array([0.01, 0.01])
+    rv, sig_est = _per_order_noise_mc(sigmas, n_real=6, seed=8)
+    assert np.all(np.abs(sig_est / sigmas - 1.0) < 0.1)
+    assert np.all(np.abs(rv['none'][:, :2] - rv['true'][:, :2]) < 0.2 * rv['true'][:, 2:])
+    assert np.all(np.abs(rv['none'][:, 2:] / rv['true'][:, 2:] - 1.0) < 0.05)
+
+
+@pytest.mark.parametrize('kind', ['flat', 'short'])
+def test_ccf2d_sigma_none_falls_back_to_the_common_noise(kind):
+    # A flat order (masked and filled with continuum: zero residual) or one
+    # with too few pixels to measure its own noise gets the common estimate,
+    # with a warning, instead of an infinite or wildly noisy weight.
+    spec, tmpl1, tmpl2 = _sparta_case(n_ord=2)
+    rng = np.random.default_rng(9)
+    lo, hi = (4750.0, 4950.0) if kind == 'flat' else (4800.0, 4800.4)
+    extra, _ = log_lambda_grid(lo, hi, 1.0)
+    extra_flux = (np.ones_like(extra) if kind == 'flat'
+                  else 1.0 + rng.normal(0.0, 0.01, extra.size))
+    noisy = Spectrum(wv=list(spec.wv) + [extra],
+                     sp=[f + rng.normal(0.0, 0.01, f.size) for f in spec.sp] + [extra_flux])
+    noisy.Info.update(GridType='log', GridDelta=1.0 * u.km / u.s)
+    with pytest.warns(UserWarning, match="common noise estimate"):
+        ccf = CCF2d().CrossCorrelateSpec(noisy, tmpl1, tmpl2, VelBound=150, dvel=2.0)
+    assert [w['sigma_fallback'] for w in ccf.windows] == [False, False, True]
+    assert ccf.windows[2]['sigma'] == pytest.approx(0.01, rel=0.1)
+    assert ccf.Corr2d['sigma'][2] == ccf.windows[2]['sigma']
+    assert abs(ccf.Corr2d['RV1'] - 60.0) < 1.0
+    assert abs(ccf.Corr2d['RV2'] + 95.0) < 1.0
+    assert np.isfinite(ccf.Corr2d['eRV1']) and np.isfinite(ccf.Corr2d['eRV2'])
+
+
+def test_ccf2d_explicit_per_order_sigma_is_reported_per_window():
+    spec, tmpl1, tmpl2 = _sparta_case(n_ord=2)
+    ccf = CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, VelBound=150, dvel=2.0,
+                                     sigma=[0.01, 0.02])
+    assert [w['sigma'] for w in ccf.windows] == [0.01, 0.02]
+    assert not any(w['sigma_fallback'] for w in ccf.windows)

@@ -43,8 +43,8 @@ from astropy import constants as consts, units as u
 from unicor import dsp
 from todcor.simulate import model_flux
 from todcor.estimator import (
-    combine_stats, crlb_from_map, profile_from_stats, resampled_noise_psd,
-    window_stats,
+    chi2_from_stats, combine_stats, crlb_from_map, profile_from_stats,
+    resampled_noise_psd, window_stats,
 )
 from sparta.UNICOR.Spectrum import resample_flux
 
@@ -57,7 +57,11 @@ class CCF2d:
         No input required. Sets the speed of light ``self.c`` (km/s), the
         default log-lambda grid step ``self.default_dv`` (0.1 km/s, matching
         CCF1d), the default step of the trial-velocity map
-        ``self.default_dvel`` (1 km/s), and the peak-refinement geometry.
+        ``self.default_dvel`` (1 km/s), the peak-refinement geometry, and
+        ``self.min_noise_dof`` (50): the fewest noise degrees of freedom an
+        order needs for its own noise estimate under ``sigma=None`` (below
+        that its estimate would scatter by more than ~10 per cent; see
+        ``CrossCorrelateSpec``).
 
         The map step is deliberately coarser than the spectral grid step: the
         cost of the fit scales as ``n1 * n2 * K`` (velocity nodes squared times
@@ -82,6 +86,7 @@ class CCF2d:
         self.refine_span = 2       # fine-map half-width, in coarse steps
         self.refine_factor = 10    # coarse step / fine step
         self.crlb_half = 3         # half-width (nodes) of the quadratic patch
+        self.min_noise_dof = 50    # fewest dof to estimate one window's noise
 
     # =============================================================================
     # =============================================================================
@@ -132,11 +137,11 @@ class CCF2d:
         :param: sigma      - per-pixel noise of the observed flux on its
                             *native* pixels (flux units), either a scalar (all
                             orders) or one value per order; taken at face value.
-                            Default None: fit at unit noise and estimate one
-                            common noise level from the fit, scaling the errors
-                            by sqrt(chi2_red at unit noise). Either way it sets
-                            the absolute scale of the uncertainties only, not
-                            the RVs.
+                            Its order-to-order ratios weight the orders; its
+                            overall scale sets the uncertainties only.
+                            Default None: estimate each order's noise from its
+                            own residual and weight the orders by it (see
+                            below).
         :param: alpha      - Tukey apodisation parameter applied to each window.
                             Set 0 to skip (e.g. if the spectrum was already
                             tapered by ``SpecPreProccess``).
@@ -168,36 +173,51 @@ class CCF2d:
                                 (2x2, km^2/s^2), 'peak' (the coarse argmax
                                 node, km/s), 'a1_best', 'a2_best' (at the
                                 refined RVs), 'sigma' (the native per-pixel
-                                noise behind the errors: the input, or the
-                                fitted estimate), 'sigma_from_fit', and the
-                                misfit at the refined RVs:
-                                'chi2_best' and 'chi2_red' (chi2_best per noise
-                                degree of freedom, see below) at the noise
-                                'sigma' -- so under sigma=None chi2_red is 1 by
-                                construction and 'sigma' carries the
-                                information -- and 'chi2_map', the same chi2 on
-                                the noise scale of the maps (equal to chi2_best
-                                for an explicit sigma; at unit noise, i.e.
-                                chi2_best * sigma**2, under sigma=None).
-                                With sigma=None the maps ('logL_profile',
+                                noise behind the fit and its errors: the input
+                                as given, or under sigma=None an array of the
+                                per-window estimates, aligned with
+                                self.windows), 'sigma_from_fit', and the misfit
+                                at the refined RVs at that noise: 'chi2_best'
+                                and 'chi2_red' (chi2_best per noise degree of
+                                freedom, see below; ~1 by construction under
+                                sigma=None). The maps ('logL_profile',
                                 'logL_marginal', 'chi2', and those under
-                                'fine') are evaluated at unit noise: their
-                                shape and argmax are those of the fit, their
-                                scale is 1 / sigma**2 too large.
+                                'fine') are on the same noise scale.
                  self.stats   - the *combined* coarse-map sufficient statistics,
-                                on the maps' noise scale, enough to re-profile
+                                on that noise scale, enough to re-profile
                                 (e.g. with a different 'nonneg') without
                                 touching the spectrum again.
                  self.windows - per-order diagnostics: the order index, the
-                                window's own 'S11'/'S22'/'SD', 'oversampling'
-                                (dv_native / dv, at least 1), 'n_eff' (the
-                                independent-pixel count n_pix / oversampling),
-                                'nu' (the expected chi2 of its pure noise), and
-                                (if keep_windows) the prepared arrays.
+                                window's own 'S11'/'S22'/'SD' (at the input
+                                sigma, unit noise under sigma=None),
+                                'oversampling' (dv_native / dv, at least 1),
+                                'n_eff' (the independent-pixel count
+                                n_pix / oversampling), 'nu' (the expected chi2
+                                of its pure noise), 'sigma' (its noise: input or
+                                estimated), 'sigma_fallback' (True if sigma=None
+                                could not estimate it and used the common
+                                estimate), and (if keep_windows) the prepared
+                                arrays.
                  self.n_ord   - the number of pooled windows.
-                 self.crlb    - the crlb_from_map output behind the RVs, on the
-                                maps' noise scale (its sigmas and cov are not
-                                rescaled under sigma=None; eRV1/eRV2 are).
+                 self.crlb    - the crlb_from_map output behind the RVs.
+
+        sigma=None runs the joint fit twice. Pass 1 fits every order at unit
+        noise and locates the joint peak (coarse and fine maps). Each order's
+        noise is then estimated from its own share of the joint chi2 there,
+        sigma_i^2 = chi2_i / (nu_i * (1 - 4 / sum(nu))) -- the four shared
+        parameters' dof charged in proportion to nu_i (see _window_noise).
+        Pass 2 re-weights each order's statistics by 1 / sigma_i^2 (no new
+        FFTs: the statistics are linear in the weights, and the per-order fine
+        maps are reused when the coarse argmax has not moved) and re-profiles;
+        the RVs, amplitudes and errors come from pass 2. An order with fewer
+        than ``self.min_noise_dof`` dof, or no residual (e.g. a masked order
+        filled with continuum), gets the common estimate instead, with a
+        warning. With one order this is the single common noise
+        sqrt(chi2_red). One pass leaves the cleaner of two orders of very
+        different S/N with a slightly high estimate -- its pass-1 residual
+        includes the misfit of a fit pulled by the noisier order: +3 per cent
+        at a 10x noise contrast, +0.5 per cent at 3x -- i.e. its errors are
+        that much conservative; the RVs are unaffected.
 
         chi2_red = chi2_best / (sum(nu) - 4). Interpolated noise is smoother
         than the native noise -- a cubic spline keeps ~0.87 of its variance
@@ -300,61 +320,60 @@ class CCF2d:
             win = {'order': I, 'dv': dv_kms,
                    'S11': st['S11'], 'S22': st['S22'], 'SD': st['SD'],
                    'oversampling': oversampling, 'n_eff': len(w) / oversampling,
-                   'nu': st['nu']}
+                   'nu': st['nu'], 'sigma': float(sigma[I]), 'sigma_fallback': False}
             if keep_windows:
                 win.update(wv=w, data_g=data_g, g1=g1, g2=g2)
             windows.append(win)
 
-        # Only the *combined* statistics are retained: each window's A12 is an
+        # Only *pooled* statistics outlive this call: each window's A12 is an
         # (n1, n2) array, so keeping one per order would dominate memory on a
-        # many-order spectrum. The combined dict is all that re-profiling needs.
-        self.stats = combine_stats(stats)
+        # many-order spectrum. The per-window list lives until the re-weighted
+        # pass (sigma=None) has re-pooled it.
+        pooled = combine_stats(stats)
         # A template with no lines over the fitted orders makes the 2x2 amplitude
         # system singular, and the map collapses to a flat, meaningless argmax.
         for k, name in (('S11', 'template1'), ('S22', 'template2')):
-            if not self.stats[k] > 0:
+            if not pooled[k] > 0:
                 raise ValueError(
                     f"{name} has no spectral structure over the fitted orders "
-                    f"({k} = {self.stats[k]}); check its wavelength coverage and "
+                    f"({k} = {pooled[k]}); check its wavelength coverage and "
                     "air/vacuum frame against the observation")
-        res = profile_from_stats(self.stats, v1_grid, v2_grid, nonneg=nonneg)
-        res['units'] = u.km / u.s
 
-        coarse = crlb_from_map(res['logL_profile'], v1_grid, v2_grid,
-                               half=self.crlb_half)
+        # Per-window fine-map statistics, keyed by the coarse node they are
+        # centred on: the re-weighted pass reuses them if its coarse argmax
+        # has not moved.
+        fine_cache = {}
+        fit = self._joint_fit(stats, None, prepared, dv_kms, v1_grid, v2_grid,
+                              nonneg, fine_cache)
+        noise = sigma_in
+        if sigma_from_fit:
+            noise, fallback = self._window_noise(fit, windows)
+            for win, s_i, fb in zip(windows, noise, fallback):
+                win.update(sigma=float(s_i), sigma_fallback=bool(fb))
+            fit = self._joint_fit(stats, 1.0 / noise ** 2, prepared, dv_kms,
+                                  v1_grid, v2_grid, nonneg, fine_cache)
+
+        res, coarse, crlb, at_peak = fit['res'], fit['coarse'], fit['crlb'], fit['best']
         if coarse['on_edge']:
             warnings.warn("the TODCOR peak lies on the edge of the velocity grid; "
                           "the RVs are grid-limited and their errors are NaN. "
                           "Widen VelBound (or the explicit grids).", stacklevel=2)
-            res['fine'] = None
-        else:
-            res['fine'] = self._refine(prepared, dv_kms, res, nonneg)
-        crlb = coarse if res['fine'] is None else crlb_from_map(
-            res['fine']['logL_profile'], res['fine']['v1_grid'],
-            res['fine']['v2_grid'], half=self.crlb_half)
+        elif res['fine'] is None:
+            warnings.warn("the refined TODCOR peak lies outside the fine map "
+                          f"(+/-{self.refine_span} coarse steps around the coarse "
+                          "argmax); reporting the coarse-map estimate, whose "
+                          "sub-grid refinement may be biased.", stacklevel=2)
 
         rv1, rv2 = crlb['peak_refined']
-        at_peak = self._profile_at(prepared, dv_kms, rv1, rv2, nonneg)
-        chi2_map, chi2_red_map = at_peak['chi2'], at_peak['chi2_red']
-        noise, scale = sigma_in, 1.0
-        if sigma_from_fit:
-            if not (np.isfinite(chi2_red_map) and chi2_red_map > 0):
-                raise ValueError(
-                    f"cannot estimate the noise from the fit (chi2_red = {chi2_red_map}); "
-                    "pass an explicit sigma")
-            # The fit ran at unit noise, so sqrt(chi2_red) *is* the common
-            # native per-pixel noise; chi2 and the map curvature scale as
-            # 1/sigma^2, the velocity errors as sigma.
-            noise = scale = float(np.sqrt(chi2_red_map))
-
         res.update(RV1=rv1, RV2=rv2,
-                   eRV1=crlb['sigma_v1'] * scale, eRV2=crlb['sigma_v2'] * scale,
-                   rho12=crlb['rho'], cov=crlb['cov'] * scale ** 2,
+                   eRV1=crlb['sigma_v1'], eRV2=crlb['sigma_v2'],
+                   rho12=crlb['rho'], cov=crlb['cov'],
                    peak=coarse['peak'],
                    a1_best=at_peak['a1'], a2_best=at_peak['a2'],
-                   chi2_best=chi2_map / scale ** 2, chi2_red=chi2_red_map / scale ** 2,
-                   chi2_map=chi2_map, sigma=noise, sigma_from_fit=sigma_from_fit)
+                   chi2_best=at_peak['chi2'], chi2_red=at_peak['chi2_red'],
+                   sigma=noise, sigma_from_fit=sigma_from_fit)
 
+        self.stats = fit['pooled']
         self.windows = windows
         self.n_ord = len(windows)
         self.Corr2d = res
@@ -466,15 +485,59 @@ class CCF2d:
             v2_grid = grid
         return np.asarray(v1_grid, float), np.asarray(v2_grid, float)
 
-    def _refine(self, prepared, dv_kms, res, nonneg):
+    def _joint_fit(self, stats, weights, prepared, dv_kms, v1_grid, v2_grid, nonneg,
+                   fine_cache):
+        '''
+        One pass of the joint fit: pool the per-window coarse statistics with
+        the given weights, locate the peak on the coarse map, refine it on the
+        fine map, and evaluate every window exactly at the refined peak.
+
+        :param: stats      - per-window coarse-map window_stats.
+        :param: weights    - per-window factors on the statistics (1/sigma_i^2
+                             for unit-noise windows), or None for all ones.
+        :param: fine_cache - dict of per-window fine-map statistics by coarse
+                             node, filled here and reused across passes.
+        :return: dict with 'pooled' (the weighted coarse statistics), 'res'
+                 (the coarse profile_from_stats dict, plus 'fine': the fine
+                 one, or None if refinement was skipped or failed), 'coarse'
+                 and 'crlb' (crlb_from_map on the coarse map and on the map
+                 behind the RVs), 'at_peak' (per-window window_stats at the
+                 refined peak) and 'best' (the joint profile there).
+        '''
+        pooled = combine_stats(stats, weights)
+        res = profile_from_stats(pooled, v1_grid, v2_grid, nonneg=nonneg)
+        res['units'] = u.km / u.s
+
+        coarse = crlb_from_map(res['logL_profile'], v1_grid, v2_grid,
+                               half=self.crlb_half)
+        res['fine'] = None if coarse['on_edge'] else self._refine(
+            prepared, dv_kms, res, nonneg, weights, fine_cache)
+        crlb = coarse if res['fine'] is None else crlb_from_map(
+            res['fine']['logL_profile'], res['fine']['v1_grid'],
+            res['fine']['v2_grid'], half=self.crlb_half)
+
+        # Amplitudes and chi2 exactly at the refined velocities, so the
+        # reported RVs and amplitudes belong to one point.
+        p1, p2 = np.array([crlb['peak_refined'][0]]), np.array([crlb['peak_refined'][1]])
+        at_peak = [window_stats(d, g1, g2, dv_kms, p1, p2, **kw)
+                   for d, g1, g2, kw in prepared]
+        best = profile_from_stats(combine_stats(at_peak, weights), p1, p2,
+                                  nonneg=nonneg)['best']
+        return dict(pooled=pooled, res=res, coarse=coarse, crlb=crlb,
+                    at_peak=at_peak, best=best)
+
+    def _refine(self, prepared, dv_kms, res, nonneg, weights, fine_cache):
         '''
         Re-evaluate the statistics on a fine (v1, v2) grid around the coarse
         argmax and profile them -- the second, exact pass (see ``__init__``).
+        The per-window fine statistics are cached in ``fine_cache`` by coarse
+        node, so a re-weighted pass with the same coarse argmax only re-pools
+        them.
 
-        :return: the fine-map profile_from_stats dict, or None (with a warning)
-                 if its argmax lands on its own edge -- the coarse argmax was
-                 then not close to the true peak (e.g. a ridge or a tie), and
-                 the coarse map is the more honest answer.
+        :return: the fine-map profile_from_stats dict, or None if its argmax
+                 lands on its own edge -- the coarse argmax was then not close
+                 to the true peak (e.g. a ridge or a tie), and the coarse map
+                 is the more honest answer.
         '''
         v1, v2 = res['v1_grid'], res['v2_grid']
         i, j = np.unravel_index(np.argmax(res['logL_profile']), res['logL_profile'].shape)
@@ -485,28 +548,65 @@ class CCF2d:
                           self.refine_span * self.refine_factor + 1) / self.refine_factor
         f1, f2 = v1[i] + step1 * nodes, v2[j] + step2 * nodes
 
-        stats = combine_stats(window_stats(d, g1, g2, dv_kms, f1, f2, **kw)
-                              for d, g1, g2, kw in prepared)
-        fine = profile_from_stats(stats, f1, f2, nonneg=nonneg)
+        if (i, j) not in fine_cache:
+            fine_cache[(i, j)] = [window_stats(d, g1, g2, dv_kms, f1, f2, **kw)
+                                  for d, g1, g2, kw in prepared]
+        fine = profile_from_stats(combine_stats(fine_cache[(i, j)], weights), f1, f2,
+                                  nonneg=nonneg)
         fi, fj = np.unravel_index(np.argmax(fine['logL_profile']), fine['logL_profile'].shape)
         if fi in (0, len(f1) - 1) or fj in (0, len(f2) - 1):
-            warnings.warn("the refined TODCOR peak lies outside the fine map "
-                          f"(+/-{self.refine_span} coarse steps around the coarse "
-                          "argmax); reporting the coarse-map estimate, whose "
-                          "sub-grid refinement may be biased.", stacklevel=3)
             return None
         return fine
 
-    @staticmethod
-    def _profile_at(prepared, dv_kms, v1, v2, nonneg):
+    def _window_noise(self, fit, windows):
         '''
-        Profile amplitudes, chi2 and chi2_red exactly at one (v1, v2) (km/s),
-        so the reported amplitudes belong to the reported velocities.
+        Each window's native per-pixel noise, from its own residual at the
+        joint best fit of a unit-noise pass.
+
+        Window i's share of the joint chi2, chi2_i
+        (todcor.estimator.chi2_from_stats at the joint amplitudes), is set
+        against its noise degrees of freedom:
+
+            sigma_i^2 = chi2_i / (nu_i * (1 - 4 / sum(nu)))
+
+        The four shared parameters (v1, v2, a1, a2) take four dof from the
+        joint chi2, charged to the windows in proportion to nu_i. (A window's
+        exact charge -- the trace of its block of the hat matrix -- follows its
+        line content instead; the two differ by at most 4 / nu_i in sigma_i^2.)
+        The charges sum to four, so with one window this is sqrt(chi2_red).
+
+        A window with fewer than ``self.min_noise_dof`` dof (its estimate
+        would scatter by more than ~10 per cent), or with no residual to
+        measure (chi2_i <= 0, e.g. a masked order filled with continuum), gets
+        the common estimate instead, with a warning: sum(chi2_i) / sum(dof_i)
+        over the windows that measured their own noise -- a flat order's
+        zero chi2 would drag a pooled estimate down -- or over all windows
+        (i.e. chi2_red) if none did.
+
+        :return: (sigma, fallback) - per-window noise (flux units, per native
+                 pixel) and a Boolean array marking the fallbacks.
         '''
-        g1_, g2_ = np.array([v1]), np.array([v2])
-        stats = combine_stats(window_stats(d, g1, g2, dv_kms, g1_, g2_, **kw)
-                              for d, g1, g2, kw in prepared)
-        return profile_from_stats(stats, g1_, g2_, nonneg=nonneg)['best']
+        best = fit['best']
+        chi2 = np.array([chi2_from_stats(st, best['a1'], best['a2']).item()
+                         for st in fit['at_peak']])
+        nu = np.array([st['nu'] for st in fit['at_peak']])
+        dof = nu * (1.0 - 4.0 / nu.sum())
+        own = (dof >= self.min_noise_dof) & np.isfinite(chi2) & (chi2 > 0)
+        pool = own if own.any() else np.ones_like(own)
+        common = chi2[pool].sum() / dof[pool].sum()
+        if not (np.isfinite(common) and common > 0):
+            raise ValueError(
+                f"cannot estimate the noise from the fit (chi2 per dof = {common}); "
+                "pass an explicit sigma")
+        fallback = ~own
+        if fallback.any():
+            bad = [win['order'] for win, fb in zip(windows, fallback) if fb]
+            warnings.warn(
+                f"order(s) {bad}: too few noise degrees of freedom (< "
+                f"{self.min_noise_dof}) or no residual to measure their own noise; "
+                "using the common noise estimate for them", stacklevel=3)
+        var = np.where(fallback, common, chi2 / np.where(fallback, 1.0, dof))
+        return np.sqrt(var), fallback
 
     @staticmethod
     def _template_on_grid(template, order, wave):

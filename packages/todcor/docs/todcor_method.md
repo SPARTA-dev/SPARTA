@@ -131,7 +131,10 @@ may differ in `dv`, resolution, or instrument. In SPARTA the natural windows are
 the **spectral orders** of one observation, which is exactly what
 `CCF2d.CrossCorrelateSpec` pools; hand-picked line windows (He II 4686, N IV
 4058, …) work the same way — one window per line → `combine_stats` → a joint
-velocity fit.
+velocity fit. The statistics are linear in the Parseval weights `1/σ²`, so
+`combine_stats(stats, weights=w)` — each window's six statistics times `w_i`,
+`ν` unchanged — equals recomputing window *i* at noise `σ_i/√w_i`: windows are
+re-weighted without new FFTs (§8).
 
 Two usage constraints — the first is checked at runtime (shape guard in
 `combine_stats`), the second cannot be:
@@ -231,16 +234,69 @@ linear-λ native grids): χ²_red = 1.006–1.014 for dv = 0.25, 0.5, 1, 1.5, 2,
 3 × native. (Probing a single phase had given ν ≈ 0 at 2× — χ²_red undefined —
 and χ²_red 1.11–1.34 at 1.5× and 3×.)
 
-Since χ² and the map curvature scale as `1/σ²`, a single common σ does not
-move the argmax and rescales the errors by `√χ²_red`. `CCF2d`'s default
-`sigma=None` uses exactly that: fit at unit σ, report `sigma = √χ²_red` (the
-native per-pixel noise, χ²_red at unit σ) and errors scaled by it. The reported
-`chi2_best` / `chi2_red` are at the noise behind the errors, so under
-`sigma=None` χ²_red = 1 by construction; `chi2_map` is the same χ² on the
-maps' noise scale (unit σ under `sigma=None`, where the logL/χ² maps, the fine
-maps, `self.stats` and `self.crlb` all stay at unit σ). An explicit `sigma`
-(scalar or per order) is taken at face value — no rescale — and χ²_red is a
-consistency check.
+**Per-order noise (`sigma=None`).** χ² and the map curvature scale as `1/σ²`,
+so one common σ would not move the argmax and would only rescale the errors by
+`√χ²_red` — which is what `sigma=None` used to do. But echelle orders differ in
+S/N by 2–5×, and equal weights then waste the clean orders: with two orders of
+noise 0.003 and 0.03 the RV scatter was 4.6–4.9× that of the fit with the true
+per-order σ (Monte Carlo, 200 realisations; the errors were honest, the
+weighting was not). `CCF2d`'s default `sigma=None` therefore fits twice:
+
+1. **Pass 1** fits every order at unit σ and locates the joint peak (coarse +
+   fine maps), with the amplitudes and every window's statistics evaluated
+   exactly at the refined `(v1, v2)`.
+2. Each window's share of the joint χ² there, `χ²_i = chi2_from_stats(stats_i,
+   a1, a2)` (the shares sum to the joint χ²), gives its own noise
+
+       σ_i² = χ²_i / (ν_i (1 − 4/Σν))
+
+   The four shared parameters take four dof from the joint χ²; each window is
+   charged a share proportional to `ν_i`. Its exact charge — the trace of its
+   block of the hat matrix — follows its line content instead, but the two
+   differ by at most `4/ν_i` in `σ_i²` (≲ 0.2 % for an order with `ν ≈ 2000`).
+   The charges sum to four, so with one window `σ² = χ²_red`, the old estimate.
+3. **Pass 2** weights each window by `1/σ_i²` and re-profiles. No FFT is
+   repeated for this: the six statistics are linear in the Parseval weights,
+   so `combine_stats(stats, weights=1/σ_i²)` re-pools the per-window coarse
+   statistics (kept for the call anyway), and the per-window fine-map
+   statistics are cached by coarse node and re-pooled when the coarse argmax
+   has not moved. Only the evaluation at the new refined peak (one 1 × 1
+   `window_stats` per window) is new. The RVs, amplitudes and errors come from
+   pass 2, at the noise `σ_i`; the maps, `self.stats` and `self.crlb` are on
+   that noise scale, and `Corr2d['sigma']` / `windows[i]['sigma']` report the
+   per-window estimates.
+
+A window with fewer than `min_noise_dof` = 50 dof (its σ would scatter by
+> 10 %), or with no residual to measure (`χ²_i ≤ 0`, e.g. a masked order filled
+with continuum, which would otherwise get an infinite weight), gets the common
+estimate `Σχ²_i/Σdof_i` over the windows that did measure their own (all
+windows if none did), with a warning and `windows[i]['sigma_fallback'] = True`.
+An order whose residual is dominated by template mismatch rather than noise
+gets a large σ_i and is down-weighted accordingly.
+
+Monte Carlo (two 35 Å orders on 1 km/s native grids resampled to 0.1 km/s,
+lines clear of the order edges, 200 realisations; std/eRV for RV1, RV2):
+
+| noise per order | fit | RV1 scatter | std/eRV | RV2 scatter | std/eRV | χ²_red |
+| --- | --- | --- | --- | --- | --- | --- |
+| 0.003, 0.03 | common σ (old `None`) | 0.0340 | 1.09 | 0.0521 | 0.98 | 1 |
+| 0.003, 0.03 | per-order σ (new `None`) | 0.00742 | 1.07 | 0.0106 | 0.98 | 0.977 |
+| 0.003, 0.03 | true σ | 0.00742 | 1.10 | 0.0106 | 1.00 | 1.002 |
+| 0.01, 0.01 | common σ (old `None`) | 0.01469 | 1.00 | 0.0262 | 1.05 | 1 |
+| 0.01, 0.01 | per-order σ (new `None`) | 0.01473 | 1.00 | 0.0262 | 1.05 | 1.000 |
+
+The σ_i estimates are within 1.5–2.3 % (rms) of the truth. One pass leaves a
+small bias: the cleaner window's pass-1 residual also holds the misfit of a fit
+pulled by the noisier window, so its σ runs high by 3 % at a 10× noise contrast
+(0.5 % at 3×), its errors are that much conservative, and χ²_red at the pass-2
+peak is ≈ 0.97 instead of 1. A second re-estimation removes it (σ within
+0.2 %, χ²_red = 1.000) but moves the RVs by only ~0.01 eRV, so `CCF2d` stops
+after one. Cost: two orders of ~2300 native pixels, 93 → 101 ms per call on a
+31 × 31 map; ≈ 370 ms either way (within timing noise) on the default
+301 × 301 map, whose coarse statistics pass 2 re-pools rather than recomputes.
+
+An explicit `sigma` (scalar or per order) is taken at face value — one pass, no
+re-estimation — and χ²_red is a consistency check.
 
 ## 9. Assumptions and caveats
 
@@ -257,9 +313,9 @@ Exact **only** under these; the first is the one to watch:
   Monte Carlo on preprocessed spectra: TODCOR RV scatter / eRV = 0.72–0.74,
   i.e. errors ~1.4× too large; UNICOR eRV / RV scatter = 1.17 at
   `SpecPreProccess`'s default `FilterHC = 0.15` and 1.38 at `FilterHC = 0.9`.
-  χ²_red then drifts from 1 and `sigma=None` absorbs only its mean scale.
-  Calibrate the errors by simulation (or a constant star) for preprocessed
-  spectra. The taper makes the noise heteroscedastic (`σ_n = w_n σ`); only its
+  χ²_red then drifts from 1 and `sigma=None` absorbs only each order's mean
+  scale. Calibrate the errors by simulation (or a constant star) for
+  preprocessed spectra. The taper makes the noise heteroscedastic (`σ_n = w_n σ`); only its
   mean square enters `ν`.
 - **White weights.** The Fisher weights ignore the colour of the resampled
   noise. An interpolator that attenuates in-band noise (linear interpolation's
@@ -270,6 +326,13 @@ Exact **only** under these; the first is the one to watch:
   and at 2× on a log-λ native grid, whose nodes then all fall on native pixels.
 - **χ²_red counts four parameters.** When `nonneg=True` clamps an amplitude to
   zero only three are free; the difference is negligible against `Σν`.
+- **Per-order noise under `sigma=None`** (§8) is one noise level per order:
+  noise that varies *within* an order (e.g. with the blaze) is averaged. Each
+  order is charged the four shared dof in proportion to `ν_i`, not by its line
+  content (≤ `4/ν_i` in `σ_i²`); one re-estimation leaves the cleaner of two
+  very unequal orders with a few-per-cent conservative σ. Orders below
+  `min_noise_dof` fall back to the common estimate. An order whose residual is
+  template mismatch rather than noise is down-weighted as if it were noisy.
 - **Local quadratic CRLB** (§8): valid for an isolated, well-resolved peak
   sampled by the fine map.
 - **Flat ℝ² amplitude prior** for the marginal map (§5).
@@ -291,12 +354,13 @@ All of these except `CCF2d` are reachable from the `todcor` namespace; the
 | `shift_template_flux`, `composite_flux` | `todcor.simulate` | forward model / simulate composites |
 | `window_stats` | `todcor.estimator` | the six sufficient statistics (+ noise dof `nu`) for one window (§3, §8) |
 | `resampled_noise_psd` | `todcor.estimator` | noise spectrum of resampled white native noise → `noise_psd` (§8) |
-| `combine_stats` | `todcor.estimator` | sum statistics across windows → joint fit (§7) |
+| `combine_stats` | `todcor.estimator` | (weighted) sum of statistics across windows → joint fit (§7, §8) |
+| `chi2_from_stats` | `todcor.estimator` | χ² of statistics at given amplitudes — per-window shares of the joint χ² (§8) |
 | `profile_from_stats` | `todcor.estimator` | profile/marginalise amplitudes → logL maps (§4–5) |
 | `todcor_map` | `todcor.estimator` | single-window convenience wrapper (§4) |
 | `crlb_from_map` | `todcor.estimator` | Cramér–Rao velocity errors from curvature (§8) |
 | `model_flux` | `todcor.simulate` | reconstruct the best-fit composite for residual plots |
-| `CCF2d` | `sparta.TODCOR` | `Spectrum` + two `Template`s → coarse + fine maps, RVs, errors, χ²_red (orders as windows) |
+| `CCF2d` | `sparta.TODCOR` | `Spectrum` + two `Template`s → coarse + fine maps, RVs, errors, χ²_red, per-order noise (orders as windows) |
 
 ## 11. Reference
 
