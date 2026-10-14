@@ -11,13 +11,17 @@ SPARTA's heavier stack. Two independent checks:
 """
 
 import ast
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-_SRC = Path(__file__).resolve().parents[1] / "src" / "unicor"
+_PKGS = Path(__file__).resolve().parents[2]
+_SRC = _PKGS / "unicor" / "src" / "unicor"
+# The fresh interpreter must find the checkout whether or not it is installed.
+_PATH = os.pathsep.join(str(p) for p in (_SRC.parent,))
 _SUBMODULES = ["dsp", "ccf"]
 FORBIDDEN = ("sparta", "astropy", "specutils", "pandas", "matplotlib")
 
@@ -29,7 +33,8 @@ def test_no_forbidden_modules_imported_at_runtime():
         f"bad = sorted({{k for k in sys.modules if k.split('.')[0] in {FORBIDDEN!r}}}); "
         "print(bad); sys.exit(1 if bad else 0)"
     )
-    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    env = dict(os.environ, PYTHONPATH=_PATH + os.pathsep + os.environ.get("PYTHONPATH", ""))
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
     assert proc.returncode == 0, (
         f"forbidden modules imported by unicor: {proc.stdout.strip()} {proc.stderr.strip()}"
     )

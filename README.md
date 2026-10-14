@@ -82,10 +82,16 @@ pip install ./packages/unicor ./packages/todcor    # TODCOR (needs unicor)
 Straight from GitHub, without cloning:
 
 ```bash
-pip install "sparta-unicor @ git+https://github.com/SPARTA-dev/SPARTA#subdirectory=packages/unicor"
-pip install "sparta-unicor @ git+https://github.com/SPARTA-dev/SPARTA#subdirectory=packages/unicor" \
-            "sparta-todcor @ git+https://github.com/SPARTA-dev/SPARTA#subdirectory=packages/todcor"
+R=git+https://github.com/SPARTA-dev/SPARTA
+pip install "sparta-unicor @ $R#subdirectory=packages/unicor"                 # UNICOR
+pip install "sparta-unicor @ $R#subdirectory=packages/unicor" \
+            "sparta-todcor @ $R#subdirectory=packages/todcor"                 # + TODCOR
+pip install "sparta-unicor @ $R#subdirectory=packages/unicor" \
+            "sparta-todcor @ $R#subdirectory=packages/todcor" "SPARTA @ $R"   # everything
 ```
+
+The engines are not on PyPI yet, so list them in the same `pip` call as anything
+that depends on them.
 
 Run the tests with `pytest` from the repository root (all three packages), or
 `pytest packages/todcor` for one engine.

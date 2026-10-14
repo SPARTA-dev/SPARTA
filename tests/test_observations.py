@@ -105,3 +105,15 @@ def test_clean_rejects_zero_sample_rate():
 def test_kek_loader_is_not_implemented():
     with pytest.raises(NotImplementedError, match="KEK"):
         ReadSpec("KEK")._load_kek(None, 4900, 5150)
+
+
+def test_clean_time_series_ignores_unaligned_vrad_list_and_rv_pairs():
+    # vrad_list only gets entries for headers carrying VRAD, and a [min, max]
+    # pair of RV rows is not one RV per epoch -- neither may block a time cut.
+    obs = _observations()
+    obs.vrad_list = [1.0, 2.0]
+    obs.time_series.calculated_vrad_list = [np.zeros(len(TIMES)), np.ones(len(TIMES))]
+    with pytest.warns(UserWarning, match="NaN filter"):
+        obs.clean_time_series(max_time=2.5)
+    _assert_consistent(obs, [0, 1, 2])
+    assert obs.vrad_list == [1.0, 2.0]

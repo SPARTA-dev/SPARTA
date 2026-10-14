@@ -48,6 +48,8 @@ def ccf_vs_velocity(template, signal, dv, vmax):
         Normalized correlation in [-1, 1]. Peaks at the velocity by which
         ``signal`` is red-shifted relative to ``template``.
     """
+    if not dv > 0:
+        raise ValueError(f"dv must be positive, got {dv}")
     t = np.asarray(template, float)
     s = np.asarray(signal, float)
     if t.shape != s.shape:
@@ -160,6 +162,11 @@ def ccf_at(v, ccf, v0):
     -------
     float
         Interpolated CCF value.
+
+    Raises
+    ------
+    ValueError
+        If ``v0`` lies outside ``[v[0], v[-1]]``.
     """
     v = np.asarray(v, float)
     ccf = np.asarray(ccf, float)
@@ -196,6 +203,8 @@ def rv_uncertainty(v, ccf, v_peak, n_orders):
         maximum of the spline (non-negative curvature).
     """
     v = np.asarray(v, float)
+    if not np.all(np.isfinite(ccf)):
+        raise ValueError("CCF contains NaN/inf")
     n_vels = len(v)
 
     spl = interpolate.UnivariateSpline(v, ccf, k=4, s=0)
@@ -244,8 +253,12 @@ def bisector_span(v, ccf, n_orders, levels=(0.35, 0.95)):
     low = [ccf_at(v, ccf, roots_low[0]), ccf_at(v, ccf, roots_low[1])]
     high = [ccf_at(v, ccf, roots_high[0]), ccf_at(v, ccf, roots_high[1])]
 
-    v_peak, _ = subpixel_peak(v, ccf)
-    err = rv_uncertainty(v, ccf, v_peak, n_orders)
+    try:
+        v_peak, _ = subpixel_peak(v, ccf)
+        err = rv_uncertainty(v, ccf, v_peak, n_orders)
+    except ValueError:
+        # The bisector is defined, but its error needs a located peak.
+        err = np.nan
 
     bis = (low[1] + low[0]) / 2 - (high[1] + high[0]) / 2
     return bis, np.sqrt(2) * err

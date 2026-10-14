@@ -26,7 +26,7 @@ from sparta.USURPER.USURPER_functions import calc_PDC, calc_PDC_unbiased, calc_p
 from scipy.stats.distributions import chi2
 
 
-def _is_numeric_scalar(v):
+def is_numeric_scalar(v):
     '''
     True for a single numeric value of any numpy or Python numeric type
     (float32, int, ...), which marks a scalar (e.g. RV) time series rather
@@ -112,7 +112,7 @@ class PeriodicityDetector:
 
         temp = []
 
-        if _is_numeric_scalar(self.time_series.vals[0]) or isinstance(self.time_series.vals[0], (tuple, list)):
+        if is_numeric_scalar(self.time_series.vals[0]) or isinstance(self.time_series.vals[0], (tuple, list)):
             self.method = "PDC"
         elif len(self.time_series.calculated_vrad_list) != 0:
             self.method = "PDC"
@@ -155,7 +155,7 @@ class PeriodicityDetector:
               calc_unbiased_flag: bool, sets running the unbiased PDC
         '''
 
-        if not _is_numeric_scalar(self.time_series.vals[0]):
+        if not is_numeric_scalar(self.time_series.vals[0]):
             self.method = "USURPER"
         else:
             raise ValueError('USURPER is available for spectrum time-series only')
@@ -190,7 +190,7 @@ class PeriodicityDetector:
 
         self.partial_type = partial_type
 
-        if not _is_numeric_scalar(self.time_series.vals[0]):
+        if not is_numeric_scalar(self.time_series.vals[0]):
             if partial_type == "shift":
                 self.method = "shift_periodogram"
             elif partial_type == "shape":
@@ -213,7 +213,7 @@ class PeriodicityDetector:
         This function runs the GLS calculation process.
         '''
 
-        if _is_numeric_scalar(self.time_series.vals[0]):
+        if is_numeric_scalar(self.time_series.vals[0]):
             self.GLS_power = LombScargle(self.time_series.times, self.time_series.vals).power(self.GLS_frequency)
         else:
             if len(self.time_series.calculated_vrad_list) != 0:
@@ -288,7 +288,7 @@ class PeriodicityDetector:
 
             times_folded = [t % self.period_truth[0] for t in self.time_series.times]
 
-            if _is_numeric_scalar(self.time_series.vals[0]):
+            if is_numeric_scalar(self.time_series.vals[0]):
                 v_list = self.time_series.vals
             else:
                 if len(self.time_series.calculated_vrad_list) != 0:

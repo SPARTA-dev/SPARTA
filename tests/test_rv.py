@@ -86,3 +86,16 @@ def test_a_grid_that_is_not_velocity_even_is_refused(template):
     obs.sp[0] = np.delete(obs.sp[0], np.arange(100, 110))
     with pytest.raises(ValueError, match="uniform"):
         CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=template, VelBound=50)
+
+
+def test_an_order_the_template_does_not_cover_is_nan_not_fatal():
+    # Order 0 lies outside the template's span, so the resampled template is a
+    # constant there; that order is NaN and order 1 still yields its RV.
+    tmpl = Template(template=Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0)], name="t"))
+    far = np.linspace(6000.0, 6040.0, 4000)
+    obs = Spectrum(wv=[far, WAVE.copy()],
+                   sp=[np.ones_like(far), _line(5500.0 * (1 + 4.0 / C))], name="o")
+    with pytest.warns(UserWarning, match="order 0"):
+        ccf = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=tmpl, dv=0.5, VelBound=50)
+    assert np.isnan(ccf.Corr["RV"][0, 0])
+    assert float(ccf.Corr["RV"][1, 0]) == pytest.approx(4.0, abs=0.05)

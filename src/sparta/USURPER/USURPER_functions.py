@@ -188,7 +188,7 @@ def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbias
                 raise ValueError(
                     f"The partial periodogram needs one RV (km/s) per epoch in "
                     f"time_series.calculated_vrad_list; got {len(vrads)} for {len(waves)} epochs.")
-            waves =[dsp.doppler_shift_wave(w, -v) for w, v in zip(waves, vrads)]
+            waves = [dsp.doppler_shift_wave(w, -v) for w, v in zip(waves, vrads)]
             sp_matrix = resample_spec_to_common_grid(waves, fluxes, factor=1)
 
         method = periodicity_detector.method

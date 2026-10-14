@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]  # SPDX `license = "MIT"` (PEP 639)
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -40,5 +40,13 @@ Source = "https://github.com/SPARTA-dev/SPARTA"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# The bundled PHOENIX templates the examples and tests use, so a regular
+# (non-editable) install finds them instead of downloading into site-packages.
+"sparta.UNICOR" = ["template_files/WAVE_PHOENIX-ACES-AGSS-COND-2011.fits",
+                   "template_files/lte*.fits"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages/unicor/tests", "packages/todcor/tests"]
+# Always test this checkout, whatever happens to be installed in the env.
+pythonpath = ["src", "packages/unicor/src", "packages/todcor/src"]

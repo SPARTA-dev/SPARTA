@@ -237,7 +237,7 @@ class CCF2d:
         if crlb['on_edge']:
             warnings.warn("the TODCOR peak lies on the edge of the velocity grid; "
                           "the RVs are grid-limited and their errors are NaN. "
-                          "Widen VelBound (or the explicit grids).")
+                          "Widen VelBound (or the explicit grids).", stacklevel=2)
         res.update(RV1=crlb['peak_refined'][0], RV2=crlb['peak_refined'][1],
                    eRV1=crlb['sigma_v1'], eRV2=crlb['sigma_v2'],
                    rho12=crlb['rho'], cov=crlb['cov'], peak=crlb['peak'])

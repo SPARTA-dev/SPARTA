@@ -24,13 +24,14 @@
 # (velocity-even) grid.
 #
 # Dependencies: numpy, astropy, matplotlib, copy, unicor.
-# Last update: Avraham Binnenfeld, 20210510.
+# Last update: 2026-10-14 (array engine moved to the unicor package).
 
 
 import numpy as np
 from astropy import constants as consts, units as u
 import matplotlib.pyplot as plt
 from copy import deepcopy
+import warnings
 from unicor import ccf as unicor_ccf, dsp
 
 class CCF1d:
@@ -121,11 +122,23 @@ class CCF1d:
             # Resample the template onto the SAME grid as the observation, so
             # the cross-correlation is equal-length and symmetric. The legacy
             # code truncated the template to a shifted sub-grid, which made
-            # only negative velocities recoverable (see KNOWN_TRAPS.md).
-            spT = dsp.resample(np.asarray(template.model.wv[I]),
-                               np.asarray(template.model.sp[I]), w)
+            # only negative velocities recoverable (see KNOWN_TRAPS.md). A
+            # single-order template (e.g. a full-range library spectrum) is
+            # reused for every order, as in CCF2d.
+            It = I if len(template.model.wv) > 1 else 0
+            spT = dsp.resample(np.asarray(template.model.wv[It]),
+                               np.asarray(template.model.sp[It]), w)
 
-            v_kms, C = unicor_ccf.ccf_vs_velocity(spT, s, dv_kms, vmax_kms)
+            # A template that is flat over this order (e.g. it does not cover
+            # it) has nothing to correlate: that order becomes NaN, as before,
+            # instead of aborting the whole epoch.
+            try:
+                v_kms, C = unicor_ccf.ccf_vs_velocity(spT, s, dv_kms, vmax_kms)
+            except ValueError as err:
+                warnings.warn(f"order {I}: {err}; its CCF is set to NaN", stacklevel=2)
+                K = min(int(round(vmax_kms / dv_kms)), len(w) - 1)
+                v_kms = np.arange(-K, K + 1) * dv_kms
+                C = np.full(len(v_kms), np.nan)
 
             if V is None:
                 V = v_kms << (u.km / u.s)

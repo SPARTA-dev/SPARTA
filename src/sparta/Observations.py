@@ -33,6 +33,7 @@
 
 import os
 import contextlib
+import warnings
 import numpy as np
 from sparta.UNICOR.Spectrum import Spectrum
 from sparta.Auxil.ReadSpec import ReadSpec
@@ -356,10 +357,17 @@ class Observations:
         has_rvs = vrads.size > 0
         if (max_vel is not None or min_vel is not None) and not has_rvs:
             raise ValueError("A velocity cut needs RVs in time_series.calculated_vrad_list, which is empty.")
-        if has_rvs and (nan_flag or max_vel is not None or min_vel is not None):
-            if vrads.shape != (n,):
+        velocity_cut = max_vel is not None or min_vel is not None
+        if has_rvs and vrads.shape != (n,):
+            # E.g. a [min, max] pair of RV rows: not one RV per epoch, so it
+            # cannot drive a cut -- but it should not block a time-only clean.
+            if velocity_cut:
                 raise ValueError(f"time_series.calculated_vrad_list has shape {vrads.shape}; "
-                                 f"expected one RV per epoch ({n},).")
+                                 f"a velocity cut needs one RV per epoch ({n},).")
+            if nan_flag:
+                warnings.warn("calculated_vrad_list is not one RV per epoch; "
+                              "skipping the NaN filter.", stacklevel=2)
+        elif has_rvs and (nan_flag or velocity_cut):
             if nan_flag:
                 keep &= ~np.isnan(vrads)
             # NaN RVs fail both comparisons, so they drop out of a cut regardless.
@@ -371,9 +379,13 @@ class Observations:
         if max_time is not None:
             keep &= np.asarray(ts.times, float) <= max_time
 
-        for owner, names in ((ts, ('times', 'vals', 'calculated_vrad_list', 'errors',
-                                   'calculated_ccf_peaks')),
-                             (self, ('vrad_list', 'bcv', 'snr', 'air_mass',
+        ts_names = ('times', 'vals', 'errors', 'calculated_ccf_peaks')
+        if not has_rvs or vrads.shape == (n,):
+            ts_names += ('calculated_vrad_list',)
+        for owner, names in ((ts, ts_names),
+                             # vrad_list is left out: it only gets entries for
+                             # headers that carry VRAD, so it is not epoch-aligned.
+                             (self, ('bcv', 'snr', 'air_mass',
                                      'ccf_list', 'vels', 'evels', 'ccf_peaks',
                                      'ccf2d_list', 'vels1', 'vels2', 'evels1', 'evels2',
                                      'amps1', 'amps2', 'BIS', 'eBIS'))):
