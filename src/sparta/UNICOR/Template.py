@@ -104,21 +104,12 @@ class Template:
                             "and downloads are disabled (allow_download=False).")
                     self.download_PHOENIX_files(sub_path, fname)
 
-            # Open the fits file using fits module from astropy.
-            wl_fname = self.wl_f_n
-            spec_fname = f_n
+            with fits.open(os.path.join(TEMPLATE_FILES_PATH, f_n)) as hdul_spec:
+                s = np.squeeze(np.array(hdul_spec[0].data))
+                header = hdul_spec[0].header.copy()
 
-            hdul_spec = fits.open(
-                os.path.join(TEMPLATE_FILES_PATH, spec_fname)
-            )
-
-            s = np.squeeze(np.array(hdul_spec[0].data))
-
-            hdul_wl = fits.open(
-                os.path.join(TEMPLATE_FILES_PATH, wl_fname)
-            )
-
-            w = np.squeeze(np.array(hdul_wl[0].data))
+            with fits.open(os.path.join(TEMPLATE_FILES_PATH, self.wl_f_n)) as hdul_wl:
+                w = np.squeeze(np.array(hdul_wl[0].data))
 
             # Change to air wavelengths, if required
             # The following transformation is taken from Morton (2000, ApJ. Suppl., 130, 403)
@@ -128,10 +119,10 @@ class Template:
                     f = 1 + 0.0000834254 + 0.02406147 / (130 - s2) + 0.00015998 / (38.9 - s2)
                     w = w/f
 
-            self.PHXMASS = hdul_spec[0].header['PHXMASS']
+            self.PHXMASS = header['PHXMASS']
 
             # Effective stellar radius cm
-            self.PHXREFF = hdul_spec[0].header['PHXREFF']
+            self.PHXREFF = header['PHXREFF']
 
             min_index = np.where(w > self.min_val)[0][0]
             max_index = np.where(w > self.max_val)[0][0]
@@ -151,11 +142,8 @@ class Template:
             self.max_val = kwargs['max_val']
             self.wl_f_n = 'WAVE_PHOENIX-ACES-AGSS-COND-2011.fits'
 
-            hdul_wl = fits.open(
-                os.path.join(TEMPLATE_FILES_PATH, self.wl_f_n)
-            )
-
-            w = np.squeeze(np.array(hdul_wl[0].data))
+            with fits.open(os.path.join(TEMPLATE_FILES_PATH, self.wl_f_n)) as hdul_wl:
+                w = np.squeeze(np.array(hdul_wl[0].data))
             s = np.zeros_like(w)
 
             min_index = np.where(w > self.min_val)[0][0]

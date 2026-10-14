@@ -24,7 +24,8 @@ from unicor.dsp import doppler_factor, resample, shift_kms
 
 # =============================================================================
 # =============================================================================
-def shift_template_flux(wave_t, flux_t, wave_grid, v, fill=1.0, velocity_convention='cz'):
+def shift_template_flux(wave_t, flux_t, wave_grid, v, fill=1.0, velocity_convention='cz',
+                        kind='linear'):
     """Resample a template, Doppler-shifted by ``v`` (km/s), onto ``wave_grid``.
 
     A line emitted at rest wavelength ``lam`` appears at ``lam * D(v)``, with
@@ -46,6 +47,11 @@ def shift_template_flux(wave_t, flux_t, wave_grid, v, fill=1.0, velocity_convent
         (default 1.0, the continuum).
     velocity_convention : {'cz', 'relativistic'}
         Doppler convention of ``v``. Default 'cz'.
+    kind : {'linear', 'cubic'}
+        Interpolation of the template (:func:`unicor.dsp.resample`). Linear
+        is enough for a template sampled much finer than its lines; use
+        'cubic' when it is not (e.g. PHOENIX at ~0.6 km/s per pixel), where
+        linear interpolation biases the shift at the m/s level.
 
     Returns
     -------
@@ -54,12 +60,13 @@ def shift_template_flux(wave_t, flux_t, wave_grid, v, fill=1.0, velocity_convent
     """
     return resample(wave_t, flux_t,
                     np.asarray(wave_grid, float) / doppler_factor(v, velocity_convention),
-                    fill=fill)
+                    fill=fill, kind=kind)
 
 
 # =============================================================================
 # =============================================================================
-def composite_flux(wave_grid, templates, velocities, amplitudes, velocity_convention='cz'):
+def composite_flux(wave_grid, templates, velocities, amplitudes, velocity_convention='cz',
+                   kind='linear'):
     """Build a noiseless composite (continuum-normalised) by physical shifting.
 
     Parameters
@@ -74,6 +81,8 @@ def composite_flux(wave_grid, templates, velocities, amplitudes, velocity_conven
         Linear scaling (light/dilution fraction) of each component's *lines*.
     velocity_convention : {'cz', 'relativistic'}
         Doppler convention of ``velocities``. Default 'cz'.
+    kind : {'linear', 'cubic'}
+        Interpolation of the templates, see :func:`shift_template_flux`.
 
     Returns
     -------
@@ -83,7 +92,8 @@ def composite_flux(wave_grid, templates, velocities, amplitudes, velocity_conven
     g = np.zeros_like(np.asarray(wave_grid, float))
     for (wave_t, flux_t), v, a in zip(templates, velocities, amplitudes):
         g += a * (shift_template_flux(wave_t, flux_t, wave_grid, v,
-                                      velocity_convention=velocity_convention) - 1.0)
+                                      velocity_convention=velocity_convention,
+                                      kind=kind) - 1.0)
     return 1.0 + g
 
 

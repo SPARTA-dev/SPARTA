@@ -7,18 +7,24 @@ key to it, and `get` looks one up::
     from sparta import instruments
     spec = instruments.get("HARPS").load(path, min_wv=4990, max_wv=5090)
 
+The synthetic ``SIMULATED`` product (`sparta.instruments.simulated`) builds
+spectra as a chosen archive product would record them, from a `Simulation`.
+
 Wavelengths are returned in Angstrom, velocities in km/s, times in days.
 ``docs/instruments.md`` is generated from the registry by
 ``python -m sparta.instruments`` (see `render_markdown`).
 """
 from sparta.instruments import (apogee, coralie, elodie, feros, harps, lamost, nres, pepsi,
-                                srg, tres, uves)
+                                simulated, srg, tres, uves)
 from sparta.instruments.base import Instrument, LoadedSpectrum, Product, Recommended
+from sparta.instruments.simulated import Component, Simulation, Truth
 
 __all__ = ["REGISTRY", "get", "render_markdown",
-           "Instrument", "LoadedSpectrum", "Product", "Recommended"]
+           "Instrument", "LoadedSpectrum", "Product", "Recommended",
+           "Component", "Simulation", "Truth"]
 
-MODULES = (harps, nres, apogee, coralie, elodie, feros, lamost, pepsi, srg, tres, uves)
+MODULES = (harps, nres, apogee, coralie, elodie, feros, lamost, pepsi, srg, tres, uves,
+           simulated)
 
 
 def _build_registry(modules):
@@ -66,7 +72,7 @@ def _cell(value):
 
 def _product_markdown(product):
     loader = f"{product.load.__module__}.{product.load.__qualname__}"
-    lines = [f"### `{product.survey}`" + ("" if product.verified else " (unverified)"),
+    lines = [f"### `{product.survey}`" + _status_suffix(product),
              "",
              product.description,
              "",
@@ -89,6 +95,16 @@ def _product_markdown(product):
     if rec.drop_orders:
         lines.append(f"- Orders to drop: {_ranges(rec.drop_orders)}")
     return lines
+
+
+def _status(product):
+    return "simulated" if product.synthetic else ("yes" if product.verified else "no")
+
+
+def _status_suffix(product):
+    if product.synthetic:
+        return " (simulated)"
+    return "" if product.verified else " (unverified)"
 
 
 def _ranges(indices):
@@ -119,12 +135,13 @@ def render_markdown():
              "",
              "Pass the survey key to `Observations(survey=...)` or "
              "`sparta.instruments.get(...)`. Unverified loaders have not been checked "
-             "against archive files and warn (UserWarning) on every load.",
+             "against archive files and warn (UserWarning) on every load. The simulated "
+             "product is validated by injection-recovery tests instead.",
              "",
              "| Survey key | Instrument | Verified | Orders | Grid | λ frame | SPECSYS | Time |",
              "|---|---|---|---|---|---|---|---|"]
     for p in REGISTRY.values():
-        lines.append(f"| `{p.survey}` | {p.instrument.name} | {'yes' if p.verified else 'no'} | "
+        lines.append(f"| `{p.survey}` | {p.instrument.name} | {_status(p)} | "
                      f"{'all' if p.multi_order else 'one'} | "
                      f"{'resampled' if p.resampled else 'native'} | "
                      f"{_cell(p.wavelength_frame)} | {_cell(p.specsys)} | {p.time_system} |")

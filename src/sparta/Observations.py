@@ -46,50 +46,54 @@ class Observations:
     # =============================================================================
     # =============================================================================
     def __init__(self, survey=None, min_snr=-1, target_visits_lib=None, time_series=[],
-                 min_avg_flux_val=-1, sample_rate=1, output=False, min_wv=5150, max_wv=5300):
+                 min_avg_flux_val=-1, sample_rate=1, output=False, min_wv=5150, max_wv=5300,
+                 simulation=None):
         '''
         Input: All input is optional, and needs to be called along
                with its keyword. Below appears a list of the possible input
                variables.
 
               survey: str, registry key of the data product (see
-                      sparta.instruments.REGISTRY); required with target_visits_lib.
+                      sparta.instruments.REGISTRY); required with target_visits_lib
+                      or simulation.
               min_snr: float, can be used to sort out noisy observations
               target_visits_lib: str, observation visit directory path
-                                 (required when time_series is not supplied).
+                                 (required when reading files).
               time_series: TimeSeries object, in case a direct load of TimeSeries (instead of file reading)
               min_wv, max_wv: float, wavelength window (Angstrom) passed to
                               single-order loaders.
+              simulation: sparta.instruments.Simulation, with survey='SIMULATED':
+                          simulated spectra instead of files, ingested the same
+                          way; what was injected is kept as ``self.truth``
+                          (sparta.instruments.Truth), which is None otherwise.
 
         When reading files, ``time_system`` and ``wavelength_frame`` record
         what the loader returned (e.g. 'BJD-TDB', 'air'); a directory whose
         visits disagree on either raises ValueError. Both are None for a
         directly supplied TimeSeries.
         '''
+        self.truth = None
         if not isinstance(time_series, TimeSeries):
             if survey is None:
                 raise ValueError("survey is required to read a visit directory; known surveys: "
                                  f"{', '.join(sorted(instruments.REGISTRY))}")
             product = instruments.get(survey)
-            if not target_visits_lib:
-                raise ValueError(
-                    "target_visits_lib is required: pass the path to the "
-                    f"{survey} visit directory.")
-
-            self.file_list = []
-            count = 0
-            for root, dirs, files in os.walk(target_visits_lib):
-                for file in files:
-                    if (file.endswith(".fits") or file.endswith(".fits.gz") or file.endswith(".fts.gz") or file.endswith(".fits.Z")) and not file.startswith('~'):
-                        if count % sample_rate == 0:
-                            self.file_list.append(os.path.join(root, file))
-                        count = count + 1
-
-            records = []
-            for visit_path in self.file_list:
-                if output:
-                    print(visit_path)
-                records.append(product.load(visit_path, min_wv=min_wv, max_wv=max_wv))
+            if product.synthetic:
+                if simulation is None or target_visits_lib:
+                    raise ValueError(f"survey {survey!r} is simulated: pass simulation="
+                                     "Simulation(...), not target_visits_lib.")
+                self.file_list = []
+                records, self.truth = product.load(simulation)
+            else:
+                if simulation is not None:
+                    raise ValueError(f"simulation= needs a simulated survey ('SIMULATED'), "
+                                     f"not {survey!r}.")
+                if not target_visits_lib:
+                    raise ValueError(
+                        "target_visits_lib is required: pass the path to the "
+                        f"{survey} visit directory.")
+                records = self._read_directory(product, target_visits_lib, sample_rate,
+                                               output, min_wv, max_wv)
             self._ingest(records, min_snr=min_snr, min_avg_flux_val=min_avg_flux_val)
         else:
             self.time_series = time_series
@@ -101,6 +105,31 @@ class Observations:
             self.sample_size = self.time_series.size
 
         self.periodicity_detector = []
+
+# =============================================================================
+# =============================================================================
+    def _read_directory(self, product, target_visits_lib, sample_rate, output, min_wv, max_wv):
+        '''
+        Load every ``sample_rate``-th FITS file under ``target_visits_lib``
+        with ``product.load``; the paths are kept in ``self.file_list``.
+
+        :return: list of sparta.instruments.LoadedSpectrum.
+        '''
+        self.file_list = []
+        count = 0
+        for root, dirs, files in os.walk(target_visits_lib):
+            for file in files:
+                if (file.endswith(".fits") or file.endswith(".fits.gz") or file.endswith(".fts.gz") or file.endswith(".fits.Z")) and not file.startswith('~'):
+                    if count % sample_rate == 0:
+                        self.file_list.append(os.path.join(root, file))
+                    count = count + 1
+
+        records = []
+        for visit_path in self.file_list:
+            if output:
+                print(visit_path)
+            records.append(product.load(visit_path, min_wv=min_wv, max_wv=max_wv))
+        return records
 
 # =============================================================================
 # =============================================================================

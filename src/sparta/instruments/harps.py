@@ -116,6 +116,7 @@ PRODUCTS = (
                             RemCosmicNum=3, FilterLC=3, FilterHC=0.15, alpha=0.3)),
         verified=True,
         load=load_sdp,
+        grid_step_A=0.01,
     ),
     Product(
         survey="HARPS-CERES",

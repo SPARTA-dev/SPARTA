@@ -153,11 +153,20 @@ class Product:
     recommended : Recommended
     verified : bool
         True if the loader has been checked against real archive files. An
-        unverified product's ``load`` warns (UserWarning) on every call.
+        unverified product's ``load`` warns (UserWarning) on every call --
+        except a synthetic one's, which has no archive files to check against
+        and is never verified.
     load : callable
         ``load(path, *, min_wv, max_wv, **options) -> LoadedSpectrum``;
         ``min_wv``/``max_wv`` (Angstrom) select the window of single-order
-        products and are ignored by multi-order ones.
+        products and are ignored by multi-order ones. A synthetic product's
+        is ``load(simulation) -> (list of LoadedSpectrum, truth)``.
+    grid_step_A : float or None
+        Pixel step (Angstrom) of a linear archive grid, when documented.
+    synthetic : bool
+        True for a simulator rather than an archive product (see
+        `sparta.instruments.simulated`); validated by injection-recovery
+        tests instead of real files.
     """
     survey: str
     instrument: Instrument
@@ -171,6 +180,8 @@ class Product:
     recommended: Recommended
     verified: bool
     load: Callable[..., LoadedSpectrum]
+    grid_step_A: Optional[float] = None
+    synthetic: bool = False
 
     def __post_init__(self):
         if self.wavelength_frame not in WAVELENGTH_FRAMES:
@@ -181,7 +192,10 @@ class Product:
         if self.resampled and self.instrument.native_step_kms is not None:
             object.__setattr__(self, "load",
                                _seed_native_step(self.instrument.native_step_kms, self.load))
-        if not self.verified:
+        if self.synthetic and self.verified:
+            raise ValueError(f"{self.survey}: a synthetic product has no archive files "
+                             "to be verified against")
+        if not (self.verified or self.synthetic):
             object.__setattr__(self, "load", _warn_unverified(self.survey, self.load))
 
 

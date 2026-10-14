@@ -91,10 +91,12 @@ def test_load_seeds_the_native_step_only_for_resampled_products(product):
                               wavelength_frame=None)
 
     fields = {f: getattr(product, f) for f in Product.__dataclass_fields__}
-    seeded = Product(**{**fields, "load": fake_load, "verified": True})
+    seeded = Product(**{**fields, "load": fake_load})
     native = product.instrument.native_step_kms
     expected = [native, native] if product.resampled and native is not None else None
-    assert seeded.load("x", min_wv=0.0, max_wv=1.0).native_step_kms == expected
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", UserWarning)        # unverified products warn
+        assert seeded.load("x", min_wv=0.0, max_wv=1.0).native_step_kms == expected
 
 
 def test_a_loader_reported_native_step_is_kept():
@@ -107,10 +109,21 @@ def test_a_loader_reported_native_step_is_kept():
 
 
 def test_every_verified_product_has_real_files():
+    # Archive products only: a synthetic product (the simulator) has no files to
+    # verify against, is never `verified`, and is covered by test_simulated.py.
     assert {p.survey for p in instruments.REGISTRY.values() if p.verified} == set(REAL_FILES)
 
 
-@pytest.mark.parametrize("product", [p for p in instruments.REGISTRY.values() if not p.verified],
+def test_synthetic_products_are_never_verified():
+    synthetic = [p for p in instruments.REGISTRY.values() if p.synthetic]
+    assert [p.survey for p in synthetic] == ["SIMULATED"]
+    fields = {f: getattr(synthetic[0], f) for f in Product.__dataclass_fields__}
+    with pytest.raises(ValueError, match="synthetic"):
+        Product(**{**fields, "verified": True})
+
+
+@pytest.mark.parametrize("product", [p for p in instruments.REGISTRY.values()
+                                     if not (p.verified or p.synthetic)],
                          ids=lambda p: p.survey)
 def test_unverified_loaders_warn(product, tmp_path):
     with pytest.warns(UserWarning, match=f"loader not verified against archive files: {product.survey}"):

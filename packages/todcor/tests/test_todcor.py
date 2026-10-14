@@ -560,6 +560,23 @@ def test_forward_model_follows_the_convention(conv):
         1.0 + data_g, atol=1e-9)
 
 
+def test_cubic_shift_of_a_coarse_template_beats_linear():
+    # A template sampled at ~4 px per line sigma: linear interpolation of the
+    # shifted template errs at the per-cent level, the cubic spline far less.
+    t_wave, _ = ops.log_lambda_grid(4990.0, 5070.0, 0.6)
+    wave, _ = ops.log_lambda_grid(5000.0, 5060.0, 0.1)
+    v = 13.37
+    exact = _T1(wave / _factor(v, 'cz'))
+    err = {kind: np.max(np.abs(shift_template_flux(t_wave, _T1(t_wave), wave, v, kind=kind) - exact))
+           for kind in ('linear', 'cubic')}
+    assert err['cubic'] < 0.1 * err['linear']
+    np.testing.assert_allclose(
+        composite_flux(wave, [(t_wave, _T1(t_wave))], [v], [1.0], kind='cubic'),
+        shift_template_flux(t_wave, _T1(t_wave), wave, v, kind='cubic'), atol=1e-15)
+    with pytest.raises(ValueError, match="kind"):
+        shift_template_flux(t_wave, _T1(t_wave), wave, v, kind='quadratic')
+
+
 def test_the_default_convention_is_cz():
     for fn in (window_stats, todcor_map, shift_template_flux, composite_flux, model_flux):
         assert inspect.signature(fn).parameters['velocity_convention'].default == 'cz'
