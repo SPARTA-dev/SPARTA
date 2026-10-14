@@ -16,6 +16,7 @@ PHOENIX templates come from the bundled cache, never the network).
 | [`04_template_from_data_tiravel`](04_template_from_data_tiravel.ipynb) | TIRAVEL: a template built from the observations; the alignment measure ρ; simulated data, then HARPS spectra of TOI-193. |
 | [`05_finding_periods`](05_finding_periods.ipynb) | GLS, PDC (with and without error bars), USuRPER and the partial (shift/shape) periodograms; local p-values. |
 | [`06_end_to_end`](06_end_to_end.ipynb) | A simulated season of HARPS-like spectra → RVs → periodogram → orbit fit, with the 1-day alias. |
+| [`07_usurper_concept`](07_usurper_concept.ipynb) | USuRPER without RVs or a template: spectra as points on a unit sphere; a moving star, a temperature change with no motion, and an unresolved twin binary found at half its period. |
 
 ## Deep dives
 
