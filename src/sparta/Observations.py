@@ -6,9 +6,9 @@
 # existing TimeSeries object. It also drives GLS / Zucker PDC / USuRPER on the
 # data (arxiv.org/pdf/1711.06075.pdf) via a PeriodicityDetector.
 #
-# Per-instrument FITS reading lives in ReadSpec (HARPS, NRES, APOGEE, ELODIE,
-# LAMOST, and more). Conventions: wavelengths in Angstrom, velocities in km/s,
-# times in BJD (days), periodogram frequency in 1/day.
+# Per-instrument FITS reading lives in sparta.instruments (one module per
+# instrument; the survey key selects the loader). Conventions: wavelengths in
+# Angstrom, velocities in km/s, times in BJD (days), periodogram frequency in 1/day.
 #
 # Observations class stores the following methods:
 # ---------------------------------------------
@@ -36,7 +36,7 @@ import contextlib
 import warnings
 import numpy as np
 from sparta.UNICOR.Spectrum import Spectrum
-from sparta.Auxil.ReadSpec import ReadSpec
+from sparta import instruments
 from sparta.Auxil.TimeSeries import TimeSeries
 from sparta.Auxil.PeriodicityDetector import PeriodicityDetector
 from tqdm import tqdm
@@ -44,87 +44,52 @@ from tqdm import tqdm
 class Observations:
     # =============================================================================
     # =============================================================================
-    def __init__(self, survey="APOGEE", min_snr=-1, target_visits_lib=None, time_series=[],
+    def __init__(self, survey=None, min_snr=-1, target_visits_lib=None, time_series=[],
                  min_avg_flux_val=-1, sample_rate=1, output=False, min_wv=5150, max_wv=5300):
         '''
         Input: All input is optional, and needs to be called along
                with its keyword. Below appears a list of the possible input
                variables.
 
-              survey: str, source name.
+              survey: str, registry key of the data product (see
+                      sparta.instruments.REGISTRY); required with target_visits_lib.
               min_snr: float, can be used to sort out noisy observations
               target_visits_lib: str, observation visit directory path
                                  (required when time_series is not supplied).
               time_series: TimeSeries object, in case a direct load of TimeSeries (instead of file reading)
+              min_wv, max_wv: float, wavelength window (Angstrom) passed to
+                              single-order loaders.
 
         When reading files, ``time_system`` and ``wavelength_frame`` record
-        what ReadSpec returned (e.g. 'BJD-TDB', 'air'); a directory whose
+        what the loader returned (e.g. 'BJD-TDB', 'air'); a directory whose
         visits disagree on either raises ValueError. Both are None for a
         directly supplied TimeSeries.
         '''
         if not isinstance(time_series, TimeSeries):
-            self.file_list = []
-            self.spec_list = []
-            self.time_list = []
-            self.first_time = []
-            self.vrad_list = []
-            self.bcv = []
-            self.snr = []
-            self.air_mass = []
-
+            if survey is None:
+                raise ValueError("survey is required to read a visit directory; known surveys: "
+                                 f"{', '.join(sorted(instruments.REGISTRY))}")
+            product = instruments.get(survey)
             if not target_visits_lib:
                 raise ValueError(
                     "target_visits_lib is required: pass the path to the "
                     f"{survey} visit directory.")
-            path = target_visits_lib
 
+            self.file_list = []
             count = 0
-
-            for root, dirs, files in os.walk(path):
+            for root, dirs, files in os.walk(target_visits_lib):
                 for file in files:
                     if (file.endswith(".fits") or file.endswith(".fits.gz") or file.endswith(".fts.gz") or file.endswith(".fits.Z")) and not file.startswith('~'):
                         if count % sample_rate == 0:
                             self.file_list.append(os.path.join(root, file))
                         count = count + 1
-                    else:
-                        pass
 
-            frames = set()
+            records = []
             for visit_path in self.file_list:
-
-                visit = ReadSpec(survey)
-                visit.load_spectrum_from_fits(path=visit_path, output=output, min_wv=min_wv, max_wv=max_wv)
-                w, s, bool_mask_s, date_obs, vrad, bcv, snr, air_mass = visit.retrieve_all_spectrum_parameters()
-                frames.add((visit.time_system, visit.wavelength_frame))
-
-                if (snr >= min_snr or snr == -1 or min_snr == -1) and (min_avg_flux_val == -1 or min_avg_flux_val <= np.mean(s)):
-                    if isinstance(visit.bcv, list):
-                        bcv = 0.0
-                    sp = Spectrum(wv=w, sp=s, bjd=date_obs, bcv=bcv, name=survey)
-                    sp.BarycentricCorrection()
-
-                    self.spec_list.append(sp)
-                    self.time_list.append(date_obs)
-                    self.bcv.append(bcv)
-                    self.snr.append(snr)
-                    self.air_mass.append(air_mass)
-
-                    if not isinstance(vrad, list):
-                        self.vrad_list.append(vrad)
-
-            self.sample_size = len(self.bcv)
-
-            # Relative times and a common CCF grid are meaningless across
-            # time systems or air/vacuum frames, so refuse a mixed directory.
-            if len(frames) > 1:
-                raise ValueError("visits disagree on (time_system, wavelength_frame): "
-                                 f"{sorted(frames, key=str)}")
-            self.time_system, self.wavelength_frame = frames.pop() if frames else (None, None)
-
-            self.convert_times_to_relative_float_values()
-
-            self.time_series = TimeSeries(size=self.sample_size, times=self.time_list,
-                                          vals=self.spec_list)
+                if output:
+                    print(visit_path)
+                records.append(product.load(visit_path, min_wv=min_wv, max_wv=max_wv))
+            self._ingest(records, min_snr=min_snr, min_avg_flux_val=min_avg_flux_val)
         else:
             self.time_series = time_series
             self.time_system = None
@@ -135,6 +100,65 @@ class Observations:
             self.sample_size = self.time_series.size
 
         self.periodicity_detector = []
+
+# =============================================================================
+# =============================================================================
+    def _ingest(self, records, min_snr=-1, min_avg_flux_val=-1):
+        '''
+        Build the time series from loaded spectra.
+
+        Keeps the records that pass the SNR and mean-flux cuts, applies each
+        one's barycentric correction, and fills spec_list, time_list (days
+        after ``first_time``), bcv (km/s), snr, air_mass, vrad_list and
+        time_series.
+
+        :param records: iterable of sparta.instruments.LoadedSpectrum.
+        :param min_snr: float, drop records with snr < min_snr; -1 disables
+                        the cut, and a record of unknown (NaN) snr is kept.
+        :param min_avg_flux_val: float, drop records whose mean flux is below
+                                 it; -1 disables the cut.
+        :raises ValueError: if the records (including dropped ones) disagree on
+                            (time_system, wavelength_frame).
+        '''
+        self.spec_list = []
+        self.time_list = []
+        self.first_time = []
+        self.vrad_list = []
+        self.bcv = []
+        self.snr = []
+        self.air_mass = []
+
+        frames = set()
+        for rec in records:
+            frames.add((rec.time_system, rec.wavelength_frame))
+            snr_ok = min_snr == -1 or np.isnan(rec.snr) or rec.snr >= min_snr
+            flux_ok = min_avg_flux_val == -1 or min_avg_flux_val <= np.mean(rec.flux)
+            if not (snr_ok and flux_ok):
+                continue
+            sp = Spectrum(wv=rec.wave, sp=rec.flux, bjd=rec.time, bcv=rec.bcv, name=rec.survey)
+            sp.BarycentricCorrection()
+
+            self.spec_list.append(sp)
+            self.time_list.append(rec.time)
+            self.bcv.append(rec.bcv)
+            self.snr.append(rec.snr)
+            self.air_mass.append(rec.air_mass)
+            if rec.vrad is not None:
+                self.vrad_list.append(rec.vrad)
+
+        self.sample_size = len(self.bcv)
+
+        # Relative times and a common CCF grid are meaningless across
+        # time systems or air/vacuum frames, so refuse a mixed directory.
+        if len(frames) > 1:
+            raise ValueError("visits disagree on (time_system, wavelength_frame): "
+                             f"{sorted(frames, key=str)}")
+        self.time_system, self.wavelength_frame = frames.pop() if frames else (None, None)
+
+        self.convert_times_to_relative_float_values()
+
+        self.time_series = TimeSeries(size=self.sample_size, times=self.time_list,
+                                      vals=self.spec_list)
 
 # =============================================================================
 # =============================================================================

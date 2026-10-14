@@ -27,7 +27,7 @@ import pathlib
 import numpy as np
 import pytest
 
-from sparta.Auxil.ReadSpec import ReadSpec
+from sparta import instruments
 from sparta.Observations import Observations
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -83,11 +83,10 @@ def _known_snr(x):
 
 def _load(survey, path, window):
     """The loader under test, as a plain dict."""
-    rs = ReadSpec(survey)
-    rs.load_spectrum_from_fits(path=str(path), **window)
-    return {"w": rs.w, "s": rs.s, "time": rs.DATE_OBS, "bcv": rs.bcv, "snr": rs.snr,
-            "air_mass": rs.air_mass, "vrad": rs.vrad, "time_system": rs.time_system,
-            "wavelength_frame": rs.wavelength_frame, "specsys": rs.specsys}
+    out = instruments.get(survey).load(path, **window)
+    return {"w": out.wave, "s": out.flux, "time": out.time, "bcv": out.bcv, "snr": out.snr,
+            "air_mass": out.air_mass, "vrad": out.vrad, "time_system": out.time_system,
+            "wavelength_frame": out.wavelength_frame, "specsys": out.specsys}
 
 
 def _record_loader(survey, path):

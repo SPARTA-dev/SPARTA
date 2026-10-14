@@ -1,4 +1,4 @@
-"""Tests for Observations.clean_time_series and the ReadSpec KEK stub.
+"""Tests for Observations: clean_time_series, survey lookup and _ingest.
 
 The Observations object is built directly from a synthetic TimeSeries (no FITS
 reading); per-epoch products such as RVs and CCFs are attached by hand so the
@@ -9,7 +9,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from sparta.Auxil.ReadSpec import ReadSpec
 from sparta.Auxil.TimeSeries import TimeSeries
 from sparta.Observations import Observations
 
@@ -102,9 +101,9 @@ def test_clean_rejects_zero_sample_rate():
         _observations().clean_time_series(sample_rate=0)
 
 
-def test_kek_loader_is_not_implemented():
-    with pytest.raises(NotImplementedError, match="KEK"):
-        ReadSpec("KEK")._load_kek(None, 4900, 5150)
+def test_unknown_survey_raises_and_lists_known_surveys(tmp_path):
+    with pytest.raises(ValueError, match=r"unknown survey 'KEK'.*HARPS"):
+        Observations(survey="KEK", target_visits_lib=str(tmp_path))
 
 
 def test_clean_time_series_ignores_unaligned_vrad_list_and_rv_pairs():
@@ -117,3 +116,24 @@ def test_clean_time_series_ignores_unaligned_vrad_list_and_rv_pairs():
         obs.clean_time_series(max_time=2.5)
     _assert_consistent(obs, [0, 1, 2])
     assert obs.vrad_list == [1.0, 2.0]
+
+
+def test_reading_a_directory_requires_a_survey(tmp_path):
+    with pytest.raises(ValueError, match="survey is required"):
+        Observations(target_visits_lib=str(tmp_path))
+
+
+def test_ingest_cuts_on_snr_keeps_unknown_snr_and_skips_missing_vrad():
+    from sparta.instruments import LoadedSpectrum
+    wave = np.linspace(5000.0, 5010.0, 50)
+    records = [LoadedSpectrum(wave=[wave], flux=[np.ones(50)], time=2458000.0 + k,
+                              time_system="BJD-TDB", bcv=1.0, specsys="TOPOCENT",
+                              wavelength_frame="air", snr=snr, vrad=vrad, survey="TEST")
+               for k, (snr, vrad) in enumerate([(80.0, 3.0), (np.nan, None), (20.0, 4.0)])]
+    obs = _observations()
+    obs._ingest(records, min_snr=50)
+    assert obs.sample_size == 2 and obs.time_list == [0.0, 1.0]
+    assert obs.snr[0] == 80.0 and np.isnan(obs.snr[1])
+    assert obs.vrad_list == [3.0]
+    assert (obs.time_system, obs.wavelength_frame) == ("BJD-TDB", "air")
+    np.testing.assert_allclose(obs.spec_list[0].wv[0], wave * (1 + 1.0 / 299792.458), rtol=1e-15)
