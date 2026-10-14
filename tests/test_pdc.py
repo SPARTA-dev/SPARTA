@@ -31,7 +31,7 @@ def pdc():
     ts = TimeSeries(size=len(TIMES), times=list(TIMES), vals=list(VALS))
     det = PeriodicityDetector(time_series=ts, freq_range=(0.05, 1.0),
                               periodogram_grid_resolution=20)
-    det.calc_PDC(calc_unbiased_flag=True)
+    det.calc_pdc(calc_unbiased_flag=True)
     return det
 
 
@@ -50,11 +50,11 @@ def test_pdc_recovers_injected_period(pdc):
 
 def test_pdc_biased_matches_golden():
     # The biased PDC path crashed under @njit (it took a Python object) until
-    # Stage 4 vectorized calc_PDC. This pins the now-working output.
+    # Stage 4 vectorized calc_pdc. This pins the now-working output.
     ts = TimeSeries(size=len(TIMES), times=list(TIMES), vals=list(VALS))
     det = PeriodicityDetector(time_series=ts, freq_range=(0.05, 1.0),
                               periodogram_grid_resolution=20)
-    det.calc_PDC(calc_biased_flag=True, calc_unbiased_flag=False)
+    det.calc_pdc(calc_biased_flag=True, calc_unbiased_flag=False)
     golden = np.array([
         0.166999289578, 0.161718905768, 0.151392714048, 0.115604741635,
         0.157741292807, 0.321436592725, 0.758153188588, 0.131493345769,
@@ -88,7 +88,7 @@ def test_unbiased_pdc_rejects_n_le_3(n):
     det = PeriodicityDetector(time_series=ts, freq_range=(0.05, 1.0),
                               periodogram_grid_resolution=20)
     with pytest.raises(ValueError, match="n <= 3"):
-        det.calc_PDC(calc_unbiased_flag=True)
+        det.calc_pdc(calc_unbiased_flag=True)
 
 
 def test_unbiased_u_centering_rejects_n_le_3():
@@ -124,7 +124,7 @@ def test_pdc_accepts_float32_values():
     ts = TimeSeries(size=len(TIMES), times=list(TIMES), vals=vals32)
     det = PeriodicityDetector(time_series=ts, freq_range=(0.05, 1.0),
                               periodogram_grid_resolution=20)
-    det.calc_PDC(calc_unbiased_flag=True)
+    det.calc_pdc(calc_unbiased_flag=True)
     power = np.asarray(det.results_power["PDC_unbiased"])
     np.testing.assert_allclose(power, GOLDEN_POWER, atol=1e-5)
 
@@ -134,7 +134,7 @@ def test_gls_accepts_integer_values():
     ts = TimeSeries(size=len(TIMES), times=list(TIMES), vals=ivals)
     det = PeriodicityDetector(time_series=ts, freq_range=(0.05, 1.0),
                               periodogram_grid_resolution=20)
-    _, power = det.calc_GLS()
+    _, power = det.calc_gls()
     assert np.all(np.isfinite(power))
 
 
@@ -171,8 +171,8 @@ def test_error_aware_pdc_matches_golden():
     ts = TimeSeries(times=list(TIMES), vals=list(VALS), errors=list(ERRORS))
     det = PeriodicityDetector(time_series=ts, freq_range=(0.05, 1.0),
                               periodogram_grid_resolution=20)
-    det.calc_PDC(calc_unbiased_flag=True, errors=True)
-    np.testing.assert_allclose(np.asarray(det.results_power["PDC_unbiased"]),
+    det.calc_pdc(calc_unbiased_flag=True, errors=True)
+    np.testing.assert_allclose(np.asarray(det.results_power["PDC_errors_unbiased"]),
                                GOLDEN_POWER_ERRORS, rtol=1e-8, atol=1e-10)
 
 
@@ -208,7 +208,7 @@ def test_pdc_on_stored_rvs_leaves_the_series_values_alone():
     ts = TimeSeries(times=list(TIMES), vals=specs, calculated_vrad_list=list(VALS))
     det = PeriodicityDetector(time_series=ts, freq_range=(0.05, 1.0),
                               periodogram_grid_resolution=20)
-    det.calc_PDC(calc_unbiased_flag=True)
+    det.calc_pdc(calc_unbiased_flag=True)
     assert ts.vals is specs and all(v is s for v, s in zip(ts.vals, specs))
     np.testing.assert_allclose(det.results_power["PDC_unbiased"], GOLDEN_POWER,
                                rtol=1e-8, atol=1e-10)
@@ -221,7 +221,7 @@ def test_plot_with_values_leaves_period_truth_unset():
     ts = TimeSeries(times=list(TIMES), vals=list(VALS))
     det = PeriodicityDetector(time_series=ts, freq_range=(0.05, 1.0),
                               periodogram_grid_resolution=20)
-    det.calc_GLS()
+    det.calc_gls()
     det.plot_periodograms(plot_vals=True)
     plt.close("all")
     assert det.period_truth is None

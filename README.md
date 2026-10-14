@@ -68,6 +68,9 @@ importable from the top level (`from sparta import Observations, Template`):
 | `sparta.periodogram`, `sparta.pdc` | `PeriodicityDetector` (GLS, PDC, USuRPER) and the PDC array math |
 | `sparta.instruments` | per-instrument loaders and the simulator |
 
+API changes between versions, with complete old → new rename tables, are listed
+in [`CHANGELOG.md`](CHANGELOG.md).
+
 The engines carry a `sparta-` prefix on PyPI because `unicor` there is an
 unrelated project; likewise `pip install sparta` installs an unrelated RDF
 library. Install from this repository as below.

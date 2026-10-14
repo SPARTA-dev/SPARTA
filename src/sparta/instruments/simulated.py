@@ -42,7 +42,7 @@ Angstrom):
 For a topocentric product (SPECSYS 'TOPOCENT', e.g. NRES) the records carry
 ``bcv`` and their wavelengths are topocentric: a component at ``v`` is
 observed at ``lambda_rest * D(v) / (1 + bcv/c)``, so that
-``Spectrum.BarycentricCorrection`` (``lambda * (1 + bcv/c)``) returns it to
+``Spectrum.barycentric_correction`` (``lambda * (1 + bcv/c)``) returns it to
 ``lambda_rest * D(v)``, D the Doppler factor of ``velocity_convention``.
 """
 import math
@@ -388,8 +388,8 @@ def component_templates(simulation, margin=None):
     list of Template
         One per component.
     '''
-    return [Template(template=Spectrum(wv=[w for w, _ in orders], sp=[f for _, f in orders],
-                                       name="simulated"))
+    return [Template(Spectrum(wv=[w for w, _ in orders], sp=[f for _, f in orders],
+                              name="simulated"))
             for orders in component_spectra(simulation, margin)]
 
 
@@ -403,10 +403,10 @@ def _intrinsic(comp, span, simulation):
                              f"not cover {span[0]:.1f}-{span[1]:.1f} A (the windows plus "
                              "the velocity margin)")
         return wave, flux
-    phoenix = Template(temp=comp.teff, log_g=comp.logg, metal=comp.feh, alpha=comp.alpha,
-                       min_val=span[0], max_val=span[1],
-                       air=simulation.wavelength_frame == "air",
-                       allow_download=simulation.allow_download)
+    phoenix = Template.from_phoenix(comp.teff, comp.logg, comp.feh, comp.alpha,
+                                    wave_range=span,
+                                    air=simulation.wavelength_frame == "air",
+                                    allow_download=simulation.allow_download)
     return np.asarray(phoenix.model.wv[0], float), np.asarray(phoenix.model.sp[0], float)
 
 
@@ -445,7 +445,7 @@ def simulate(simulation):
     for k, rng in enumerate(rngs):
         waves, fluxes = [], []
         for o, wave in enumerate(grids):
-            # The pixels' wavelengths once BarycentricCorrection has been applied.
+            # The pixels' wavelengths once barycentric_correction has been applied.
             corrected = dsp.doppler_shift_wave(wave, sim.bcv_kms[k], convention="cz")
             flux = composite_flux(corrected, [comp[o] for comp in spectra], sim.rv_kms[k],
                                   amplitudes, velocity_convention=sim.velocity_convention,

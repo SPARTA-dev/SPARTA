@@ -61,6 +61,14 @@ SCALAR_PERIOD, SCALAR_EPOCHS = 5.0, 30
 FREQ_RANGE, GRID_RESOLUTION = (0.02, 1.0), 40     # 1/day; grid points per 1/day
 
 
+# The golden file keeps the 0.2.0 result names; PeriodicityDetector's own
+# names changed in 0.3.0 (see CHANGELOG.md).
+_SPECTRAL_GOLDEN_KEYS = {"GLS": "GLS", "USURPER_unbiased": "USURPER",
+                         "USURPER_biased": "USURPER_biased",
+                         "partial_shift": "shift_periodogram",
+                         "partial_shape": "shape_periodogram"}
+
+
 def _rounded(values):
     """Plain Python floats at ``SIG_DIGITS`` significant digits."""
     return [float(f"{float(v):.{SIG_DIGITS}g}") for v in np.ravel(values)]
@@ -91,23 +99,24 @@ def _sb1_observations():
 def _record_sb1_and_spectral_periodograms():
     """UNICOR RVs of the simulated SB1, then its single-order periodograms."""
     obs, template = _sb1_observations()
-    obs.calc_rv_against_template(template, dv=0.1, VelBound=60)
+    obs.calc_rv_against_template(template, dv=0.1, vel_bound=60)
     sb1 = {"rv": _rounded(obs.vels), "erv": _rounded(obs.evels),
            "peak": _rounded(obs.ccf_peaks)}
 
     # USuRPER and the partial periodograms take one order; the partials need
     # one RV per epoch -- the measured ones, which the RV run stored in
     # time_series.calculated_vrad_list.
-    obs.SelectOrders([0], remove=False)
-    obs.initialize_periodicity_detector(freq_range=FREQ_RANGE,
-                                        periodogram_grid_resolution=GRID_RESOLUTION)
+    obs.select_orders([0], remove=False)
+    obs.init_periodicity_detector(freq_range=FREQ_RANGE,
+                                  periodogram_grid_resolution=GRID_RESOLUTION)
     detector = obs.periodicity_detector
-    detector.calc_GLS()
-    detector.calc_USURPER(calc_biased_flag=True, calc_unbiased_flag=True)
+    detector.calc_gls()
+    detector.calc_usurper(calc_biased_flag=True, calc_unbiased_flag=True)
     detector.calc_partial_periodogram(partial_type="shift")
     detector.calc_partial_periodogram(partial_type="shape")
-    spectral = {"frequency": _rounded(detector.results_frequency["USURPER"])}
-    spectral.update({name: _rounded(power) for name, power in detector.results_power.items()})
+    spectral = {"frequency": _rounded(detector.results_frequency["USURPER_unbiased"])}
+    spectral.update({_SPECTRAL_GOLDEN_KEYS[name]: _rounded(power)
+                     for name, power in detector.results_power.items()})
     return sb1, spectral
 
 
@@ -120,7 +129,7 @@ def _record_sb2():
                                  dict(K_DWARF, amplitude=0.3)])
     obs = Observations(survey="SIMULATED", simulation=sim)
     template1, template2 = component_templates(sim)
-    obs.calc_rv_against_two_templates(template1, template2, dv=0.3, VelBound=40,
+    obs.calc_rv_against_two_templates(template1, template2, dv=0.3, vel_bound=40,
                                       continuum=1.0, alpha=0.3)
     return {"rv1": _rounded(obs.vels1), "rv2": _rounded(obs.vels2),
             "erv1": _rounded(obs.evels1), "erv2": _rounded(obs.evels2),
@@ -136,21 +145,21 @@ def _record_scalar_periodograms():
     def detector():
         series = TimeSeries(times=list(times), vals=list(vals), errors=list(errors))
         obs = Observations(time_series=series)
-        obs.initialize_periodicity_detector(freq_range=FREQ_RANGE,
-                                            periodogram_grid_resolution=GRID_RESOLUTION)
+        obs.init_periodicity_detector(freq_range=FREQ_RANGE,
+                                      periodogram_grid_resolution=GRID_RESOLUTION)
         return obs.periodicity_detector
 
     plain = detector()
-    plain.calc_GLS()
-    plain.calc_PDC(calc_biased_flag=True, calc_unbiased_flag=True)
+    plain.calc_gls()
+    plain.calc_pdc(calc_biased_flag=True, calc_unbiased_flag=True)
     aware = detector()
-    aware.calc_PDC(calc_biased_flag=True, calc_unbiased_flag=True, errors=True)
+    aware.calc_pdc(calc_biased_flag=True, calc_unbiased_flag=True, errors=True)
     return {"frequency": _rounded(plain.results_frequency["PDC_unbiased"]),
             "GLS": _rounded(plain.results_power["GLS"]),
             "PDC_biased": _rounded(plain.results_power["PDC_biased"]),
             "PDC_unbiased": _rounded(plain.results_power["PDC_unbiased"]),
-            "PDC_errors_biased": _rounded(aware.results_power["PDC_biased"]),
-            "PDC_errors_unbiased": _rounded(aware.results_power["PDC_unbiased"])}
+            "PDC_errors_biased": _rounded(aware.results_power["PDC_errors_biased"]),
+            "PDC_errors_unbiased": _rounded(aware.results_power["PDC_errors_unbiased"])}
 
 
 def _tiravel_files():
@@ -164,22 +173,22 @@ def _record_tiravel(directory):
     obs = Observations(survey="HARPS", target_visits_lib=str(directory),
                        min_wv=4990, max_wv=5090)
     for spec in obs.time_series.vals:
-        spec.SpecPreProccess()
+        spec.preprocess()
 
-    lib = Template(temp=5500, log_g=4.5, metal=0, alpha=0, min_val=4980, max_val=5100,
-                   air=False, allow_download=False)
-    lib = Template(template=Spectrum(wv=lib.model.wv, sp=lib.model.sp).InterpolateSpectrum())
-    lib.RotationalBroadening(epsilon=0.5, vsini=1.5)
-    lib = Template(template=Spectrum(wv=lib.model.wv, sp=lib.model.sp).SpecPreProccess())
-    lib = Template(template=Spectrum(wv=lib.model.wv, sp=lib.model.sp)
-                   .InterpolateSpectrum(delta=0.5))
-    lib.GaussianBroadening(resolution=115_000)
-    template_library = Template(template=Spectrum(wv=lib.model.wv, sp=lib.model.sp)
-                                .SpecPreProccess())
+    lib = Template.from_phoenix(5500, 4.5, 0, 0, wave_range=(4980, 5100),
+                                air=False, allow_download=False)
+    lib = Template(Spectrum(wv=lib.model.wv, sp=lib.model.sp).interpolate())
+    lib.broaden_rotational(epsilon=0.5, vsini=1.5)
+    lib = Template(Spectrum(wv=lib.model.wv, sp=lib.model.sp).preprocess())
+    lib = Template(Spectrum(wv=lib.model.wv, sp=lib.model.sp)
+                   .interpolate(delta=0.5))
+    lib.broaden_instrumental(resolution=115_000)
+    template_library = Template(Spectrum(wv=lib.model.wv, sp=lib.model.sp)
+                                .preprocess())
 
     # The order-averaged per-order RVs (single-order data here), not the
     # combined CCF's.
-    rv_library = obs.calc_rv_against_template(template_library, dv=0.1, VelBound=[-117, 117],
+    rv_library = obs.calc_rv_against_template(template_library, dv=0.1, vel_bound=[-117, 117],
                                               combine_ccfs=False).vels_per_order.mean(axis=1)
     names = [os.path.basename(p) for p in obs.file_list]
     # The reference epoch fixes the common grid; take the first by name.

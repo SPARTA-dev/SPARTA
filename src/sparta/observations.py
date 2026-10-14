@@ -140,12 +140,12 @@ class Observations:
         ``native_step_kms``; it becomes the spectrum's ``Info['NativeStep']``
         (km/s), so UNICOR / TODCOR count native pixels rather than archive
         ones. Per order it is ``max(native, archive step)`` -- the rule of
-        ``Spectrum.InterpolateSpectrum``, since an archive grid coarser than
+        ``Spectrum.interpolate``, since an archive grid coarser than
         the detector (e.g. HARPS's 0.01 A bins blueward of ~4900 A) leaves
         fewer independent pixels than the detector had. This is approximate:
         the pipeline's own rebinning kernel is unknown, so the noise is
         modelled as white on the native pixels and resampled once, from
-        uniformly spread sub-pixel phases (see CCF2d.CrossCorrelateSpec).
+        uniformly spread sub-pixel phases (see CCF2d.cross_correlate).
 
         :param records: iterable of sparta.instruments.LoadedSpectrum.
         :param min_snr: float, drop records with snr < min_snr; -1 disables
@@ -178,7 +178,7 @@ class Observations:
                                      f"{len(rec.wave)} orders")
                 sp.Info['NativeStep'] = [max(float(native), dsp.dv_from_wave(w))
                                          for native, w in zip(rec.native_step_kms, rec.wave)]
-            sp.BarycentricCorrection()
+            sp.barycentric_correction()
 
             self.spec_list.append(sp)
             self.time_list.append(rec.time)
@@ -197,43 +197,45 @@ class Observations:
                              f"{sorted(frames, key=str)}")
         self.time_system, self.wavelength_frame = frames.pop() if frames else (None, None)
 
-        self.convert_times_to_relative_float_values()
+        self._relative_times()
 
         self.time_series = TimeSeries(size=self.sample_size, times=self.time_list,
                                       vals=self.spec_list)
 
 # =============================================================================
 # =============================================================================
-    def PreProccessSpectra(self, Ntrim=10, CleanMargins=True, RemoveNaNs=True,
-                           delta=0.5, RemCosmicNum=3, FilterLC=3, FilterHC=0.15,
-                           alpha=0.3):
+    def preprocess(self, n_trim=10, clean_margins=True, remove_nans=True,
+                   delta=0.5, cosmic_sigma=3, filter_lowcut=3, filter_highcut=0.15,
+                   alpha=0.3):
         '''
-        This function conatains different pre-processing procedures applied on an observed spectrum.
+        Apply ``Spectrum.preprocess`` to every epoch, in place; the
+        parameters are passed through (see there).
+
+        :return: self.
         '''
         with tqdm(total=self.sample_size) as pbar:
             for s in self.spec_list:
-                s.SpecPreProccess(Ntrim=Ntrim, CleanMargins=CleanMargins, RemoveNaNs=RemoveNaNs,
-                                  delta=delta, RemCosmicNum=RemCosmicNum, FilterLC=FilterLC,
-                                  FilterHC=FilterHC, alpha=alpha)
+                s.preprocess(n_trim=n_trim, clean_margins=clean_margins, remove_nans=remove_nans,
+                             delta=delta, cosmic_sigma=cosmic_sigma, filter_lowcut=filter_lowcut,
+                             filter_highcut=filter_highcut, alpha=alpha)
                 pbar.update(1)
 
         return self
 
 # =============================================================================
 # =============================================================================
-    def SelectOrders(self, orders, remove=True):
+    def select_orders(self, orders, remove=True):
         '''
-        This routine enables the user to keep or discard orders from the observed
-        data. Orders are numbered according to their index (0-> #ord-1),
+        Keep or discard the same orders in every epoch (``Spectrum.select_orders``).
 
-        :param orders: Indices of the required orders
-        :param include: Boolean. If True, these orders will be removed.
-                        otherwise, these will be the orders that will
-                        be kept.
-        :return: Same structure, with the orders arranged.
+        :param orders: Indices of the required orders (0 .. n_ord - 1).
+        :param remove: Boolean. If True, these orders are removed;
+                       otherwise they are the ones kept.
+        :return: self.
         '''
         for s in self.spec_list:
-            s.SelectOrders(orders, remove=remove)
+            s.select_orders(orders, remove=remove)
+        return self
 
 # =============================================================================
 # =============================================================================
@@ -251,16 +253,16 @@ class Observations:
 
 # =============================================================================
 # =============================================================================
-    def calc_rv_against_template(self, template, dv=0.1, VelBound=150,
-                                 err_per_ord=False, combine_ccfs=True):
+    def calc_rv_against_template(self, template, dv=0.1, vel_bound=150,
+                                 errors_per_order=False, combine_ccfs=True):
         '''
         Single-lined (SB1) radial velocities for the whole time series: a UNICOR
         CCF of every epoch against one resting template.
 
         :param: template - a Template object, with which the observations are
                            correlated.
-        :param: dv, VelBound, err_per_ord - parameters of the CCF1d
-                           CrossCorrelateSpec routine (km/s), see the
+        :param: dv, vel_bound, errors_per_order - parameters of
+                           CCF1d.cross_correlate (km/s), see the
                            documentation therein.
         :param: combine_ccfs - bool. If True, every epoch's per-order CCFs are
                            combined by maximum likelihood (Zucker 2003) and the
@@ -272,7 +274,7 @@ class Observations:
                  'ccf_list' - the CCF1d objects, one per epoch;
                  'vels_per_order', 'evels_per_order', 'ccf_peaks_per_order' -
                      (epochs x orders) arrays of the per-order RVs (km/s), their
-                     uncertainties (km/s; NaN unless err_per_ord) and CCF peaks;
+                     uncertainties (km/s; NaN unless errors_per_order) and CCF peaks;
                  'vels', 'evels', 'ccf_peaks' - per-epoch RV (km/s), its ML
                      uncertainty (km/s) and the CCF peak, all from the combined
                      CCF; None when combine_ccfs is False (an average of the
@@ -287,13 +289,12 @@ class Observations:
 
         ccfs = []
         for spec in tqdm(spectra):
-            ccf = CCF1d().CrossCorrelateSpec(template_in=template,
-                                             spec_in=spec,
-                                             dv=dv,
-                                             VelBound=VelBound,
-                                             err_per_ord=err_per_ord)
+            ccf = CCF1d().cross_correlate(spec, template,
+                                          dv=dv,
+                                          vel_bound=vel_bound,
+                                          errors_per_order=errors_per_order)
             if combine_ccfs:
-                ccf.CombineCCFs()
+                ccf.combine()
             ccfs.append(ccf)
 
         self.ccf_list = ccfs
@@ -317,7 +318,7 @@ class Observations:
 # =============================================================================
 # =============================================================================
     def calc_rv_against_two_templates(self, template1, template2, dv=0.1,
-                                      VelBound=150, dvel=None, sigma=None,
+                                      vel_bound=150, dvel=None, sigma=None,
                                       nonneg=True, **kwargs):
         '''
         Double-lined (SB2) radial velocities for the whole time series, using
@@ -335,8 +336,8 @@ class Observations:
 
         :param: template1, template2 - Template objects for the primary and the
                                        secondary component.
-        :param: dv, VelBound, dvel, sigma, nonneg - parameters for the CCF2d
-                                       CrossCorrelateSpec routine (km/s), see
+        :param: dv, vel_bound, dvel, sigma, nonneg - parameters for
+                                       CCF2d.cross_correlate (km/s), see
                                        the documentation therein. Remaining
                                        keyword arguments are passed through --
                                        including keep_windows, which defaults
@@ -350,15 +351,13 @@ class Observations:
         spectra = self._spectra('RV calculation')
         kwargs.setdefault('keep_windows', False)
 
-        ccfs = [CCF2d().CrossCorrelateSpec(spec_in=spec,
-                                           template1_in=template1,
-                                           template2_in=template2,
-                                           dv=dv,
-                                           VelBound=VelBound,
-                                           dvel=dvel,
-                                           sigma=sigma,
-                                           nonneg=nonneg,
-                                           **kwargs)
+        ccfs = [CCF2d().cross_correlate(spec, template1, template2,
+                                        dv=dv,
+                                        vel_bound=vel_bound,
+                                        dvel=dvel,
+                                        sigma=sigma,
+                                        nonneg=nonneg,
+                                        **kwargs)
                 for spec in tqdm(spectra)]
 
         fields = ('RV1', 'RV2', 'eRV1', 'eRV2', 'a1_best', 'a2_best')
@@ -389,7 +388,7 @@ class Observations:
         :param: velocities - a list of radial velocities (km/s), one per epoch.
                              Only their differences matter: the template's rest
                              frame inherits this set's zero point.
-        :param: kwargs     - passed through to TIRAVEL.BuildTemplate (orders,
+        :param: kwargs     - passed through to TIRAVEL.build_template (orders,
                              reference, margin, kind, keep_aligned).
 
         :return: self, with 'tiravel' (the TIRAVEL object, carrying .rho,
@@ -398,14 +397,14 @@ class Observations:
                  calc_rv_against_template).
         '''
         spectra = self._spectra('TIRAVEL')
-        self.tiravel = TIRAVEL().BuildTemplate(spectra, velocities, **kwargs)
+        self.tiravel = TIRAVEL().build_template(spectra, velocities, **kwargs)
         self.tiravel_template = self.tiravel.template
 
         return self
 
 # =============================================================================
 # =============================================================================
-    def retrieve_BIS(self, bisect_val=[0.35, 0.95], use_combined=True):
+    def calc_bis(self, bisect_val=[0.35, 0.95], use_combined=True):
         '''
         This function computes BIS from the calculated CCF.
 
@@ -419,18 +418,18 @@ class Observations:
 
         if use_combined:
             for ind, c in enumerate(ccf_list):
-                BIS[ind], eBIS[ind], _ = c.calcBIS(c.CorrCombined['vel'],
-                                                   c.CorrCombined['corr'],
-                                                   bisect_val=bisect_val,
-                                                   n_ord=c.n_ord)
+                BIS[ind], eBIS[ind], _ = c.calc_bis(c.CorrCombined['vel'],
+                                                    c.CorrCombined['corr'],
+                                                    bisect_val=bisect_val,
+                                                    n_ord=c.n_ord)
         else:
             for ind, c in enumerate(ccf_list):
                 BISo = np.full(c.n_ord, np.nan)
                 for co in c.CombinedCorr['corr']:
-                    BISo[ind], _ = c.calcBIS(c.Corr['vel'],
-                                             co,
-                                             bisect_val=bisect_val,
-                                             n_ord=1)
+                    BISo[ind], _ = c.calc_bis(c.Corr['vel'],
+                                              co,
+                                              bisect_val=bisect_val,
+                                              n_ord=1)
                 BIS[ind] = np.average(BISo)
                 eBIS[ind] = np.std(BISo)
 
@@ -440,22 +439,25 @@ class Observations:
 
 # =============================================================================
 # =============================================================================
-    def initialize_periodicity_detector(self, freq_range=(1/1000, 1), periodogram_grid_resolution=1000):
+    def init_periodicity_detector(self, freq_range=(1/1000, 1), periodogram_grid_resolution=1000):
         """
-        This function initiate the object's PeriodicityDetector instance before using it to create periodograms.
-        :param
-        periodogram_grid_resolution: float, the periodogram grid resolution
-        freq_range: float tuple, the periodogram frequency range
+        Create ``self.periodicity_detector``, a PeriodicityDetector on this
+        object's time series, ready to compute periodograms.
+
+        :param freq_range: (f_min, f_max), the frequency grid range (1/day).
+        :param periodogram_grid_resolution: float, grid points per 1/day.
+        :return: self.
         """
         self.periodicity_detector = PeriodicityDetector(time_series=self.time_series, freq_range=freq_range,
                                                         periodogram_grid_resolution=periodogram_grid_resolution)
+        return self
 
 # =============================================================================
 # =============================================================================
-    def convert_times_to_relative_float_values(self):
+    def _relative_times(self):
         """
-        This function converts the observation dates to float values,
-        marking the days past the first visit.
+        Replace ``time_list`` by the days past ``first_time``, the integer day
+        of the first visit.
         """
         float_times = [0 for _ in range(self.sample_size)]
         start_time = int(min(self.time_list))

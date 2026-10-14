@@ -90,7 +90,7 @@ def _product_markdown(product):
     if rec.window_A is not None:
         lines.append(f"- Recommended window: {rec.window_A[0]:g}–{rec.window_A[1]:g} Å")
     if rec.preprocess:
-        lines.append("- Recommended preprocessing: `SpecPreProccess("
+        lines.append("- Recommended preprocessing: `preprocess("
                      + ", ".join(f"{k}={v!r}" for k, v in rec.preprocess.items()) + ")`")
     if rec.drop_orders:
         lines.append(f"- Orders to drop: {_ranges(rec.drop_orders)}")

@@ -202,23 +202,23 @@ def _sb1_observations(sb1):
 
 def test_combined_run_fills_the_time_series_rvs(sb1):
     obs, template = _sb1_observations(sb1)
-    obs.calc_rv_against_template(template, dv=0.1, VelBound=40)
+    obs.calc_rv_against_template(template, dv=0.1, vel_bound=40)
     np.testing.assert_array_equal(obs.time_series.calculated_vrad_list, obs.vels)
     np.testing.assert_array_equal(obs.time_series.errors, obs.evels)
     np.testing.assert_allclose(obs.vels, obs.truth.rv_kms[:, 0], atol=0.1)
     assert obs.vels_per_order.shape == obs.evels_per_order.shape == (5, 2)
     assert obs.ccf_peaks_per_order.shape == (5, 2)
-    assert np.all(np.isnan(obs.evels_per_order))          # err_per_ord=False
+    assert np.all(np.isnan(obs.evels_per_order))          # errors_per_order=False
     assert obs.ccf_peaks.shape == (5,)
 
 
 def test_uncombined_run_keeps_per_order_rvs_only(sb1):
     import warnings
     obs, template = _sb1_observations(sb1)
-    obs.calc_rv_against_template(template, dv=0.1, VelBound=40)
+    obs.calc_rv_against_template(template, dv=0.1, vel_bound=40)
     with warnings.catch_warnings():
         warnings.simplefilter("error")      # no ndarray-to-scalar DeprecationWarning
-        obs.calc_rv_against_template(template, dv=0.1, VelBound=40, err_per_ord=True,
+        obs.calc_rv_against_template(template, dv=0.1, vel_bound=40, errors_per_order=True,
                                      combine_ccfs=False)
     assert obs.vels is None and obs.evels is None and obs.ccf_peaks is None
     # Cleared, not left holding the combined RVs of the run before.
@@ -232,7 +232,7 @@ def test_uncombined_run_keeps_per_order_rvs_only(sb1):
 
 def test_clean_filters_the_per_order_arrays(sb1):
     obs, template = _sb1_observations(sb1)
-    obs.calc_rv_against_template(template, dv=0.1, VelBound=40)
+    obs.calc_rv_against_template(template, dv=0.1, vel_bound=40)
     per_order = obs.vels_per_order.copy()
     obs.clean_time_series(max_vel=1.0)
     np.testing.assert_array_equal(obs.vels_per_order, per_order[:3])
@@ -249,6 +249,6 @@ def test_sb2_run_leaves_calculated_vrad_list_alone():
     obs = Observations(survey="SIMULATED", simulation=sim)
     marker = [1.0, 2.0, 3.0, 4.0]
     obs.time_series.calculated_vrad_list = marker
-    obs.calc_rv_against_two_templates(*component_templates(sim), dv=0.3, VelBound=40)
+    obs.calc_rv_against_two_templates(*component_templates(sim), dv=0.3, vel_bound=40)
     assert obs.time_series.calculated_vrad_list is marker
     assert obs.vels1.shape == obs.vels2.shape == (4,)

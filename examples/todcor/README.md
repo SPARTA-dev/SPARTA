@@ -20,7 +20,7 @@ The canonical written spec is [`todcor_method.md`](../../packages/todcor/docs/to
    pooling windows of one epoch via `combine_stats` (shared velocities /
    amplitudes) tightens and de-correlates the joint fit — and the boundary
    (within one epoch, shared velocity grid, **not** across epochs).
-4. **`04_sparta_objects.ipynb`** — the SPARTA path: `CCF2d.CrossCorrelateSpec`
+4. **`04_sparta_objects.ipynb`** — the SPARTA path: `CCF2d.cross_correlate`
    on a `Spectrum` plus two `Template`s (orders pooled as windows), the 2-D
    likelihood map, the best-fit residual, and a whole SB2 time series through
    `Observations.calc_rv_against_two_templates`.

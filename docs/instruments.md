@@ -39,7 +39,7 @@ ESO Phase-3 SDP 1-D spectrum (ADP.*.fits, HARPS DRS s1d): one-row binary table i
 - Wavelength frame: air; SPECSYS: BARYCENT; time: BJD (HARPS DRS; scale unverified)
 - Recommended CCF step: 0.1 km/s
 - Recommended window: 4990–5090 Å
-- Recommended preprocessing: `SpecPreProccess(Ntrim=10, CleanMargins=True, RemoveNaNs=True, delta=0.5, RemCosmicNum=3, FilterLC=3, FilterHC=0.15, alpha=0.3)`
+- Recommended preprocessing: `preprocess(n_trim=10, clean_margins=True, remove_nans=True, delta=0.5, cosmic_sigma=3, filter_lowcut=3, filter_highcut=0.15, alpha=0.3)`
 
 ### `HARPS-CERES` (unverified)
 
@@ -67,7 +67,7 @@ NRES commissioning (IDL) pipeline extracted spectrum, RLEVEL 91 ('*-e91.fits'): 
 - Orders returned: all
 - Wavelength frame: —; SPECSYS: TOPOCENT; time: BJD-TDB
 - Recommended CCF step: 0.05 km/s
-- Recommended preprocessing: `SpecPreProccess(Ntrim=100, CleanMargins=True, RemoveNaNs=True, delta=0.5, RemCosmicNum=3, FilterLC=4, FilterHC=0.15, alpha=0.3)`
+- Recommended preprocessing: `preprocess(n_trim=100, clean_margins=True, remove_nans=True, delta=0.5, cosmic_sigma=3, filter_lowcut=4, filter_highcut=0.15, alpha=0.3)`
 - Orders to drop: 0–9, 50–66
 
 ### `NRES-BANZAI` (unverified)

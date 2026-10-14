@@ -27,9 +27,9 @@ HARPS_NATIVE = instruments.get("HARPS").instrument.native_step_kms
 
 
 def _ccf1d_rvs(obs, template, vel_bound, convention="cz"):
-    return np.array([CCF1d().CrossCorrelateSpec(sp, template, dv=0.1, VelBound=vel_bound,
-                                                velocity_convention=convention)
-                     .CombineCCFs().CorrCombined["RV"] for sp in obs.spec_list])
+    return np.array([CCF1d().cross_correlate(sp, template, dv=0.1, vel_bound=vel_bound,
+                                             velocity_convention=convention)
+                     .combine().CorrCombined["RV"] for sp in obs.spec_list])
 
 
 @pytest.mark.parametrize("convention", ["cz", "relativistic"])
@@ -82,9 +82,9 @@ def test_noiseless_sb2_through_ccf2d_recovers_both_components(convention):
     t1, t2 = component_templates(sim)
     for k, sp in enumerate(obs.spec_list):
         g1, g2 = (np.arange(round(v) - 5.0, round(v) + 6.0) for v in rv[k])
-        fit = CCF2d().CrossCorrelateSpec(sp, t1, t2, dv=0.3, v1_grid=g1, v2_grid=g2,
-                                         continuum=1.0, alpha=0.3,
-                                         velocity_convention=convention).Corr2d
+        fit = CCF2d().cross_correlate(sp, t1, t2, dv=0.3, v1_grid=g1, v2_grid=g2,
+                                      continuum=1.0, alpha=0.3,
+                                      velocity_convention=convention).Corr2d
         np.testing.assert_allclose([fit["RV1"], fit["RV2"]], rv[k], rtol=0, atol=5e-3)
         np.testing.assert_allclose([fit["a1_best"], fit["a2_best"]], obs.truth.amplitudes,
                                    rtol=0, atol=2e-3)
@@ -92,7 +92,7 @@ def test_noiseless_sb2_through_ccf2d_recovers_both_components(convention):
 
 def test_topocentric_truth_round_trips_with_bcv():
     # NRES-like: topocentric pixels observed at lambda D(v) / (1 + bcv/c);
-    # Observations' BarycentricCorrection must bring them back to lambda D(v).
+    # Observations' barycentric_correction must bring them back to lambda D(v).
     rv, bcv = np.array([-50.0, 3.3, 50.0]), np.array([25.1, -17.4, 8.0])
     sim = Simulation(like="NRES", components=[dict(SUN_LIKE, vsini=6.0)], times=[1.0, 2.0, 3.0],
                      rv_kms=rv, bcv_kms=bcv, windows_A=[(5000.0, 5060.0), (5500.0, 5560.0)])
@@ -127,7 +127,7 @@ def _unicor_mc(as_product, window, n_epochs=60, seed=1):
                      as_product=as_product)
     obs = Observations(survey="SIMULATED", simulation=sim)
     template = component_templates(sim)[0]
-    fits = [CCF1d().CrossCorrelateSpec(sp, template, dv=0.1, VelBound=30).CombineCCFs().CorrCombined
+    fits = [CCF1d().cross_correlate(sp, template, dv=0.1, vel_bound=30).combine().CorrCombined
             for sp in obs.spec_list]
     residual = np.array([f["RV"] for f in fits]) - rv
     return np.std(residual, ddof=1) / np.mean([f["eRV"] for f in fits])
@@ -158,8 +158,8 @@ def test_todcor_scatter_matches_its_uncertainty_with_sigma_none():
     residual, erv = [], []
     for k, sp in enumerate(obs.spec_list):
         g1, g2 = (np.arange(round(v) - 5.0, round(v) + 6.0) for v in rv[k])
-        fit = CCF2d().CrossCorrelateSpec(sp, t1, t2, dv=0.3, v1_grid=g1, v2_grid=g2, continuum=1.0,
-                                         alpha=0.3, keep_windows=False).Corr2d
+        fit = CCF2d().cross_correlate(sp, t1, t2, dv=0.3, v1_grid=g1, v2_grid=g2, continuum=1.0,
+                                      alpha=0.3, keep_windows=False).Corr2d
         residual.append([fit["RV1"], fit["RV2"]] - rv[k])
         erv.append([fit["eRV1"], fit["eRV2"]])
     ratio = np.std(residual, axis=0, ddof=1) / np.mean(erv, axis=0)
@@ -211,8 +211,8 @@ def test_allow_download_false_never_touches_the_network(monkeypatch):
 
 def test_a_template_component_matches_its_phoenix_model():
     sim = Simulation(like="HARPS", components=[SUN_LIKE], times=[0.0], rv_kms=[0.0])
-    phoenix = Template(temp=5800, log_g=3.5, metal=0.5, alpha=0.0, min_val=4900.0,
-                       max_val=5200.0, air=True, allow_download=False)
+    phoenix = Template.from_phoenix(5800, 3.5, 0.5, 0.0, wave_range=(4900.0, 5200.0),
+                                    air=True, allow_download=False)
     own = Simulation(like="HARPS", components=[Component(template=phoenix, vsini=3.0)],
                      times=[0.0], rv_kms=[0.0])
     (w, f), = component_spectra(sim)[0]
@@ -253,7 +253,7 @@ def test_a_component_needs_exactly_one_source():
     with pytest.raises(ValueError, match="either PHOENIX"):
         Component(vsini=2.0)
     with pytest.raises(ValueError, match="either PHOENIX"):
-        Component(teff=5800, logg=4.5, template=Template())
+        Component(teff=5800, logg=4.5, template=Template.from_arrays([5000.0], [1.0]))
 
 
 def test_observations_route_simulations_only_through_the_simulated_survey(tmp_path):

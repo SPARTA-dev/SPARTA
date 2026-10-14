@@ -1,11 +1,13 @@
 """Template: a reference spectrum for the correlation engines.
 
-A ``Template`` wraps a ``Spectrum`` in ``self.model``: a PHOENIX-ACES
-synthetic spectrum read from the local cache in ``template_files/`` (fetched
-from the Goettingen server only on explicit opt-in, ``allow_download=True``),
-user-supplied wavelengths and fluxes, or a ready ``Spectrum``. Its methods
-broaden (rotational, instrumental), Doppler-shift, rebin and cut the model to
-the orders of an observation.
+A ``Template`` wraps a ``Spectrum`` in ``self.model``. Build it from a ready
+``Spectrum`` (``Template(spectrum)``), from wavelength and flux arrays
+(``Template.from_arrays``), from a PHOENIX-ACES synthetic spectrum read from
+the local cache in ``template_files/`` (``Template.from_phoenix``; fetched from
+the Goettingen server only on explicit opt-in, ``allow_download=True``), or
+from a line mask (``Template.from_mask``). Its methods broaden (rotational,
+instrumental), Doppler-shift, rebin and cut the model to the orders of an
+observation.
 
 Conventions: wavelengths in Angstrom (PHOENIX grids are in vacuum; ``air=True``
 converts them with Morton 2000, ApJS 130, 403), velocities in km/s.
@@ -21,13 +23,15 @@ import numpy as np
 import os
 import shutil
 from astropy import units as u
-from astropy.table import Table
 
 
 TEMPLATE_FILES_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     'template_files/'
 )
+PHOENIX_URL = "https://phoenix.astro.physik.uni-goettingen.de/data/"
+PHOENIX_WAVE_FILE = 'WAVE_PHOENIX-ACES-AGSS-COND-2011.fits'
+_PHOENIX_WAVE_SUB_PATH = 'HiResFITS/'
 
 
 def _per_order(like, orders):
@@ -43,242 +47,162 @@ class Template:
 
     # =============================================================================
     # =============================================================================
-    def __init__(self, **kwargs):
+    def __init__(self, model):
         '''
-        :param: The following stellar parameters are necessary for PHOENIX spectrum definition:
-                temp, log_g, metal, alpha.
+        Wrap a ready-for-use spectrum as a template, as-is (no copy).
 
-        :param: min_val - minimal value for wavelength range (Angstrom)
-        :param: max_val - maximal value for wavelength range (Angstrom)
-        :param: air - bool, convert the (vacuum) PHOENIX wavelengths to air.
-        :param: allow_download - bool, default False. Fetch PHOENIX files missing
-                from the local cache (TEMPLATE_FILES_PATH) over HTTPS; when
-                False a missing file raises FileNotFoundError.
+        :param: model - Spectrum, the template's (multi-order) wavelengths
+                        (Angstrom) and fluxes; stored as ``self.model``.
 
-        alternatively:
-        1) Template spectrum and wavelengths can be passed on to the class and will be saved as-is.
-           This required passing  "template=[template object]"
-        2) A ready-for-use Spectrum object can be passed on to the class and will be saved as-is.
-        3) The path of a HARPS DRS mask can be provided.
+        See ``from_arrays``, ``from_phoenix`` and ``from_mask`` for the other
+        ways to build one.
         '''
-        if 'template' in kwargs:
-            self.model = kwargs['template']
-
-        elif all(k in kwargs for k in ('temp', 'log_g', 'metal', 'alpha')):
-            self.temp = kwargs['temp']
-            self.log_g = kwargs['log_g']
-            self.metal = kwargs['metal']
-            self.alpha = kwargs['alpha']
-            self.min_val = kwargs['min_val']
-            self.max_val = kwargs['max_val']
-            self.server_url = "https://phoenix.astro.physik.uni-goettingen.de/data/"
-            self.wl_f_n = 'WAVE_PHOENIX-ACES-AGSS-COND-2011.fits'
-
-            p, f_n = self.create_PHOENIX_fname(self.temp, self.log_g, self.metal, self.alpha)
-
-            # Network access is opt-in: a file missing from the local cache
-            # raises unless allow_download=True.
-            allow_download = kwargs.get('allow_download', False)
-            for sub_path, fname in [('HiResFITS/', self.wl_f_n), (p, f_n)]:
-                if not os.path.exists(os.path.join(TEMPLATE_FILES_PATH, fname)):
-                    if not allow_download:
-                        raise FileNotFoundError(
-                            f"PHOENIX file '{fname}' is not in {TEMPLATE_FILES_PATH} "
-                            "and downloads are disabled (allow_download=False); pass "
-                            "allow_download=True to fetch it.")
-                    self.download_PHOENIX_files(sub_path, fname)
-
-            with fits.open(os.path.join(TEMPLATE_FILES_PATH, f_n)) as hdul_spec:
-                s = np.squeeze(np.array(hdul_spec[0].data))
-                header = hdul_spec[0].header.copy()
-
-            with fits.open(os.path.join(TEMPLATE_FILES_PATH, self.wl_f_n)) as hdul_wl:
-                w = np.squeeze(np.array(hdul_wl[0].data))
-
-            # Change to air wavelengths, if required
-            # The following transformation is taken from Morton (2000, ApJ. Suppl., 130, 403)
-            if 'air' in kwargs:
-                if kwargs['air']:
-                    s2 = 10**8 * w**(-2)
-                    f = 1 + 0.0000834254 + 0.02406147 / (130 - s2) + 0.00015998 / (38.9 - s2)
-                    w = w/f
-
-            self.PHXMASS = header['PHXMASS']
-
-            # Effective stellar radius cm
-            self.PHXREFF = header['PHXREFF']
-
-            min_index = np.where(w > self.min_val)[0][0]
-            max_index = np.where(w > self.max_val)[0][0]
-
-            spectrum = s[min_index:max_index]
-            wavelengths = w[min_index:max_index]
-
-            spectrum = np.reshape(spectrum, (1, -1))
-            wavelengths = np.reshape(wavelengths, (1, -1))
-
-            spectrum = spectrum / (10 ** 13)
-
-            self.model = Spectrum(wv=wavelengths, sp=spectrum)
-
-        elif 'mask' in kwargs:
-            self.min_val = kwargs['min_val']
-            self.max_val = kwargs['max_val']
-            self.wl_f_n = 'WAVE_PHOENIX-ACES-AGSS-COND-2011.fits'
-
-            with fits.open(os.path.join(TEMPLATE_FILES_PATH, self.wl_f_n)) as hdul_wl:
-                w = np.squeeze(np.array(hdul_wl[0].data))
-            s = np.zeros_like(w)
-
-            min_index = np.where(w > self.min_val)[0][0]
-            max_index = np.where(w > self.max_val)[0][0]
-
-            raw_mask = Table.read(kwargs['mask'], format='ascii')
-            raw_mask['col1'].name = 'wv1'
-            raw_mask['col2'].name = 'wv2'
-            raw_mask['col3'].name = 'msk'
-
-            for i, m in enumerate(raw_mask['msk']):
-                ii = np.argwhere((w > raw_mask['wv1'][i]) & (w < raw_mask['wv2'][i]))
-                s[ii] = -m
-
-            spectrum = s[min_index:max_index]
-            wavelengths = w[min_index:max_index]
-
-            spectrum = np.reshape(spectrum, (1, -1))
-            wavelengths = np.reshape(wavelengths, (1, -1))
-
-            self.model = Spectrum(wv=wavelengths, sp=spectrum)
-
-        elif all(k in kwargs for k in ('spectrum', 'wavelengths')):
-            spectrum = kwargs['spectrum']
-            wavelengths = kwargs['wavelengths']
-            if all(k in kwargs for k in ('min_val', 'max_val')):
-                self.min_val = kwargs['min_val']
-                self.max_val = kwargs['max_val']
-
-            spectrum = np.reshape(spectrum, (1, -1))
-            wavelengths = np.reshape(wavelengths, (1, -1))
-
-            self.model = Spectrum(wv=wavelengths, sp=spectrum)
-
-        else:
-            self.model = Spectrum()
-
-        if 'PHXMASS' in kwargs:
-            self.PHXMASS = kwargs['PHXMASS']
-
-        if 'PHXREFF' in kwargs:
-            self.PHXREFF = kwargs['PHXREFF']
-
+        if not isinstance(model, Spectrum):
+            raise TypeError(f"model must be a Spectrum, not {type(model).__name__}; "
+                            "use Template.from_arrays for plain arrays")
+        self.model = model
 
     # =============================================================================
-    def GaussianBroadening(self, **kwargs):
+    # =============================================================================
+    @classmethod
+    def from_arrays(cls, wave, flux):
+        '''
+        A single-order template from one wavelength and one flux array.
+
+        :param: wave - 1-D wavelength array (Angstrom), increasing.
+        :param: flux - 1-D flux array matching ``wave``.
+        :return: Template whose model holds one order, as (1, n_pixels)
+                 arrays.
+        :raises ValueError: if the arrays are not 1-D or differ in length.
+        '''
+        wave, flux = np.asarray(wave), np.asarray(flux)
+        if wave.ndim != 1 or wave.shape != flux.shape:
+            raise ValueError(f"wave and flux must be 1-D arrays of one length, got shapes "
+                             f"{wave.shape} and {flux.shape}")
+        return cls(Spectrum(wv=wave.reshape(1, -1), sp=flux.reshape(1, -1)))
+
+    # =============================================================================
+    # =============================================================================
+    @classmethod
+    def from_phoenix(cls, teff, logg, feh=0.0, alpha=0.0, *, wave_range,
+                     air=False, allow_download=False):
+        '''
+        A single-order PHOENIX-ACES-AGSS-COND-2011 HiRes model (Husser et al.
+        2013) over a wavelength range.
+
+        :param: teff  - effective temperature (K), a grid value.
+        :param: logg  - log surface gravity (cgs), a grid value.
+        :param: feh   - metallicity [Fe/H] (dex), a grid value.
+        :param: alpha - alpha enhancement [alpha/Fe] (dex), a grid value.
+        :param: wave_range - (lo, hi) wavelengths (Angstrom); the model keeps
+                        the grid points from the first above ``lo`` up to,
+                        not including, the first above ``hi``.
+        :param: air   - bool, convert the (vacuum) PHOENIX wavelengths to air
+                        (Morton 2000) before the range is applied.
+        :param: allow_download - bool, default False. Fetch files missing from
+                        the local cache (TEMPLATE_FILES_PATH) over HTTPS; when
+                        False a missing file raises FileNotFoundError.
+        :return: Template with one order: wavelengths (Angstrom) and the
+                 PHOENIX flux density divided by 1e13.
+        :raises FileNotFoundError: for a missing file with downloads disabled.
+        :raises ValueError: if ``wave_range`` is not inside the model grid.
+        '''
+        wave_path = _cached_phoenix_file(_PHOENIX_WAVE_SUB_PATH, PHOENIX_WAVE_FILE,
+                                         allow_download)
+        flux_path = _cached_phoenix_file(*_phoenix_filename(teff, logg, feh, alpha),
+                                         allow_download)
+
+        with fits.open(flux_path) as hdul_spec:
+            s = np.squeeze(np.array(hdul_spec[0].data))
+        with fits.open(wave_path) as hdul_wl:
+            w = np.squeeze(np.array(hdul_wl[0].data))
+
+        if air:
+            # Morton (2000, ApJS 130, 403), vacuum to air.
+            s2 = 10**8 * w**(-2)
+            f = 1 + 0.0000834254 + 0.02406147 / (130 - s2) + 0.00015998 / (38.9 - s2)
+            w = w/f
+
+        cut = _wave_slice(w, wave_range)
+        spectrum = np.reshape(s[cut], (1, -1)) / (10 ** 13)
+        wavelengths = np.reshape(w[cut], (1, -1))
+        return cls(Spectrum(wv=wavelengths, sp=spectrum))
+
+    # =============================================================================
+    # =============================================================================
+    @classmethod
+    def from_mask(cls, path, wave_range, allow_download=False):
+        '''
+        A line-mask template (e.g. a HARPS DRS ``.mas`` file) on the PHOENIX
+        wavelength grid.
+
+        The flux is 0 except inside each mask window, where it is the negative
+        of the line's weight, so lines read as absorption.
+
+        :param: path       - text file of three columns: window start and end
+                             (Angstrom) and weight; '#' starts a comment.
+                             Where windows overlap, the later line wins.
+        :param: wave_range - (lo, hi) wavelengths (Angstrom), applied as in
+                             ``from_phoenix``.
+        :param: allow_download - bool, see ``from_phoenix`` (only the PHOENIX
+                             wavelength grid is needed).
+        :return: Template with one order on the PHOENIX (vacuum) grid.
+        :raises ValueError: if ``wave_range`` is not inside the grid.
+        '''
+        wave_path = _cached_phoenix_file(_PHOENIX_WAVE_SUB_PATH, PHOENIX_WAVE_FILE,
+                                         allow_download)
+        with fits.open(wave_path) as hdul_wl:
+            w = np.squeeze(np.array(hdul_wl[0].data))
+        w = w[_wave_slice(w, wave_range)]
+
+        lines = np.loadtxt(path, usecols=(0, 1, 2), ndmin=2)
+        s = np.zeros_like(w)
+        # Pixels strictly inside each (start, end) window.
+        first = np.searchsorted(w, lines[:, 0], side='right')
+        last = np.searchsorted(w, lines[:, 1], side='left')
+        for a, b, weight in zip(first, last, lines[:, 2]):
+            s[a:b] = -weight
+
+        return cls(Spectrum(wv=np.reshape(w, (1, -1)), sp=np.reshape(s, (1, -1))))
+
+    # =============================================================================
+    # =============================================================================
+    def broaden_instrumental(self, resolution):
         '''
         Broaden every order with a Gaussian instrumental profile.
 
         :param: resolution - float, the resolving power R; the kernel FWHM is
                              c / R (km/s).
-        :param: wv, sp     - optional external (multi-order) wavelengths
-                             (Angstrom) and normalized flux. When given, they
-                             are broadened and returned, and the template's own
-                             model is left untouched.
-        :return: the broadened flux, shape (n_orders, n_pixels) per order.
+        :return: self, with the model's flux broadened.
         '''
-        resolution = kwargs["resolution"]
-
-        external = 'wv' in kwargs and 'sp' in kwargs
-        wvs, sps = (kwargs["wv"], kwargs["sp"]) if external else (self.model.wv, self.model.sp)
-
-        flux = _per_order(sps, [dsp.broaden_gaussian(s, dsp.dv_from_wave(w), dsp.C_KMS / resolution)
-                                for w, s in zip(wvs, sps)])
-
-        if not external:
-            self.model.sp = flux
-        return flux
+        self.model.sp = _per_order(self.model.sp,
+                                   [dsp.broaden_gaussian(s, dsp.dv_from_wave(w), dsp.C_KMS / resolution)
+                                    for w, s in zip(self.model.wv, self.model.sp)])
+        return self
 
     # =============================================================================
     # =============================================================================
-    def RotationalBroadening(self, **kwargs):
+    def broaden_rotational(self, vsini, epsilon):
         '''
         Broaden every order with a rotational profile (Gray 2005).
 
         :param: vsini   - float, projected rotational velocity [km/s]
         :param: epsilon - float, linear limb-darkening coefficient (0-1)
+        :return: self, with the model's flux broadened.
         '''
-        epsilon = kwargs["epsilon"]
-        vsini = kwargs["vsini"]
-
         self.model.sp = _per_order(self.model.sp,
                                    [dsp.broaden_rotational(s, dsp.dv_from_wave(w), vsini, epsilon)
                                     for w, s in zip(self.model.wv, self.model.sp)])
         return self
 
-        # =============================================================================
-    # =============================================================================
-    def create_PHOENIX_fname(self, temp, log_g, metal, alpha):
-        '''
-        This function prepares the needed spectra files names and paths for downloading
-        :param: The following stellar parameters are necessary for PHOENIX spectrum definition:
-                temp, log_g, metal, alpha.
-        '''
-        # PHOENIX names carry the metallicity sign explicitly ("Z-1.0", "Z+0.5"),
-        # so format its magnitude; the effective temperature is an integer.
-        temp = int(temp)
-        if metal > 0:
-            p = "/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/Z+{:.1f}/".format(metal)
-            s = "lte{:05d}-{:.2f}+{:.1f}.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits".format(temp, log_g, metal)
-        elif alpha != 0:
-            metal = abs(metal)
-            p = "/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/Z-{:.1f}.Alpha={:+.2f}/".format(metal, alpha)
-            s = "lte{:05d}-{:.2f}-{:.1f}.Alpha={:+.2f}.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits".format(temp, log_g,
-                                                                                                      metal, alpha)
-        else:
-            metal = abs(metal)
-            p = "/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/Z-{:.1f}".format(metal)
-            s = "lte{:05d}-{:.2f}-{:.1f}.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits".format(temp, log_g, metal)
-
-        return p, s
-
     # =============================================================================
     # =============================================================================
-    def download_PHOENIX_files(self, p, f_n, timeout=120):
-        '''
-        Download one synthetic-spectrum file from the Goettingen PHOENIX server
-        into TEMPLATE_FILES_PATH, over HTTPS.
-
-        Uses astropy.utils.data.download_file (TLS, timeout, atomic
-        temp-then-move), so there is no process-CWD mutation, no leaked file
-        handle, and no partial file left behind on failure. Any download error
-        propagates to the caller.
-
-        :param: p       - str, server sub-path (as built by create_PHOENIX_fname).
-        :param: f_n     - str, file name to fetch.
-        :param: timeout - float, per-request timeout in seconds.
-        :return: str, the local path of the downloaded file.
-        '''
-        os.makedirs(TEMPLATE_FILES_PATH, exist_ok=True)
-        url = self.server_url + p.strip('/') + '/' + f_n
-        target = os.path.join(TEMPLATE_FILES_PATH, f_n)
-
-        cached = download_file(url, cache=False, timeout=timeout,
-                               show_progress=False)
-        try:
-            shutil.move(cached, target)
-        except BaseException:
-            if os.path.exists(cached):
-                os.remove(cached)
-            raise
-        return target
-
-    # =============================================================================
-    # =============================================================================
-    def doppler(self, vel, wv=[], velocity_convention='cz'):
+    def doppler(self, vel, wv=None, velocity_convention='cz'):
         '''
         This function shifts the template spectrum according to a given velocity (a Doppler shift).
         :param: vel - the radial velocity to shift by (km/s if unitless);
                       positive red-shifts.
-        :param: wv - If empty, the template will be boosted.
+        :param: wv - wavelengths (Angstrom) to shift; if None, the template's own.
         :param: velocity_convention - 'cz' (default; lambda * (1 + v/c)) or
                       'relativistic' (lambda * sqrt((1 + v/c) / (1 - v/c))),
                       see ``unicor.dsp.doppler_factor``. Use the convention the
@@ -291,34 +215,8 @@ class Template:
         if type(vel) is not u.quantity.Quantity:
             vel = float(vel) << u.kilometer / u.second
 
-        target = np.array(self.model.wv) if len(wv) == 0 else wv
+        target = np.array(self.model.wv) if wv is None else wv
         return dsp.doppler_shift_wave(target, vel.to_value(u.km / u.s), velocity_convention)
-
-    # =============================================================================
-    # =============================================================================
-    def add_noise(self, snr, sp=[], rndseed=None):
-        '''
-        This function adds simulated noise to the synthetic spectrum according to a given snr.
-        :param: snr - float, desired signal to noise ration
-        :param: rndseed - random seed, for reproducibility.
-        :return: Noised spectrum model.
-        '''
-
-        if len(sp) != 0:
-            self.model.sp = sp
-
-        if snr == -1:
-            return self.model.sp
-        else:
-            NormFac = np.quantile(self.model.sp[0], 0.98)
-
-            # A dedicated numpy Generator; seeding it (rndseed) makes the noise
-            # reproducible. The old code seeded the `random` module, which does
-            # not affect numpy, so rndseed had no effect.
-            rng = np.random.default_rng(rndseed)
-            noise = rng.normal(0, 1, len(self.model.sp[0])) * NormFac / snr
-
-            return self.model.sp + noise
 
     # =============================================================================
     # =============================================================================
@@ -417,23 +315,122 @@ class Template:
 
     # =============================================================================
     # =============================================================================
-    def cut_multiorder_like(self, obs, margins=150):
+    def cut_multiorder_like(self, spectrum, margins=150):
         '''
         This function cuts the template to the shape of a given Spectrum object.
-        :param: obs - a spectrum object, according to which the template
+        :param: spectrum - a Spectrum object, according to which the template
                       will be sliced.
         :param: margins - the boundaries around the limits, in km/s.
         :return: The template model, trimmed to the provided shapes.
         '''
 
-        wv_bounds = np.zeros((len(obs.wv), 2))
+        wv_bounds = np.zeros((len(spectrum.wv), 2))
         margins = float(margins) << u.kilometer / u.second
-        beta = (margins/obs.c).decompose().value
+        beta = (margins/spectrum.c).decompose().value
 
-        for ordInd, w in enumerate(obs.wv):
+        for ordInd, w in enumerate(spectrum.wv):
             wv_bounds[ordInd, 0] = min(w)*(1-beta)
             wv_bounds[ordInd, 1] = max(w)*(1+beta)
 
         self.cut_multiorder(wv_bounds)
 
         return self
+
+
+def _phoenix_filename(teff, logg, feh, alpha):
+    '''
+    Server sub-path and file name of a PHOENIX-ACES HiRes model.
+
+    PHOENIX names carry the metallicity sign explicitly ("Z-1.0", "Z+0.5"),
+    so its magnitude is formatted; the effective temperature is an integer.
+
+    :param: teff, logg, feh, alpha - see ``Template.from_phoenix``.
+    :return: (sub_path, filename), str.
+    '''
+    teff = int(teff)
+    if feh > 0:
+        p = "/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/Z+{:.1f}/".format(feh)
+        s = "lte{:05d}-{:.2f}+{:.1f}.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits".format(teff, logg, feh)
+    elif alpha != 0:
+        feh = abs(feh)
+        p = "/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/Z-{:.1f}.Alpha={:+.2f}/".format(feh, alpha)
+        s = "lte{:05d}-{:.2f}-{:.1f}.Alpha={:+.2f}.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits".format(teff, logg,
+                                                                                                  feh, alpha)
+    else:
+        feh = abs(feh)
+        p = "/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/Z-{:.1f}".format(feh)
+        s = "lte{:05d}-{:.2f}-{:.1f}.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits".format(teff, logg, feh)
+
+    return p, s
+
+
+def _phoenix_url(sub_path, filename):
+    '''The HTTPS URL of a PHOENIX file (see ``_phoenix_filename``).'''
+    return PHOENIX_URL + sub_path.strip('/') + '/' + filename
+
+
+def _cached_phoenix_file(sub_path, filename, allow_download):
+    '''
+    Local path of a PHOENIX file, downloading it only if allowed.
+
+    :param: sub_path, filename - see ``_phoenix_filename``.
+    :param: allow_download - bool; when False a file missing from
+                             TEMPLATE_FILES_PATH raises.
+    :return: str, the path in TEMPLATE_FILES_PATH.
+    :raises FileNotFoundError: if the file is missing and downloads are off.
+    '''
+    path = os.path.join(TEMPLATE_FILES_PATH, filename)
+    if os.path.exists(path):
+        return path
+    if not allow_download:
+        raise FileNotFoundError(
+            f"PHOENIX file '{filename}' is not in {TEMPLATE_FILES_PATH} "
+            "and downloads are disabled (allow_download=False); pass "
+            "allow_download=True to fetch it.")
+    return _download_phoenix_file(sub_path, filename)
+
+
+def _download_phoenix_file(sub_path, filename, timeout=120):
+    '''
+    Download one PHOENIX file from the Goettingen server into
+    TEMPLATE_FILES_PATH, over HTTPS.
+
+    Uses astropy.utils.data.download_file (TLS, timeout, atomic
+    temp-then-move), so there is no process-CWD mutation, no leaked file
+    handle, and no partial file left behind on failure. Any download error
+    propagates to the caller.
+
+    :param: sub_path - str, server sub-path (see ``_phoenix_filename``).
+    :param: filename - str, file name to fetch.
+    :param: timeout  - float, per-request timeout in seconds.
+    :return: str, the local path of the downloaded file.
+    '''
+    os.makedirs(TEMPLATE_FILES_PATH, exist_ok=True)
+    target = os.path.join(TEMPLATE_FILES_PATH, filename)
+
+    cached = download_file(_phoenix_url(sub_path, filename), cache=False, timeout=timeout,
+                           show_progress=False)
+    try:
+        shutil.move(cached, target)
+    except BaseException:
+        if os.path.exists(cached):
+            os.remove(cached)
+        raise
+    return target
+
+
+def _wave_slice(wave, wave_range):
+    '''
+    Index range of a PHOENIX grid: from the first point above ``lo`` up to,
+    not including, the first point above ``hi``.
+
+    :param: wave       - increasing wavelength grid (Angstrom).
+    :param: wave_range - (lo, hi), Angstrom.
+    :return: slice.
+    :raises ValueError: unless lo < hi < wave[-1].
+    '''
+    lo, hi = wave_range
+    if not lo < hi < wave[-1]:
+        raise ValueError(f"wave_range={tuple(wave_range)} must satisfy lo < hi < "
+                         f"{wave[-1]:.1f} A (the end of the PHOENIX grid)")
+    return slice(int(np.argmax(wave > lo)), int(np.argmax(wave > hi)))

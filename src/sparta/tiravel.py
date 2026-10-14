@@ -42,8 +42,8 @@ class TIRAVEL:
 
     # =============================================================================
     # =============================================================================
-    def BuildTemplate(self, spec_list, velocities, orders=None, reference=0,
-                      margin=None, kind='cubic', keep_aligned=True):
+    def build_template(self, spectra, velocities, orders=None, reference=0,
+                       margin=None, kind='cubic', keep_aligned=True):
         '''
         Build the optimal template for a set of observations at given velocities.
 
@@ -55,7 +55,7 @@ class TIRAVEL:
         should be summed. Orders are pooled into one correlation matrix, so a
         single weight vector describes the whole spectrum.
 
-        :param: spec_list  - a list of K Spectrum objects (one per epoch), all
+        :param: spectra    - a list of K Spectrum objects (one per epoch), all
                             with the same number of orders.
         :param: velocities - a list of K radial velocities (km/s), the trial
                             alignment. Only their *differences* matter: adding a
@@ -75,7 +75,7 @@ class TIRAVEL:
                             smooths the lines enough to depress the very
                             correlations being measured.
         :param: keep_aligned - Boolean. Retain the aligned per-order matrices
-                            (needed by :meth:`plotTemplate`).
+                            (needed by :meth:`plot_template`).
 
         :return: self, with the following fields:
                  self.template     - a Template object holding the co-added
@@ -92,13 +92,13 @@ class TIRAVEL:
                  self.aligned      - (if keep_aligned) the per-order aligned,
                                      normalized epoch matrices.
         '''
-        if len(spec_list) != len(velocities):
+        if len(spectra) != len(velocities):
             raise ValueError(
-                f'got {len(spec_list)} spectra but {len(velocities)} velocities')
-        if len(spec_list) < 2:
+                f'got {len(spectra)} spectra but {len(velocities)} velocities')
+        if len(spectra) < 2:
             raise ValueError('TIRAVEL needs at least 2 epochs')
 
-        specs = [deepcopy(s) for s in spec_list]
+        specs = [deepcopy(s) for s in spectra]
         velocities = np.asarray(velocities, float)
         if not np.all(np.isfinite(velocities)):
             raise ValueError('the supplied velocities contain NaN/inf; drop '
@@ -142,7 +142,7 @@ class TIRAVEL:
         blocks = [normalized[:, a:b] for a, b in zip(sizes[:-1], sizes[1:])]
         template_sp = [coadd(block, weights) for block in blocks]
 
-        self.template = Template(template=Spectrum(
+        self.template = Template(Spectrum(
             wv=[np.asarray(g, float) for g in grids],
             sp=template_sp,
             name=getattr(specs[0], 'name', 'TIRAVEL')))
@@ -159,7 +159,7 @@ class TIRAVEL:
 
     # =============================================================================
     # =============================================================================
-    def plotWeights(self, times=None, figsize=(7, 3.5)):
+    def plot_weights(self, times=None, figsize=(7, 3.5)):
         '''
         Plot the per-epoch co-addition weights.
 
@@ -187,8 +187,8 @@ class TIRAVEL:
 
     # =============================================================================
     # =============================================================================
-    def plotTemplate(self, order=0, show_epochs=True, alpha=0.15,
-                     figsize=(11, 4)):
+    def plot_template(self, order=0, show_epochs=True, alpha=0.15,
+                      figsize=(11, 4)):
         '''
         Plot the co-added template over the aligned epochs that made it.
 
@@ -200,7 +200,7 @@ class TIRAVEL:
         '''
         if show_epochs and self.aligned is None:
             raise ValueError('the aligned epochs were not retained; re-run '
-                             'BuildTemplate with keep_aligned=True')
+                             'build_template with keep_aligned=True')
 
         grid = self.grids[order]
         fig, ax = plt.subplots(figsize=figsize)

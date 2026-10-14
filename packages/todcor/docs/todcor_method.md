@@ -47,7 +47,7 @@ convention (`velocity_convention`, via `unicor.dsp.shift_kms`):
 `expm1(x) = eˣ − 1`, computed without cancellation for small `x`. For the same
 spectrum the `'cz'` velocity exceeds the `'relativistic'` one by `≈ v²/2c`
 (37.5 m/s at 150 km/s). `s` is measured in units of the grid's actual step:
-a grid built with `Δ = ln(1 + dv/c)` (SPARTA's `InterpolateSpectrum`) has
+a grid built with `Δ = ln(1 + dv/c)` (SPARTA's `Spectrum.interpolate`) has
 `c·Δ = dv·(1 − dv/2c)`, so `CCF2d` passes each order's measured `c·Δ`
 (`unicor.dsp.log_grid_step`), not the nominal `dv`.
 
@@ -145,7 +145,7 @@ Because χ² is additive over independent-noise windows and each window's χ² i
 (`combine_stats`) into one joint fit with **shared `(v1, v2, a1, a2)`**. Windows
 may differ in `dv`, resolution, or instrument. In SPARTA the natural windows are
 the **spectral orders** of one observation, which is exactly what
-`CCF2d.CrossCorrelateSpec` pools; hand-picked line windows (He II 4686, N IV
+`CCF2d.cross_correlate` pools; hand-picked line windows (He II 4686, N IV
 4058, …) work the same way — one window per line → `combine_stats` → a joint
 velocity fit. The statistics are linear in the Parseval weights `1/σ²`, so
 `combine_stats(stats, weights=w)` — each window's six statistics times `w_i`,
@@ -223,7 +223,7 @@ Nyquist and anything above `zeta_max` excluded). For white noise on the
 analysis grid that is the number of retained modes. Resampled noise is not just
 correlated but *smoother*: its variance per analysis pixel is `κσ²` with
 `κ = 2/3` for linear interpolation and ≈ 0.87 for the cubic spline of
-`Spectrum.InterpolateSpectrum`, and the Tukey taper multiplies it by
+`Spectrum.interpolate`, and the Tukey taper multiplies it by
 `mean(w²)` (≈ 0.94 at α = 0.1). Dividing χ² by the bare independent-pixel
 count `n_eff = n/M` would therefore leave χ²_red ≈ 0.8 (≈ 0.63 for linear
 interpolation) for honest noise. Instead `noise_psd` — from
@@ -320,15 +320,15 @@ Exact **only** under these; the first is the one to watch:
 
 - **White native noise `σ` per native pixel, resampled once by a linear
   interpolator.** `oversampling`, `noise_psd` and the native-pixel count
-  behind the CRLB model that resampling (in `CCF2d`: one `InterpolateSpectrum`
+  behind the CRLB model that resampling (in `CCF2d`: one `Spectrum.interpolate`
   call from a uniform native grid, probed with unit impulses). **After
-  `FilterSpectrum` / `SpecPreProccess` this calibration does not hold**:
+  `filter_spectrum` / `preprocess` this calibration does not hold**:
   band-pass filtering, per-order normalisation and the double resampling
-  (`SpecPreProccess`'s linear resampling, then `CCF2d`'s log one) remove and
+  (`preprocess`'s linear resampling, then `CCF2d`'s log one) remove and
   correlate noise power that ν and the CRLB do not know about. Measured by
   Monte Carlo on preprocessed spectra: TODCOR RV scatter / eRV = 0.72–0.74,
   i.e. errors ~1.4× too large; UNICOR eRV / RV scatter = 1.17 at
-  `SpecPreProccess`'s default `FilterHC = 0.15` and 1.38 at `FilterHC = 0.9`.
+  `preprocess`'s default `filter_highcut = 0.15` and 1.38 at `filter_highcut = 0.9`.
   χ²_red then drifts from 1 and `sigma=None` absorbs only each order's mean
   scale. Calibrate the errors by simulation (or a constant star) for
   preprocessed spectra. The taper makes the noise heteroscedastic (`σ_n = w_n σ`); only its

@@ -119,19 +119,19 @@ def _record_unicor(directory):
     """RV / eRV (km/s) per epoch, exactly as UNICOR_quickstart.ipynb computes them."""
     from sparta.template import Template
     obs = Observations(survey="NRES", target_visits_lib=str(directory))
-    obs.SelectOrders([10 + i for i in np.arange(40)], remove=False)
-    obs.PreProccessSpectra(Ntrim=100, CleanMargins=True, RemoveNaNs=True, delta=0.5,
-                           RemCosmicNum=3, FilterLC=4, FilterHC=0.15, alpha=0.3)
-    template = Template(temp=5800, log_g=3.5, metal=0.5, alpha=0.0, min_val=4650,
-                        max_val=7500, air=False, allow_download=False)
+    obs.select_orders([10 + i for i in np.arange(40)], remove=False)
+    obs.preprocess(n_trim=100, clean_margins=True, remove_nans=True, delta=0.5,
+                   cosmic_sigma=3, filter_lowcut=4, filter_highcut=0.15, alpha=0.3)
+    template = Template.from_phoenix(5800, 3.5, 0.5, 0.0, wave_range=(4650, 7500),
+                                     air=False, allow_download=False)
     template.integrate_spec(integration_ratio=3)
-    template.model.InterpolateSpectrum(delta=1)
-    template.RotationalBroadening(vsini=6, epsilon=0.5)
-    template.GaussianBroadening(resolution=53000)
+    template.model.interpolate(delta=1)
+    template.broaden_rotational(vsini=6, epsilon=0.5)
+    template.broaden_instrumental(resolution=53000)
     template.cut_multiorder_like(obs.spec_list[0], margins=150)
-    template.model.SpecPreProccess(Ntrim=10, CleanMargins=False, RemoveNaNs=False, delta=1,
-                                   RemCosmicNum=3, FilterLC=4, FilterHC=0.15, alpha=0.3)
-    obs.calc_rv_against_template(template, dv=0.05, VelBound=[-50, 100], err_per_ord=False,
+    template.model.preprocess(n_trim=10, clean_margins=False, remove_nans=False, delta=1,
+                              cosmic_sigma=3, filter_lowcut=4, filter_highcut=0.15, alpha=0.3)
+    obs.calc_rv_against_template(template, dv=0.05, vel_bound=[-50, 100], errors_per_order=False,
                                  combine_ccfs=True)
     return {os.path.basename(p): {"rv": float(v), "erv": float(e)}
             for p, v, e in zip(obs.file_list, obs.vels, obs.evels)}

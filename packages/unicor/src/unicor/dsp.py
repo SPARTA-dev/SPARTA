@@ -48,7 +48,7 @@ def log_grid_dln(wave, rtol=1e-3):
     be caught before correlating, not after.
 
     A velocity read off a lag must use this *actual* step: a grid built with
-    ``ln(1 + dv/c)`` (``Spectrum.InterpolateSpectrum``) and one built with
+    ``ln(1 + dv/c)`` (``Spectrum.interpolate``) and one built with
     ``dv/c`` (:func:`log_lambda_grid`) differ by ``dv/2c`` relative.
 
     Parameters

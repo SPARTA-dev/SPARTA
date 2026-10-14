@@ -35,22 +35,25 @@ class CCF1d:
 
     # =============================================================================
     # =============================================================================
-    def CrossCorrelateSpec(self, spec_in, template_in,
-                           dv=None, VelBound=100, err_per_ord=False,
-                           velocity_convention='cz'):
+    def cross_correlate(self, spectrum, template,
+                        dv=None, vel_bound=150, errors_per_order=False,
+                        velocity_convention='cz'):
         '''
-        All input is optional, and needs to be called along
-        with its keyword. Below appears a list of the possible input
-        variables.
+        Cross-correlate every order of a spectrum with a template (UNICOR).
 
-        :param: template - the template for the CCF (see template class)
+        :param: spectrum - the observed Spectrum (not modified).
+        :param: template - the Template for the CCF (not modified).
         :param: dv       - scalar. If the spectrum is not logarithmically
                          evenly-spaced it is resampled, with a stepsize
                          determined according to dv (in km/s). Default 0.1
-        :param: VelBounds - scalar. The velocity bounds for the CCF.
-                         detemined according to [-VelBound, VelBound]
-                         Default is 100 km/s
-        :param: err_per_ord - Boolean. Indicates if the error should be
+        :param: vel_bound - scalar or [lo, hi] (km/s). The CCF is scanned over
+                         [-V, V], V the largest |vel_bound|. Default 150 km/s,
+                         the same in CCF2d and Observations: it spans the
+                         RV range of most binaries, and it equals the default
+                         margin of Template.cut_multiorder_like, so a template
+                         cut with the defaults covers every observed pixel at
+                         every lag.
+        :param: errors_per_order - Boolean. Indicates if the error should be
                          calculated (from maximum likelihood) to each
                          order.
         :param: velocity_convention - 'cz' (default) or 'relativistic': how a
@@ -65,7 +68,7 @@ class CCF1d:
                          'cz' by -v^2/2c.
 
         The template is resampled onto each order's log-lambda grid continued
-        by K = round(VelBound / dv) steps on each side, and every lag is the
+        by K = round(vel_bound / dv) steps on each side, and every lag is the
         Pearson correlation of the same observed pixels with the template
         shifted by that lag (``unicor.ccf_vs_velocity``). Correlating against
         a template on the observed span only would overlap fewer pixels at
@@ -74,7 +77,7 @@ class CCF1d:
         Template coverage: only observed pixels for which the template is
         known at every lag are correlated. A template spanning just the
         observed range (e.g. another epoch, a co-added spectrum) therefore
-        drops VelBound worth of pixels at each end of the order; a template
+        drops vel_bound worth of pixels at each end of the order; a template
         that covers no pixel across the whole scan makes that order NaN, with
         a warning. The template is never extrapolated, since constant padding
         would bring back the pull toward zero.
@@ -84,18 +87,18 @@ class CCF1d:
         but no information, so order i counts
         ``n_pix_i * min(1, dv / native_step_i)`` bins -- ``n_pix_i`` the
         pixels actually correlated (see template coverage) -- with the native step
-        from ``spec_in.native_steps()`` (km/s; the coarsest sampling the
+        from ``spectrum.native_steps()`` (km/s; the coarsest sampling the
         spectrum has had). For an archive-resampled product, Observations
         seeds it with the detector step (e.g. HARPS ADP: ~0.609 km/s, where
         the 0.01 A archive grid is ~0.60 km/s at 5000 A but ~0.44 km/s at
         6800 A), so the archive's oversampling is not counted as information.
 
         That count assumes white noise on the native pixels. Filtering and
-        per-order normalisation (``FilterSpectrum`` / ``SpecPreProccess``)
+        per-order normalisation (``filter_spectrum`` / ``preprocess``)
         remove noise power and correlate it, so the uncertainty is then no
         longer calibrated: in Monte Carlo the ratio eRV / (RV scatter) is
-        1.17 with SpecPreProccess's default FilterHC=0.15 and 1.38 with
-        FilterHC=0.9, i.e. the errors are 17-38% conservative. Calibrate by
+        1.17 with preprocess's default filter_highcut=0.15 and 1.38 with
+        filter_highcut=0.9, i.e. the errors are 17-38% conservative. Calibrate by
         simulation for preprocessed spectra.
 
         :return: self.Corr - a dictionary with the following fields:
@@ -115,8 +118,8 @@ class CCF1d:
 
         # Initialize:
         # ----------
-        template = deepcopy(template_in)
-        spec = deepcopy(spec_in)
+        template = deepcopy(template)
+        spec = deepcopy(spectrum)
 
         if dv is None:
             dv = self.default_dv
@@ -125,11 +128,11 @@ class CCF1d:
 
         # A bare number is km/s, like every other velocity in SPARTA -- not
         # the unit dv happens to carry.
-        if type(VelBound) is not u.quantity.Quantity:
-            VelBound = np.array(VelBound) << u.kilometer / u.second
+        if type(vel_bound) is not u.quantity.Quantity:
+            vel_bound = np.array(vel_bound) << u.kilometer / u.second
 
         # Symmetric velocity half-range for the CCF scan (both signs valid).
-        vmax = np.max(np.abs(VelBound))
+        vmax = np.max(np.abs(vel_bound))
 
         # Read before any resampling below: the sampling that sets the noise
         # is the one the data arrived on (native_steps validates it against
@@ -138,7 +141,7 @@ class CCF1d:
 
         # Ensure the observed spectrum is on a log-lambda (velocity-even) grid.
         if spec.Info.get('GridType') != 'log':
-            spec.InterpolateSpectrum(delta=dv, InterpMethod='log')
+            spec.interpolate(delta=dv, method='log')
         dv = spec.Info['GridDelta']
 
         dv_kms = dv.to(u.km / u.s).value
@@ -146,7 +149,7 @@ class CCF1d:
 
         n_lags = int(round(vmax_kms / dv_kms))
         if n_lags < 1:
-            raise ValueError(f"VelBound ({vmax_kms:g} km/s) must be at least one "
+            raise ValueError(f"vel_bound ({vmax_kms:g} km/s) must be at least one "
                              f"velocity step ({dv_kms:g} km/s)")
 
         # The lag axis is k * Delta in ln(lambda) only if every order really is
@@ -165,7 +168,7 @@ class CCF1d:
             raise ValueError(
                 "the orders' ln(lambda) steps differ (relative spread "
                 f"{np.ptp(dln) / dln_common:.2g}), so their CCFs cannot share one "
-                "velocity axis; resample them with InterpolateSpectrum(InterpMethod='log')")
+                "velocity axis; resample them with interpolate(method='log')")
         V = dsp.velocity_from_log_shift(np.arange(-n_lags, n_lags + 1) * dln_common,
                                         velocity_convention) << (u.km / u.s)
 
@@ -212,7 +215,7 @@ class CCF1d:
             try:
                 vPeak, ccfPeak = unicor_ccf.subpixel_peak(v_kms, C)
                 vPeakErr = (unicor_ccf.rv_uncertainty(v_kms, C, vPeak, n_eff[I])
-                            if err_per_ord else np.nan)
+                            if errors_per_order else np.nan)
             except (ValueError, np.linalg.LinAlgError):
                 vPeak, vPeakErr, ccfPeak = np.nan, np.nan, np.nan
 
@@ -235,10 +238,10 @@ class CCF1d:
 
 # =============================================================================
 # =============================================================================
-    def CombineCCFs(self):
+    def combine(self):
         '''
         This routine takes a matrix of CCF values (# orders X length of velocity vector)
-        that were calculated by the CrossCorrelateSpec routine, combines the CCFs into
+        that were calculated by the cross_correlate routine, combines the CCFs into
         a single one, based on a maximum-likelihood approach (Zucker, 2003, MNRAS).
         Orders are weighted by their effective number of independent bins
         (``self.Corr['n_eff']``). The RV is derived from the peak of the
@@ -259,7 +262,7 @@ class CCF1d:
         n_eff_total = float(np.sum(self.Corr['n_eff']))
 
         try:
-            V, eRV, CorrPeak, vUnit = self.extract_RV(velocities, CombinedCorr)
+            V, eRV, CorrPeak, vUnit = self.extract_rv(velocities, CombinedCorr)
 
             # Return the corresponding velocity grid.
             self.CorrCombined = {
@@ -287,12 +290,12 @@ class CCF1d:
 
 # =============================================================================
 # =============================================================================
-    def extract_RV(self, x, y, vel=None, n_ord=None):
+    def extract_rv(self, x, y, vel=None, n_ord=None):
         """
         Radial velocity and its maximum-likelihood uncertainty from a CCF.
 
         The uncertainty uses the effective number of independent bins stored
-        by :meth:`CrossCorrelateSpec` (``self.Corr['n_eff']``), summed over the
+        by :meth:`cross_correlate` (``self.Corr['n_eff']``), summed over the
         orders behind ``y``.
 
         :param x: velocity lags (Quantity or km/s array).
@@ -319,7 +322,7 @@ class CCF1d:
 
 # =============================================================================
 # =============================================================================
-    def calcBIS(self, x, y, bisect_val=(0.35, 0.95), n_ord=None):
+    def calc_bis(self, x, y, bisect_val=(0.35, 0.95), n_ord=None):
         """
         Bisector span of a single-peaked CCF (see :func:`unicor.bisector_span`).
 
@@ -327,7 +330,7 @@ class CCF1d:
         :param y: CCF values at ``x``.
         :param bisect_val: lower and upper bisector levels, as fractions of the
                            CCF maximum.
-        :param n_ord: number of orders behind ``y``; see :meth:`extract_RV`.
+        :param n_ord: number of orders behind ``y``; see :meth:`extract_rv`.
         :return: (BIS, eBIS, unit); (nan, nan, None) when a level does not cut
                  the CCF exactly twice.
         """
@@ -343,12 +346,12 @@ class CCF1d:
 
         :param n_ord: number of orders; None means all of them.
         :return: float, the summed ``self.Corr['n_eff']``.
-        :raises ValueError: before :meth:`CrossCorrelateSpec` has run, or when
+        :raises ValueError: before :meth:`cross_correlate` has run, or when
                             ``n_ord`` names a strict subset of the orders
                             (which orders is then unknown).
         """
         if not hasattr(self, 'Corr'):
-            raise ValueError("run CrossCorrelateSpec first: the uncertainty needs "
+            raise ValueError("run cross_correlate first: the uncertainty needs "
                              "the number of independent spectral bins it records")
         if n_ord is not None and n_ord != self.n_ord:
             raise ValueError(
@@ -357,7 +360,7 @@ class CCF1d:
                 "self.Corr['n_eff'][i]")
         return float(np.sum(self.Corr['n_eff']))
 
-    def subpixel_CCF(self, vels, ccf, v=None, Npts=5):
+    def subpixel_peak(self, vels, ccf, v=None, npts=5):
         """
         Second-order (parabolic) estimate of the CCF around its peak.
 
@@ -365,38 +368,38 @@ class CCF1d:
         :param ccf: CCF values at ``vels``.
         :param v: if given, return the interpolated CCF value at this velocity
                   (km/s) instead of the peak.
-        :param Npts: odd number of points around the peak used in the fit.
+        :param npts: odd number of points around the peak used in the fit.
         :return: (v_peak, ccf_peak) in km/s, or the CCF value at ``v``.
         """
         if isinstance(vels, u.Quantity):
             vels = vels.value
         if v is None:
-            return unicor_ccf.subpixel_peak(vels, ccf, npts=Npts)
+            return unicor_ccf.subpixel_peak(vels, ccf, npts=npts)
         return unicor_ccf.ccf_at(vels, ccf, v)
 
 
     # =============================================================================
     # =============================================================================
-    def plotCCFs(self, PlotCombined=True, PlotSingleOrds=True, ords=None, alpha=0.125, **kwargs):
+    def plot(self, plot_combined=True, plot_orders=True, orders=None, alpha=0.125):
         '''
         Produce plots of the calculated CCFs.
-        :param PlotCombined: Boolean. Plot the combined CCF (if exists)
-        :param PlotSingleOrds: Boolean. Plot the ccf of each order required.
-        :param ords: a specifiec list of order numbers to plot.
-        :param kwargs: maybe will contain some plot spec.
+        :param plot_combined: Boolean. Plot the combined CCF (if exists)
+        :param plot_orders: Boolean. Plot the ccf of each order required.
+        :param orders: a specific list of order numbers to plot (default all).
+        :param alpha: transparency of the per-order CCFs.
         :return: fig object
         '''
-        if ords is None:
-            ords = np.arange(self.n_ord)
+        if orders is None:
+            orders = np.arange(self.n_ord)
 
         fig = plt.figure(figsize=(13, 4), dpi= 80, facecolor='w', edgecolor='k')
 
-        if PlotSingleOrds:
-            for o in ords:
+        if plot_orders:
+            for o in orders:
                 plt.plot(self.Corr['vel'].value,
                          self.Corr['corr'][o], 'k', alpha=alpha, linewidth=0.75)
 
-        if PlotCombined:
+        if plot_combined:
             try:
                 plt.plot(self.CorrCombined['vel'],
                          self.CorrCombined['corr'], 'k', linewidth=2.5)
@@ -437,5 +440,5 @@ def _template_covered_pixels(w_ext, t_wave, n_lags):
         raise ValueError(
             f"the template ({t_wave[0]:.2f}-{t_wave[-1]:.2f} A) does not cover any "
             f"pixel of the order ({w_ext[n_lags]:.2f}-{w_ext[n_lags + n_obs - 1]:.2f} A) "
-            f"across the +-{n_lags}-lag scan; use a wider template or a smaller VelBound")
+            f"across the +-{n_lags}-lag scan; use a wider template or a smaller vel_bound")
     return lo, hi

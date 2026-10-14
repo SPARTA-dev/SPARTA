@@ -112,8 +112,8 @@ PRODUCTS = (
         multi_order=False,
         recommended=Recommended(
             dv_kms=0.1, window_A=(4990.0, 5090.0),
-            preprocess=dict(Ntrim=10, CleanMargins=True, RemoveNaNs=True, delta=0.5,
-                            RemCosmicNum=3, FilterLC=3, FilterHC=0.15, alpha=0.3)),
+            preprocess=dict(n_trim=10, clean_margins=True, remove_nans=True, delta=0.5,
+                            cosmic_sigma=3, filter_lowcut=3, filter_highcut=0.15, alpha=0.3)),
         verified=True,
         load=load_sdp,
         grid_step_A=0.01,

@@ -35,7 +35,7 @@ from sparta.template import Template
 from sparta.timeseries import TimeSeries
 from sparta.tiravel import TIRAVEL
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = ["Spectrum", "Template", "Observations", "TimeSeries", "CCF1d", "CCF2d",
            "TIRAVEL", "PeriodicityDetector", "instruments"]

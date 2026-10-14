@@ -1,11 +1,11 @@
 """Correctness tests for the reimplemented CCF / RV extraction.
 
-The legacy CrossCorrelateSpec could not recover non-negative radial velocities:
+The legacy cross_correlate could not recover non-negative radial velocities:
 it truncated the template to a shifted sub-grid and used a constant (not
 per-lag) normalization, so only RV <~ 0 was recoverable. Its
 first replacement correlated against a template on the observed span only, so
 fewer pixels overlapped at larger lags and the peak was pulled toward v = 0.
-CrossCorrelateSpec now resamples the template onto the observed log-lambda grid
+cross_correlate now resamples the template onto the observed log-lambda grid
 extended by the scan half-width on each side, so every lag is a Pearson
 correlation over the same observed pixels. The golden master is physical:
 recovered RV must equal the injected RV, for both signs, with no pull to zero,
@@ -32,14 +32,14 @@ def _line(center):
 
 @pytest.fixture(scope="module")
 def template():
-    return Template(template=Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0)], name="t"))
+    return Template(Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0)], name="t"))
 
 
 @pytest.mark.parametrize("inj", [-10.0, -5.0, 0.0, 5.0, 10.0])
 def test_rv_recovers_injected(template, inj):
     obs = Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0 * (1 + inj / C))], name="o")
-    ccf = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=template,
-                                     dv=0.5, VelBound=50).CombineCCFs()
+    ccf = CCF1d().cross_correlate(spectrum=obs, template=template,
+                                  dv=0.5, vel_bound=50).combine()
     rv = ccf.CorrCombined["RV"]
     rv = float(rv.value if hasattr(rv, "value") else rv)
     assert rv == pytest.approx(inj, abs=0.05)
@@ -71,16 +71,16 @@ def test_rv_beyond_the_scan_is_nan_not_a_wrong_sign(template):
     # -70 km/s with a +-50 km/s scan: the legacy parabola window wrapped around
     # the array and reported about +2.8 km/s, silently.
     obs = Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0 * (1 - 70.0 / C))], name="o")
-    ccf = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=template,
-                                     dv=0.5, VelBound=50).CombineCCFs()
+    ccf = CCF1d().cross_correlate(spectrum=obs, template=template,
+                                  dv=0.5, vel_bound=50).combine()
     assert np.isnan(float(ccf.Corr["RV"][0, 0]))
     assert np.isnan(float(np.asarray(ccf.CorrCombined["RV"])))
 
 
 def test_unitless_velbound_is_km_per_s_whatever_the_unit_of_dv(template):
     obs = Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0 * (1 + 5.0 / C))], name="o")
-    ccf = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=template,
-                                     dv=500 * u.m / u.s, VelBound=50).CombineCCFs()
+    ccf = CCF1d().cross_correlate(spectrum=obs, template=template,
+                                  dv=500 * u.m / u.s, vel_bound=50).combine()
     v = ccf.Corr["vel"].to_value(u.km / u.s)
     assert v.max() == pytest.approx(50.0, abs=0.5)
     assert float(ccf.CorrCombined["RV"]) == pytest.approx(5.0, abs=0.05)
@@ -88,24 +88,24 @@ def test_unitless_velbound_is_km_per_s_whatever_the_unit_of_dv(template):
 
 def test_a_grid_that_is_not_velocity_even_is_refused(template):
     obs = Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0)], name="o")
-    obs.InterpolateSpectrum(delta=0.5, InterpMethod="log")
+    obs.interpolate(delta=0.5, method="log")
     # Dropping pixels leaves GridType == 'log' while breaking the uniform step.
     obs.wv[0] = np.delete(obs.wv[0], np.arange(100, 110))
     obs.sp[0] = np.delete(obs.sp[0], np.arange(100, 110))
     with pytest.raises(ValueError, match="uniform"):
-        CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=template, VelBound=50)
+        CCF1d().cross_correlate(spectrum=obs, template=template, vel_bound=50)
 
 
 def test_an_order_the_template_does_not_cover_is_nan_not_fatal():
     # Order 0 lies outside the template's span, so no observed pixel has
     # template coverage at every lag; that order is NaN and order 1 still
     # yields its RV.
-    tmpl = Template(template=Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0)], name="t"))
+    tmpl = Template(Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0)], name="t"))
     far = np.linspace(6000.0, 6040.0, 4000)
     obs = Spectrum(wv=[far, WAVE.copy()],
                    sp=[np.ones_like(far), _line(5500.0 * (1 + 4.0 / C))], name="o")
     with pytest.warns(UserWarning, match="order 0: .*cover"):
-        ccf = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=tmpl, dv=0.5, VelBound=50)
+        ccf = CCF1d().cross_correlate(spectrum=obs, template=tmpl, dv=0.5, vel_bound=50)
     assert np.isnan(ccf.Corr["RV"][0, 0])
     assert float(ccf.Corr["RV"][1, 0]) == pytest.approx(4.0, abs=0.05)
 
@@ -119,15 +119,15 @@ def _log_spectrum(wave, flux, dv):
 
 @pytest.mark.parametrize("inj", [-5.0, 5.0])
 def test_a_template_on_the_observed_span_trims_the_order_by_the_scan(inj):
-    # Pixels within VelBound of either end have no template at every lag, so
+    # Pixels within vel_bound of either end have no template at every lag, so
     # they are left out of the correlation (and of n_eff) instead of being
     # correlated against a clamped, line-free template.
     dv, vel_bound = 0.5, 50.0
     wave, _ = so.log_lambda_grid(5480.0, 5520.0, dv)
     line = lambda centre: 1.0 - 0.6 * np.exp(-0.5 * ((wave - centre) / 0.12) ** 2)
-    tmpl = Template(template=Spectrum(wv=[wave.copy()], sp=[line(5500.0)], name="t"))
+    tmpl = Template(Spectrum(wv=[wave.copy()], sp=[line(5500.0)], name="t"))
     obs = _log_spectrum(wave, line(5500.0 * (1 + inj / C)), dv)
-    ccf = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=tmpl, VelBound=vel_bound)
+    ccf = CCF1d().cross_correlate(spectrum=obs, template=tmpl, vel_bound=vel_bound)
     # dv_from_wave's native step is c*expm1(dln), a hair above dv: rel 1e-6.
     assert ccf.Corr["n_eff"][0] == pytest.approx(wave.size - 2 * round(vel_bound / dv),
                                                  rel=1e-5)
@@ -139,9 +139,9 @@ def test_a_template_covering_part_of_the_order_uses_only_the_covered_pixels():
     k = round(vel_bound / dv)
     wave, _ = so.log_lambda_grid(5480.0, 5520.0, dv)
     t_wave, _ = so.log_lambda_grid(5470.0, 5500.0, 0.25)
-    tmpl = Template(template=Spectrum(wv=[t_wave], sp=[_forest(t_wave, 0.0)], name="t"))
+    tmpl = Template(Spectrum(wv=[t_wave], sp=[_forest(t_wave, 0.0)], name="t"))
     obs = _log_spectrum(wave, _forest(wave, 3.0), dv)
-    ccf = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=tmpl, VelBound=vel_bound)
+    ccf = CCF1d().cross_correlate(spectrum=obs, template=tmpl, vel_bound=vel_bound)
     dln = np.log(wave[-1] / wave[0]) / (wave.size - 1)
     covered = ((wave * np.exp(-k * dln) >= t_wave[0]) &
                (wave * np.exp(k * dln) <= t_wave[-1]))
@@ -179,14 +179,14 @@ def test_rotating_star_rv_has_no_pull_toward_zero():
     wave, _ = so.log_lambda_grid(5000.0, 5060.0, dv)
     dln = np.log(wave[-1] / wave[0]) / (wave.size - 1)
     t_wave, t_flux = _rotating_forest(25.0, seed=1)
-    tmpl = Template(template=Spectrum(wv=[t_wave], sp=[t_flux], name="t"))
+    tmpl = Template(Spectrum(wv=[t_wave], sp=[t_flux], name="t"))
     v0s = np.array([-50.0, -20.0, -5.0, 5.0, 20.0, 50.0])
     errors = []
     for v0 in v0s:
         k0 = round(np.log1p(v0 / C) / dln)
         flux = so.resample(t_wave, t_flux, wave * np.exp(-k0 * dln), kind="cubic")
-        ccf = CCF1d().CrossCorrelateSpec(spec_in=_log_spectrum(wave, flux, dv),
-                                         template_in=tmpl, VelBound=100)
+        ccf = CCF1d().cross_correlate(spectrum=_log_spectrum(wave, flux, dv),
+                                      template=tmpl, vel_bound=100)
         errors.append((float(ccf.Corr["RV"][0, 0]) - C * np.expm1(k0 * dln)) * 1e3)   # m/s
     errors = np.array(errors)
     np.testing.assert_array_less(np.abs(errors), 1.5)
@@ -216,7 +216,7 @@ def _forest(wave, v_kms):
 @pytest.fixture(scope="module")
 def forest_template():
     twave, _ = so.log_lambda_grid(5470.0, 5530.0, 0.25)
-    return Template(template=Spectrum(wv=[twave], sp=[_forest(twave, 0.0)], name="t"))
+    return Template(Spectrum(wv=[twave], sp=[_forest(twave, 0.0)], name="t"))
 
 
 def _noisy_rvs(template, n_real, dv, vel_bound, seed=42):
@@ -227,8 +227,8 @@ def _noisy_rvs(template, n_real, dv, vel_bound, seed=42):
         # SNR 50 white noise on the NATIVE grid; CCF1d then resamples to dv.
         obs = Spectrum(wv=[MC_WAVE.copy()],
                        sp=[clean + rng.normal(0.0, 0.02, MC_WAVE.size)], name="o")
-        ccf = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=template,
-                                         dv=dv, VelBound=vel_bound).CombineCCFs()
+        ccf = CCF1d().cross_correlate(spectrum=obs, template=template,
+                                      dv=dv, vel_bound=vel_bound).combine()
         rv[k] = float(ccf.CorrCombined["RV"])
         erv[k] = float(ccf.CorrCombined["eRV"])
     return rv, erv
@@ -242,7 +242,7 @@ def test_rv_uncertainty_is_calibrated_by_monte_carlo(forest_template):
     # resampled CCF peak is slightly higher than on the native grid and the
     # formula leans optimistic: measured ratios 0.93-1.02 over four seeds and
     # dv = 0.1-0.5 km/s. The band is that bias plus ~4 sigma of MC noise; the
-    # old len(v)-based error gave 2.8 here (3.4 at VelBound=20).
+    # old len(v)-based error gave 2.8 here (3.4 at vel_bound=20).
     assert 0.8 < ratio < 1.2
     assert np.mean(rv) == pytest.approx(3.0, abs=4 * np.std(rv) / np.sqrt(rv.size))
 
@@ -255,10 +255,10 @@ def test_rv_uncertainty_does_not_depend_on_the_velocity_scan(forest_template):
 
 def test_effective_bins_count_native_pixels_not_resampled_ones(forest_template):
     obs = Spectrum(wv=[MC_WAVE.copy()], sp=[_forest(MC_WAVE, 0.0)], name="o")
-    fine = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=forest_template,
-                                      dv=0.25, VelBound=20)
-    coarse = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=forest_template,
-                                        dv=NATIVE_DV, VelBound=20)
+    fine = CCF1d().cross_correlate(spectrum=obs, template=forest_template,
+                                   dv=0.25, vel_bound=20)
+    coarse = CCF1d().cross_correlate(spectrum=obs, template=forest_template,
+                                     dv=NATIVE_DV, vel_bound=20)
     # Both count the ~MC_WAVE.size native pixels (minus the resampling margin).
     for ccf in (fine, coarse):
         assert ccf.Corr["n_eff"][0] == pytest.approx(MC_WAVE.size, rel=0.01)
@@ -267,26 +267,26 @@ def test_effective_bins_count_native_pixels_not_resampled_ones(forest_template):
 def test_per_order_and_bisector_errors_use_the_same_bin_count(forest_template):
     obs = Spectrum(wv=[MC_WAVE.copy(), MC_WAVE.copy()],
                    sp=[_forest(MC_WAVE, 3.0), _forest(MC_WAVE, 3.0)], name="o")
-    ccf = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=forest_template,
-                                     dv=0.25, VelBound=30, err_per_ord=True).CombineCCFs()
+    ccf = CCF1d().cross_correlate(spectrum=obs, template=forest_template,
+                                  dv=0.25, vel_bound=30, errors_per_order=True).combine()
     # Two identical orders carry twice the bins of one: sqrt(2) smaller error.
     assert ccf.CorrCombined["n_eff"] == pytest.approx(ccf.Corr["n_eff"].sum())
     assert float(ccf.Corr["eRV"][0, 0]) == pytest.approx(
         np.sqrt(2) * float(ccf.CorrCombined["eRV"]), rel=1e-3)
-    _, ebis, _ = ccf.calcBIS(ccf.CorrCombined["vel"], ccf.CorrCombined["corr"])
+    _, ebis, _ = ccf.calc_bis(ccf.CorrCombined["vel"], ccf.CorrCombined["corr"])
     assert ebis == pytest.approx(np.sqrt(2) * float(ccf.CorrCombined["eRV"]), rel=1e-3)
     # A single order of a two-order spectrum: which order's bins is ambiguous.
     with pytest.raises(ValueError, match="subset"):
-        ccf.extract_RV(ccf.Corr["vel"], ccf.Corr["corr"][0], n_ord=1)
+        ccf.extract_rv(ccf.Corr["vel"], ccf.Corr["corr"][0], n_ord=1)
 
 
 def test_effective_bins_follow_an_intermediate_coarser_resampling(forest_template):
     # A 3x coarser linear resampling before the CCF leaves ~1/3 of the native
     # pixels independent; n_eff used to count the original ones (2166 vs ~727).
     obs = Spectrum(wv=[MC_WAVE.copy()], sp=[_forest(MC_WAVE, 0.0)], name="o")
-    obs.InterpolateSpectrum(delta=3.0)
-    ccf = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=forest_template,
-                                     dv=0.25, VelBound=20)
+    obs.interpolate(delta=3.0)
+    ccf = CCF1d().cross_correlate(spectrum=obs, template=forest_template,
+                                  dv=0.25, vel_bound=20)
     assert ccf.Corr["n_eff"][0] == pytest.approx(MC_WAVE.size / 3.0, rel=0.02)
 
 
@@ -294,7 +294,7 @@ def test_ccf1d_refuses_native_steps_that_do_not_match_the_orders(forest_template
     obs = Spectrum(wv=[MC_WAVE.copy()], sp=[_forest(MC_WAVE, 0.0)], name="o")
     obs.Info["NativeStep"] = [1.0, 1.0]
     with pytest.raises(ValueError, match="NativeStep"):
-        CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=forest_template, VelBound=20)
+        CCF1d().cross_correlate(spectrum=obs, template=forest_template, vel_bound=20)
 
 
 # --- Velocity conventions -----------------------------------------------------
@@ -302,7 +302,7 @@ def test_ccf1d_refuses_native_steps_that_do_not_match_the_orders(forest_template
 # 'cz' (lambda_obs/lambda_rest = 1 + v/c; IAU 2000, IRAF fxcor) that is
 # v = c (exp(k dln) - 1); under 'relativistic' (sqrt((1+b)/(1-b))) v = c tanh(k dln).
 # The former k * dv reading was off by -v^2/2c from cz (-37.5 m/s at 150 km/s)
-# and, on an InterpolateSpectrum grid (dln = ln(1 + dv/c)), by a further
+# and, on an interpolate grid (dln = ln(1 + dv/c)), by a further
 # -v dv/2c (-0.25 m/s at 150 km/s for dv = 1 km/s).
 
 CONVENTIONS = ("cz", "relativistic")
@@ -316,7 +316,7 @@ def _factor(v_kms, convention):
 
 
 def _interpolated_log_grid(lam_lo, lam_hi, dv):
-    """A log-lambda grid as Spectrum.InterpolateSpectrum builds it: ln-step ln(1 + dv/c)."""
+    """A log-lambda grid as Spectrum.interpolate builds it: ln-step ln(1 + dv/c)."""
     return np.exp(np.arange(np.log(lam_lo), np.log(lam_hi), np.log1p(dv / C)))
 
 
@@ -340,7 +340,7 @@ def _interior_forest(lam_lo=5000.0, lam_hi=5060.0, n_lines=100, sigma_kms=4.0, s
 
 def _whole_lag_case(v0, convention, dv=1.0, vel_bound=200.0):
     """(observed spectrum, template, injected v): a forest shifted by the whole
-    number of lags nearest ``v0`` (km/s), on an InterpolateSpectrum-style grid.
+    number of lags nearest ``v0`` (km/s), on an interpolate-style grid.
 
     The template is sampled on exactly the extended grid CCF1d resamples it
     onto, so the resampling is the identity and only the mapping is tested.
@@ -351,7 +351,7 @@ def _whole_lag_case(v0, convention, dv=1.0, vel_bound=200.0):
     v_inj = C * np.expm1(x) if convention == "cz" else C * np.tanh(x)
     forest = _interior_forest()
     t_wave = so.extend_log_grid(wave, round(vel_bound / dv))
-    tmpl = Template(template=Spectrum(wv=[t_wave], sp=[forest(t_wave)], name="t"))
+    tmpl = Template(Spectrum(wv=[t_wave], sp=[forest(t_wave)], name="t"))
     obs = _log_spectrum(wave, forest(wave / _factor(v_inj, convention)), dv)
     return obs, tmpl, v_inj
 
@@ -360,8 +360,8 @@ def _whole_lag_case(v0, convention, dv=1.0, vel_bound=200.0):
 @pytest.mark.parametrize("v0", INJECT_V0)
 def test_ccf1d_recovers_whole_lag_injections_in_either_convention(v0, conv):
     obs, tmpl, v_inj = _whole_lag_case(v0, conv)
-    ccf = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=tmpl, VelBound=200,
-                                     velocity_convention=conv).CombineCCFs()
+    ccf = CCF1d().cross_correlate(spectrum=obs, template=tmpl, vel_bound=200,
+                                  velocity_convention=conv).combine()
     assert ccf.Corr["velocity_convention"] == conv
     assert ccf.CorrCombined["velocity_convention"] == conv
     assert abs(float(ccf.Corr["RV"][0, 0]) - v_inj) * 1e3 < 0.05       # m/s
@@ -371,19 +371,19 @@ def test_ccf1d_recovers_whole_lag_injections_in_either_convention(v0, conv):
 @pytest.mark.parametrize("v0", [-150.0, 150.0])
 def test_ccf1d_cz_and_relativistic_differ_by_v2_over_2c(v0):
     obs, tmpl, _ = _whole_lag_case(v0, "cz")
-    rv = {conv: float(CCF1d().CrossCorrelateSpec(
-        spec_in=obs, template_in=tmpl, VelBound=200,
+    rv = {conv: float(CCF1d().cross_correlate(
+        spectrum=obs, template=tmpl, vel_bound=200,
         velocity_convention=conv).Corr["RV"][0, 0]) for conv in CONVENTIONS}
     assert rv["cz"] - rv["relativistic"] == pytest.approx(v0 ** 2 / (2 * C), rel=3e-3)
 
 
 def test_ccf1d_default_convention_is_cz(template):
-    sig = inspect.signature(CCF1d.CrossCorrelateSpec)
+    sig = inspect.signature(CCF1d.cross_correlate)
     assert sig.parameters["velocity_convention"].default == "cz"
     obs = Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0 * (1 + 40.0 / C))], name="o")
-    default = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=template, dv=0.5, VelBound=50)
-    cz = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=template, dv=0.5, VelBound=50,
-                                    velocity_convention="cz")
+    default = CCF1d().cross_correlate(spectrum=obs, template=template, dv=0.5, vel_bound=50)
+    cz = CCF1d().cross_correlate(spectrum=obs, template=template, dv=0.5, vel_bound=50,
+                                 velocity_convention="cz")
     assert default.Corr["velocity_convention"] == "cz"
     np.testing.assert_array_equal(default.Corr["vel"], cz.Corr["vel"])
     np.testing.assert_array_equal(default.Corr["RV"], cz.Corr["RV"])
@@ -394,8 +394,8 @@ def test_ccf1d_refuses_an_unknown_convention_instead_of_nan_orders(template, bad
     # Per-order failures become NaN + a warning; a bad convention must not.
     obs = Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0)], name="o")
     with pytest.raises(ValueError, match="convention"):
-        CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=template, dv=0.5, VelBound=50,
-                                   velocity_convention=bad)
+        CCF1d().cross_correlate(spectrum=obs, template=template, dv=0.5, vel_bound=50,
+                                velocity_convention=bad)
 
 
 def test_ccf1d_refuses_orders_whose_ln_steps_differ(template):
@@ -405,4 +405,4 @@ def test_ccf1d_refuses_orders_whose_ln_steps_differ(template):
     obs = Spectrum(wv=waves, sp=[np.ones_like(w) for w in waves], name="o")
     obs.Info["GridType"], obs.Info["GridDelta"] = "log", 0.5 * u.km / u.s
     with pytest.raises(ValueError, match="velocity axis"):
-        CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=template, VelBound=50)
+        CCF1d().cross_correlate(spectrum=obs, template=template, vel_bound=50)

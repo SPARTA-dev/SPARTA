@@ -44,7 +44,7 @@ class CCF2d:
         ``self.min_noise_dof`` (50): the fewest noise degrees of freedom an
         order needs for its own noise estimate under ``sigma=None`` (below
         that its estimate would scatter by more than ~10 per cent; see
-        ``CrossCorrelateSpec``).
+        ``cross_correlate``).
 
         The map step is deliberately coarser than the spectral grid step: the
         cost of the fit scales as ``n1 * n2 * K`` (velocity nodes squared times
@@ -72,11 +72,11 @@ class CCF2d:
 
     # =============================================================================
     # =============================================================================
-    def CrossCorrelateSpec(self, spec_in, template1_in, template2_in,
-                           dv=None, VelBound=150, dvel=None,
-                           v1_grid=None, v2_grid=None, sigma=None, alpha=0.1,
-                           nonneg=True, zeta_max=None, continuum='median',
-                           orders=None, keep_windows=True, velocity_convention='cz'):
+    def cross_correlate(self, spectrum, template1, template2,
+                        dv=None, vel_bound=150, dvel=None,
+                        v1_grid=None, v2_grid=None, sigma=None, alpha=0.1,
+                        nonneg=True, zeta_max=None, continuum='median',
+                        orders=None, keep_windows=True, velocity_convention='cz'):
         '''
         Fit both components of a double-lined spectrum simultaneously.
 
@@ -102,20 +102,22 @@ class CCF2d:
         interpolate one native pixel would each count as independent, and the
         CRLB would shrink by ``sqrt(dv_native / dv)``.
 
-        :param: spec_in    - a Spectrum object with the observed data.
-        :param: template1_in, template2_in - Template objects for the primary
-                            and the secondary. A single-order template is reused
+        :param: spectrum   - a Spectrum object with the observed data (not
+                            modified).
+        :param: template1, template2 - Template objects for the primary
+                            and the secondary (not modified). A single-order template is reused
                             for every order of the observation.
         :param: dv         - scalar (km/s). If the spectrum is not already on a
                             log-lambda grid it is resampled with this step.
                             Default 0.1 km/s.
-        :param: VelBound   - scalar or [lo, hi] (km/s). The trial-velocity range,
-                            ``[-VelBound, VelBound]`` if scalar. Used for both
+        :param: vel_bound  - scalar or [lo, hi] (km/s). The trial-velocity range,
+                            ``[-vel_bound, vel_bound]`` if scalar. Used for both
                             components unless explicit grids are given.
+                            Default 150 km/s, as in CCF1d and Observations.
         :param: dvel       - scalar (km/s). Step of the trial-velocity map.
                             Default 1 km/s.
         :param: v1_grid, v2_grid - explicit trial-velocity arrays (km/s), which
-                            override ``VelBound``/``dvel``.
+                            override ``vel_bound``/``dvel``.
         :param: sigma      - per-pixel noise of the observed flux on its
                             *native* pixels (flux units), either a scalar (all
                             orders) or one value per order; taken at face value.
@@ -126,7 +128,7 @@ class CCF2d:
                             below).
         :param: alpha      - Tukey apodisation parameter applied to each window.
                             Set 0 to skip (e.g. if the spectrum was already
-                            tapered by ``SpecPreProccess``).
+                            tapered by ``Spectrum.preprocess``).
         :param: nonneg     - Boolean. Constrain both amplitudes to be
                             non-negative (physical light fractions). Default True.
         :param: zeta_max   - optional low-pass on the Fourier axis (s/km), e.g.
@@ -137,7 +139,7 @@ class CCF2d:
                             which is what makes the amplitudes meaningful.
         :param: orders     - optional list of order indices to use. Default all.
         :param: keep_windows - Boolean. Retain the per-order prepared arrays
-                            (needed by :meth:`BestFitSpectrum`). Set False when
+                            (needed by :meth:`best_fit_spectrum`). Set False when
                             fitting a long time series: the arrays are the size
                             of the spectrum, so keeping them for every epoch is
                             what dominates memory.
@@ -235,15 +237,15 @@ class CCF2d:
         That calibration -- nu, chi2_red, the sigma=None estimate, and the
         native-pixel count behind the CRLB -- assumes white noise on the
         native pixels, resampled once. It does not hold after
-        ``FilterSpectrum`` / ``SpecPreProccess`` (band-pass filtering,
+        ``filter_spectrum`` / ``preprocess`` (band-pass filtering,
         per-order normalisation, a linear resampling before the log one): in
         Monte Carlo on such spectra the RV scatter is only 0.72-0.74 of eRV,
         i.e. the errors are ~1.4x conservative. Calibrate eRV by simulation
         (or by the RV scatter of a constant star) for preprocessed spectra.
         '''
-        spec = deepcopy(spec_in)
-        template1 = deepcopy(template1_in)
-        template2 = deepcopy(template2_in)
+        spec = deepcopy(spectrum)
+        template1 = deepcopy(template1)
+        template2 = deepcopy(template2)
 
         if dv is None:
             dv = self.default_dv
@@ -257,16 +259,16 @@ class CCF2d:
 
         # The Fourier shift theorem holds only on a velocity-even grid.
         if spec.Info.get('GridType') != 'log':
-            spec.InterpolateSpectrum(delta=dv, InterpMethod='log')
+            spec.interpolate(delta=dv, method='log')
         resampled = 'NativeStep' in spec.Info
         if 'GridDelta' not in spec.Info:
             raise ValueError(
                 "the spectrum claims a log-lambda grid but carries no "
                 "'GridDelta'; set Info['GridDelta'] to its velocity step "
-                "(km/s) or let InterpolateSpectrum build the grid.")
+                "(km/s) or let Spectrum.interpolate build the grid.")
         dv_kms = u.Quantity(spec.Info['GridDelta']).to(u.km / u.s).value
         # The shift s = c ln(D(v)) is measured in each order's actual step:
-        # InterpolateSpectrum's ln(1 + dv/c) is dv/2c (relative) short of the
+        # Spectrum.interpolate's ln(1 + dv/c) is dv/2c (relative) short of the
         # nominal dv, which would scale every velocity by 1 + dv/2c.
         steps = [dsp.log_grid_step(w) for w in spec.wv]
         for I, step in enumerate(steps):
@@ -275,7 +277,7 @@ class CCF2d:
                     f"order {I}: the wavelength grid step is {step:.6g} km/s but "
                     f"Info['GridDelta'] declares {dv_kms:.6g} km/s")
 
-        v1_grid, v2_grid = self._velocity_grids(VelBound, dvel, v1_grid, v2_grid)
+        v1_grid, v2_grid = self._velocity_grids(vel_bound, dvel, v1_grid, v2_grid)
 
         if orders is None:
             orders = range(len(spec.wv))
@@ -363,7 +365,7 @@ class CCF2d:
         if coarse['on_edge']:
             warnings.warn("the TODCOR peak lies on the edge of the velocity grid; "
                           "the RVs are grid-limited and their errors are NaN. "
-                          "Widen VelBound (or the explicit grids).", stacklevel=2)
+                          "Widen vel_bound (or the explicit grids).", stacklevel=2)
         elif res['fine'] is None:
             warnings.warn("the refined TODCOR peak lies outside the fine map "
                           f"(+/-{self.refine_span} coarse steps around the coarse "
@@ -389,7 +391,7 @@ class CCF2d:
 
     # =============================================================================
     # =============================================================================
-    def BestFitSpectrum(self, order=0):
+    def best_fit_spectrum(self, order=0):
         '''
         The best-fit composite flux for one window, for residual inspection.
 
@@ -405,7 +407,7 @@ class CCF2d:
         if 'wv' not in win:
             raise ValueError(
                 'the prepared arrays were not retained; re-run '
-                'CrossCorrelateSpec with keep_windows=True to inspect residuals')
+                'cross_correlate with keep_windows=True to inspect residuals')
         r = self.Corr2d
         model = model_flux(win['wv'], win['dv'], win['g1'], win['g2'],
                            r['RV1'], r['RV2'], r['a1_best'], r['a2_best'],
@@ -414,7 +416,7 @@ class CCF2d:
 
     # =============================================================================
     # =============================================================================
-    def plotTODCOR(self, levels=30, marginals=True, figsize=(6.5, 6.0)):
+    def plot(self, levels=30, marginals=True, figsize=(6.5, 6.0)):
         '''
         Plot the (v1, v2) profile log-likelihood surface.
 
@@ -461,7 +463,7 @@ class CCF2d:
     # =============================================================================
     # Internals
     # =============================================================================
-    def _velocity_grids(self, VelBound, dvel, v1_grid, v2_grid):
+    def _velocity_grids(self, vel_bound, dvel, v1_grid, v2_grid):
         '''
         Build the trial-velocity grids (km/s) from the bounds and step, unless
         explicit grids were supplied. Both components share one grid by default,
@@ -473,9 +475,9 @@ class CCF2d:
         if v1_grid is not None and v2_grid is not None:
             return np.asarray(v1_grid, float), np.asarray(v2_grid, float)
 
-        if isinstance(VelBound, u.quantity.Quantity):
-            VelBound = VelBound.to(u.km / u.s).value
-        bound = np.atleast_1d(np.asarray(VelBound, float))
+        if isinstance(vel_bound, u.quantity.Quantity):
+            vel_bound = vel_bound.to(u.km / u.s).value
+        bound = np.atleast_1d(np.asarray(vel_bound, float))
         lo, hi = (-np.abs(bound[0]), np.abs(bound[0])) if bound.size == 1 else \
                  (float(np.min(bound)), float(np.max(bound)))
 
@@ -639,7 +641,7 @@ class CCF2d:
 
         'median' is a robust proxy for absorption-dominated, continuum-
         normalized spectra and is also correct (~0) for spectra already
-        high-pass filtered by ``SpecPreProccess``. Pass a float to override.
+        high-pass filtered by ``Spectrum.preprocess``. Pass a float to override.
         The continuum must be removed *before* apodisation: dropping the DC
         Fourier mode removes a constant offset for free, but not a
         window-shaped one.
@@ -655,7 +657,7 @@ class CCF2d:
 def _resampling_noise_psd(n, dv_native, dv, phases=None, n_phase=32):
     '''
     Noise spectrum (todcor.estimator.resampled_noise_psd) of one order's white
-    native noise after Spectrum.InterpolateSpectrum onto a log grid of step
+    native noise after Spectrum.interpolate onto a log grid of step
     ``dv``, finer or coarser than native.
 
     Each native pixel's impulse response depends on its sub-pixel phase
@@ -691,7 +693,7 @@ def _resampling_noise_psd(n, dv_native, dv, phases=None, n_phase=32):
 @lru_cache(maxsize=256)
 def _impulse_responses(dv_native, dv, n_phase=32, half=20):
     '''
-    Analysis-grid responses of the InterpolateSpectrum resampler to a unit
+    Analysis-grid responses of the Spectrum.interpolate resampler to a unit
     impulse in one native pixel, at ``n_phase`` sub-pixel phases.
 
     The native grid is synthetic: log-uniform with step ``dv_native``, with

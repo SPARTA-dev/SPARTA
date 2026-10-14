@@ -42,12 +42,12 @@ def usurper():
     ts = TimeSeries(size=len(TIMES), times=list(TIMES), vals=vals)
     det = PeriodicityDetector(time_series=ts, freq_range=(0.05, 1.0),
                               periodogram_grid_resolution=20)
-    det.calc_USURPER(calc_unbiased_flag=True)
+    det.calc_usurper(calc_unbiased_flag=True)
     return det
 
 
 def test_usurper_matches_golden(usurper):
-    power = np.asarray(usurper.results_power["USURPER"])
+    power = np.asarray(usurper.results_power["USURPER_unbiased"])
     # atol 1e-7: the distance matrix is now a BLAS Gram product (Stage 4
     # vectorization) whose summation order differs from the original per-pair
     # np.sum at the ~8th significant figure. Physics/peak unchanged.
@@ -55,8 +55,8 @@ def test_usurper_matches_golden(usurper):
 
 
 def test_usurper_recovers_period(usurper):
-    freqs = np.asarray(usurper.results_frequency["USURPER"])
-    power = np.asarray(usurper.results_power["USURPER"])
+    freqs = np.asarray(usurper.results_frequency["USURPER_unbiased"])
+    power = np.asarray(usurper.results_power["USURPER_unbiased"])
     assert freqs[np.argmax(power)] == pytest.approx(0.3)   # nearest grid to f=1/3
     assert power.max() > 0.5
 
@@ -101,9 +101,9 @@ def _detector(vals, times=TIMES, **ts_kwargs):
 
 def test_usurper_biased_and_unbiased_together():
     det = _detector([_spectrum(t) for t in TIMES])
-    det.calc_USURPER(calc_biased_flag=True, calc_unbiased_flag=True)
-    assert {"USURPER", "USURPER_biased"} <= set(det.results_power)
-    np.testing.assert_allclose(det.results_power["USURPER"], GOLDEN_USURPER,
+    det.calc_usurper(calc_biased_flag=True, calc_unbiased_flag=True)
+    assert {"USURPER_unbiased", "USURPER_biased"} <= set(det.results_power)
+    np.testing.assert_allclose(det.results_power["USURPER_unbiased"], GOLDEN_USURPER,
                                rtol=1e-6, atol=1e-7)
 
 
@@ -115,9 +115,9 @@ def test_partial_periodogram_does_not_mutate_input(kind, golden):
     det = _detector(vals, calculated_vrad_list=vr)
 
     det.calc_partial_periodogram(partial_type=kind)
-    first = np.array(det.results_power[kind + "_periodogram"])
+    first = np.array(det.results_power["partial_" + kind])
     det.calc_partial_periodogram(partial_type=kind)
-    second = np.array(det.results_power[kind + "_periodogram"])
+    second = np.array(det.results_power["partial_" + kind])
 
     np.testing.assert_allclose(first, golden, rtol=1e-6, atol=1e-7)
     np.testing.assert_array_equal(first, second)
@@ -128,28 +128,28 @@ def test_partial_periodogram_does_not_mutate_input(kind, golden):
 def test_usurper_rejects_n_le_3():
     det = _detector([_spectrum(t) for t in TIMES[:3]], times=TIMES[:3])
     with pytest.raises(ValueError, match="n <= 3"):
-        det.calc_USURPER()
+        det.calc_usurper()
 
 
 def test_usurper_rejects_non_overlapping_spectra():
     vals = [_spectrum(t) for t in TIMES]
     vals[3] = SimpleNamespace(wv=[WV + 100.0], sp=vals[3].sp)
     with pytest.raises(ValueError, match="overlap"):
-        _detector(vals).calc_USURPER()
+        _detector(vals).calc_usurper()
 
 
 def test_usurper_rejects_decreasing_wavelengths():
     vals = [_spectrum(t) for t in TIMES]
     vals[2] = SimpleNamespace(wv=[WV[::-1]], sp=[vals[2].sp[0][::-1]])
     with pytest.raises(ValueError, match="increasing"):
-        _detector(vals).calc_USURPER()
+        _detector(vals).calc_usurper()
 
 
 def test_usurper_rejects_multi_order_spectra():
     vals = [_spectrum(t) for t in TIMES]
     vals[0] = SimpleNamespace(wv=[WV, WV + 20.0], sp=[vals[0].sp[0]] * 2)
     with pytest.raises(ValueError, match="single order"):
-        _detector(vals).calc_USURPER()
+        _detector(vals).calc_usurper()
 
 
 def test_shape_alone_matches_shape_after_shift():
@@ -161,8 +161,8 @@ def test_shape_alone_matches_shape_after_shift():
     after = _detector([_spectrum(t) for t in TIMES], calculated_vrad_list=vr)
     after.calc_partial_periodogram(partial_type="shift")
     after.calc_partial_periodogram(partial_type="shape")
-    np.testing.assert_array_equal(alone.results_power["shape_periodogram"],
-                                  after.results_power["shape_periodogram"])
+    np.testing.assert_array_equal(alone.results_power["partial_shape"],
+                                  after.results_power["partial_shape"])
 
 
 def test_partial_periodogram_rejects_an_unknown_type():

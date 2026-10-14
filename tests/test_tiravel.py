@@ -218,7 +218,7 @@ def _spectra(velocities, noise=0.02, n_ord=1, seed=7):
 
 def test_build_template_recovers_the_common_template():
     velocities = [-60.0, -20.0, 15.0, 55.0, 95.0]
-    tir = TIRAVEL().BuildTemplate(_spectra(velocities), velocities)
+    tir = TIRAVEL().build_template(_spectra(velocities), velocities)
 
     assert tir.rho > 0.9
     assert tir.n_ord == 1
@@ -233,7 +233,7 @@ def test_build_template_recovers_the_common_template():
 
 def test_build_template_is_multi_order():
     velocities = [-40.0, 0.0, 30.0, 70.0]
-    tir = TIRAVEL().BuildTemplate(_spectra(velocities, n_ord=2), velocities)
+    tir = TIRAVEL().build_template(_spectra(velocities, n_ord=2), velocities)
 
     assert tir.n_ord == 2
     assert len(tir.template.model.wv) == 2
@@ -245,7 +245,7 @@ def test_build_template_is_multi_order():
 
 def test_build_template_diagnostics_are_consistent():
     velocities = [-40.0, 0.0, 30.0, 70.0]
-    tir = TIRAVEL().BuildTemplate(_spectra(velocities), velocities)
+    tir = TIRAVEL().build_template(_spectra(velocities), velocities)
     d = tir.diagnostics
 
     K = len(velocities)
@@ -259,11 +259,11 @@ def test_build_template_validates_its_inputs():
     specs = _spectra(velocities)
 
     with pytest.raises(ValueError, match='3 spectra but 2 velocities'):
-        TIRAVEL().BuildTemplate(specs, velocities[:2])
+        TIRAVEL().build_template(specs, velocities[:2])
     with pytest.raises(ValueError, match='at least 2 epochs'):
-        TIRAVEL().BuildTemplate(specs[:1], velocities[:1])
+        TIRAVEL().build_template(specs[:1], velocities[:1])
     with pytest.raises(ValueError, match='NaN/inf'):
-        TIRAVEL().BuildTemplate(specs, [np.nan] + velocities[1:])
+        TIRAVEL().build_template(specs, [np.nan] + velocities[1:])
 
 
 def test_build_template_zero_point_shifts_the_template():
@@ -276,9 +276,9 @@ def test_build_template_zero_point_shifts_the_template():
 
     velocities = [-60.0, -20.0, 15.0, 55.0]
     specs = _spectra(velocities, noise=0.01)
-    base = TIRAVEL().BuildTemplate(specs, velocities)
+    base = TIRAVEL().build_template(specs, velocities)
     offset = 20.0
-    moved = TIRAVEL().BuildTemplate(specs, [v + offset for v in velocities])
+    moved = TIRAVEL().build_template(specs, [v + offset for v in velocities])
 
     assert moved.rho == pytest.approx(base.rho, abs=1e-6)
     assert np.allclose(np.abs(moved.weights), np.abs(base.weights), atol=1e-6)
@@ -287,9 +287,9 @@ def test_build_template_zero_point_shifts_the_template():
     # their rest frames (the sign follows the CCF convention).
     base_spec = Spectrum(wv=[np.asarray(base.template.model.wv[0], float)],
                          sp=[np.asarray(base.template.model.sp[0], float)])
-    ccf = CCF1d().CrossCorrelateSpec(
-        spec_in=base_spec, template_in=moved.template, dv=0.5, VelBound=60)
-    rv, _ = ccf.subpixel_CCF(ccf.Corr['vel'], ccf.Corr['corr'][0])
+    ccf = CCF1d().cross_correlate(
+        spectrum=base_spec, template=moved.template, dv=0.5, vel_bound=60)
+    rv, _ = ccf.subpixel_peak(ccf.Corr['vel'], ccf.Corr['corr'][0])
     assert abs(rv) == pytest.approx(offset, abs=2.0)
 
 
@@ -315,7 +315,7 @@ def test_build_template_refuses_a_nan_pixel():
     specs = _spectra(velocities)
     specs[1].sp[0][50] = np.nan
     with pytest.raises(ValueError, match="epoch 1, order 0"):
-        TIRAVEL().BuildTemplate(specs, velocities, kind='linear')
+        TIRAVEL().build_template(specs, velocities, kind='linear')
 
 
 def test_common_grid_refuses_a_negative_margin():

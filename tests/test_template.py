@@ -1,6 +1,10 @@
-"""Tests for the hardened PHOENIX download path (no network required)."""
+"""Tests for Template: its constructors, the hardened PHOENIX download path
+(no network required), and the model operations."""
+import numpy as np
 import pytest
 
+from sparta import template as template_module
+from sparta.spectrum import Spectrum
 from sparta.template import Template
 
 
@@ -8,51 +12,93 @@ def test_download_disabled_raises_without_network():
     # A template whose files are not cached locally must raise (not silently
     # reach the network) when allow_download=False.
     with pytest.raises(FileNotFoundError):
-        Template(temp=9999, log_g=9.99, metal=0, alpha=0,
-                 min_val=5000, max_val=5100, allow_download=False)
+        Template.from_phoenix(9999, 9.99, 0, 0, wave_range=(5000, 5100), allow_download=False)
 
 
 def test_download_is_opt_in_by_default(monkeypatch):
-    import sys
-    template_module = sys.modules["sparta.template"]   # the package exports the class
-
     def no_network(*args, **kwargs):
         raise AssertionError("network access attempted")
 
     monkeypatch.setattr(template_module, "download_file", no_network)
     with pytest.raises(FileNotFoundError, match="allow_download=True"):
-        Template(temp=9999, log_g=9.99, metal=0, alpha=0, min_val=5000, max_val=5100)
+        Template.from_phoenix(9999, 9.99, 0, 0, wave_range=(5000, 5100))
 
 
 def test_download_url_is_https_and_correct():
-    t = Template.__new__(Template)
-    t.server_url = "https://phoenix.astro.physik.uni-goettingen.de/data/"
-    p, fname = t.create_PHOENIX_fname(5500, 4.5, 0.0, 0.0)
-    url = t.server_url + p.strip("/") + "/" + fname
+    url = template_module._phoenix_url(*template_module._phoenix_filename(5500, 4.5, 0.0, 0.0))
     assert url.startswith("https://")
     assert "/data/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/Z-0.0/" in url
     assert url.endswith("lte05500-4.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits")
 
 
-@pytest.mark.parametrize("metal, alpha, z_dir, tail", [
+@pytest.mark.parametrize("feh, alpha, z_dir, tail", [
     (-1.0, 0.2, "Z-1.0.Alpha=+0.20/", "lte05500-4.50-1.0.Alpha=+0.20."),
     (-0.5, 0.0, "Z-0.5", "lte05500-4.50-0.5."),
     (0.5, 0.0, "Z+0.5/", "lte05500-4.50+0.5."),
 ])
-def test_phoenix_names_carry_one_metallicity_sign(metal, alpha, z_dir, tail):
+def test_phoenix_names_carry_one_metallicity_sign(feh, alpha, z_dir, tail):
     # Negative [M/H] with alpha used to produce "Z--1.0" / "-4.50--1.0".
-    p, fname = Template.__new__(Template).create_PHOENIX_fname(5500.0, 4.5, metal, alpha)
+    p, fname = template_module._phoenix_filename(5500.0, 4.5, feh, alpha)
     assert p.endswith(z_dir)
     assert fname.startswith(tail)
     assert "--" not in p + fname
 
 
-def test_phxreff_is_read_on_its_own():
-    # A copy-paste bug tested 'PHXMASS' before reading 'PHXREFF'.
-    import numpy as np
+def test_from_phoenix_cuts_the_bundled_model_to_the_range():
+    t = Template.from_phoenix(5800, 3.5, 0.5, 0.0, wave_range=(5000.0, 5010.0))
+    w, s = t.model.wv, t.model.sp
+    assert w.shape == s.shape and w.shape[0] == 1          # one order, (1, n)
+    assert 5000.0 < w[0, 0] and w[0, -1] <= 5010.0
+
+    # air=True divides the vacuum grid by n_air (Morton 2000: n - 1 = 2.79e-4
+    # at 5000 A) before the range is applied: the same pixel, shorter.
+    air = Template.from_phoenix(5800, 3.5, 0.5, 0.0, wave_range=(5000.0, 5010.0), air=True)
+    vac = Template.from_phoenix(5800, 3.5, 0.5, 0.0, wave_range=(4990.0, 5020.0))
+    assert air.model.wv[0, 0] > 5000.0
+    k = np.flatnonzero(vac.model.sp[0] == air.model.sp[0, 0])
+    assert k.size == 1
+    assert vac.model.wv[0, k[0]] / air.model.wv[0, 0] == pytest.approx(1 + 2.79e-4, abs=2e-6)
+
+
+@pytest.mark.parametrize("wave_range", [(5100.0, 5000.0), (5000.0, 1e9)])
+def test_from_phoenix_refuses_a_range_off_the_grid(wave_range):
+    with pytest.raises(ValueError, match="wave_range"):
+        Template.from_phoenix(5800, 3.5, 0.5, 0.0, wave_range=wave_range)
+
+
+def test_from_mask_marks_the_windows_with_negative_weights(tmp_path):
+    mask = tmp_path / "toy.mas"
+    mask.write_text("# start end weight\n"
+                    "5001.00 5001.10 0.5\n"
+                    "5004.00 5004.20 1.0\n")
+    t = Template.from_mask(str(mask), wave_range=(5000.0, 5006.0))
+    w, s = t.model.wv[0], t.model.sp[0]
+    assert t.model.wv.shape == t.model.sp.shape == (1, w.size)
+    assert 5000.0 < w[0] and w[-1] <= 5006.0
+    first = (w > 5001.00) & (w < 5001.10)
+    second = (w > 5004.00) & (w < 5004.20)
+    assert first.any() and second.any()
+    np.testing.assert_array_equal(s[first], -0.5)
+    np.testing.assert_array_equal(s[second], -1.0)
+    np.testing.assert_array_equal(s[~(first | second)], 0.0)
+
+
+def test_from_arrays_wraps_one_order():
     w = np.linspace(5000.0, 5100.0, 50)
-    t = Template(wavelengths=w, spectrum=np.ones_like(w), PHXREFF=7.0e10)
-    assert t.PHXREFF == 7.0e10
+    t = Template.from_arrays(w, np.ones_like(w))
+    assert t.model.wv.shape == t.model.sp.shape == (1, 50)
+    np.testing.assert_array_equal(t.model.wv[0], w)
+    with pytest.raises(ValueError, match="1-D"):
+        Template.from_arrays(w, np.ones(49))
+    with pytest.raises(ValueError, match="1-D"):
+        Template.from_arrays(np.vstack([w, w]), np.ones((2, 50)))
+
+
+def test_the_constructor_takes_a_spectrum():
+    spec = Spectrum(wv=[np.linspace(5000.0, 5010.0, 30)], sp=[np.ones(30)])
+    assert Template(spec).model is spec
+    with pytest.raises(TypeError, match="from_arrays"):
+        Template(np.ones(30))
 
 
 def test_broadening_keeps_every_order():
@@ -63,9 +109,9 @@ def test_broadening_keeps_every_order():
     from unicor import log_lambda_grid
     waves = [log_lambda_grid(lo, lo + 50.0, 0.5)[0] for lo in (5000.0, 5100.0)]
     sps = [1.0 - 0.5 * np.exp(-0.5 * ((w - w.mean()) / 0.1) ** 2) for w in waves]
-    t = Template(template=Spectrum(wv=waves, sp=sps, name="two-order"))
-    t.GaussianBroadening(resolution=50_000)
-    t.RotationalBroadening(vsini=10.0, epsilon=0.6)
+    t = Template(Spectrum(wv=waves, sp=sps, name="two-order"))
+    t.broaden_instrumental(resolution=50_000)
+    t.broaden_rotational(vsini=10.0, epsilon=0.6)
     assert len(t.model.sp) == 2
     for w, s, s0 in zip(t.model.wv, t.model.sp, sps):
         assert len(s) == len(w)
@@ -77,7 +123,7 @@ def test_save_template_model_round_trips_every_order(tmp_path):
     from sparta.spectrum import Spectrum
     waves = [np.linspace(5000.0, 5010.0, 30), np.linspace(5100.0, 5120.0, 45)]
     sps = [np.linspace(0.5, 1.0, 30), np.linspace(1.0, 0.7, 45)]
-    t = Template(template=Spectrum(wv=waves, sp=sps, name="two-order"))
+    t = Template(Spectrum(wv=waves, sp=sps, name="two-order"))
     target = t.save_template_model(title="t", path=str(tmp_path))
     with np.load(target) as f:
         for I in range(2):
@@ -93,8 +139,8 @@ def test_cut_multiorder_like_keeps_native_steps_aligned():
     from sparta.spectrum import Spectrum
     wave, _ = dsp.log_lambda_grid(4990.0, 5110.0, 0.5)
     model = Spectrum(wv=[wave], sp=[np.ones_like(wave)])
-    model.InterpolateSpectrum(delta=0.1, InterpMethod="log")
-    tmpl = Template(template=model)
+    model.interpolate(delta=0.1, method="log")
+    tmpl = Template(model)
     obs = Spectrum(wv=[np.linspace(5000.0, 5040.0, 100), np.linspace(5060.0, 5100.0, 100)],
                    sp=[np.ones(100), np.ones(100)])
     tmpl.cut_multiorder_like(obs)
@@ -109,7 +155,7 @@ def test_integrate_spec_records_the_coarser_sampling():
     wave, _ = dsp.log_lambda_grid(4990.0, 5010.0, 0.5)
     model = Spectrum(wv=[wave, wave], sp=[np.ones_like(wave), np.ones_like(wave)])
     model.Info["NativeStep"] = [0.5, 0.5]
-    tmpl = Template(template=model)
+    tmpl = Template(model)
     tmpl.integrate_spec(4)
     assert tmpl.model.native_steps() == pytest.approx([2.0], rel=1e-3)
 
@@ -121,7 +167,7 @@ def test_doppler_defaults_to_cz_and_offers_the_relativistic_factor():
     import numpy as np
     from astropy import units as u
     w = np.linspace(5000.0, 5100.0, 50)
-    t = Template(wavelengths=w, spectrum=np.ones_like(w))
+    t = Template.from_arrays(w, np.ones_like(w))
     b = 150.0 / _C_KMS
     np.testing.assert_allclose(t.doppler(150.0), w[None, :] * (1 + b), rtol=1e-14)
     np.testing.assert_allclose(t.doppler(150.0, velocity_convention="cz"),
@@ -135,12 +181,12 @@ def test_doppler_defaults_to_cz_and_offers_the_relativistic_factor():
 
 def test_barycentric_correction_stays_cz():
     # The BERV composes as lambda * (1 + bcv/c), independent of the RV
-    # convention (see Spectrum.BarycentricCorrection).
+    # convention (see Spectrum.barycentric_correction).
     import numpy as np
     from astropy import units as u
     from sparta.spectrum import Spectrum
     w = np.linspace(5000.0, 5100.0, 50)
     spec = Spectrum(wv=[w.copy()], sp=[np.ones_like(w)], bcv=25.0)
-    spec.BarycentricCorrection()
+    spec.barycentric_correction()
     np.testing.assert_allclose(spec.wv[0], w * (1 + 25.0 / _C_KMS), rtol=1e-14)
     assert spec.bcv == 0.0 * u.km / u.s

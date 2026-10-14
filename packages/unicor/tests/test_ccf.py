@@ -465,7 +465,7 @@ def test_the_default_convention_is_cz(grid):
 @pytest.mark.parametrize("conv", CONVENTIONS)
 @pytest.mark.parametrize("dln", [DV / C, np.log1p(DV / C)], ids=["dv/c", "ln(1+dv/c)"])
 def test_the_velocity_axis_follows_the_actual_grid_step(conv, dln):
-    # log_lambda_grid steps ln(lambda) by dv/c; Spectrum.InterpolateSpectrum
+    # log_lambda_grid steps ln(lambda) by dv/c; Spectrum.interpolate
     # by ln(1 + dv/c). The axis comes from the grid itself either way.
     wave = _log_wave(2000, dln, lam0=5040.0)
     k = 300

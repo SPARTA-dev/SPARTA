@@ -8,10 +8,16 @@ The layout is flat: one module per concern (``sparta.spectrum``,
 ``sparta.ccf1d``, ...), its class re-exported at the top level. The class and
 its module differ in case only for ``Observations``/``observations`` and
 ``TIRAVEL``/``tiravel``.
+
+The classes' public methods and their parameter names are pinned too (0.3.0
+made them snake_case, see CHANGELOG.md), and ``__version__`` must be the
+newest CHANGELOG section.
 """
+import functools
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -71,6 +77,83 @@ DEEP = {
                                      "component_templates", "simulate", "upper_envelope"],
 }
 
+# class -> public method -> its parameter names (without self/cls).
+METHODS = {
+    "Spectrum": {
+        "apply_cosine_bell": ["alpha"],
+        "barycentric_correction": [],
+        "filter_spectrum": ["lowcut", "highcut", "order"],
+        "from_spectrum1d": ["spectra", "bjd", "bcv", "name"],
+        "interpolate": ["delta", "method"],
+        "native_steps": [],
+        "orders": "property",
+        "preprocess": ["n_trim", "clean_margins", "remove_nans", "delta", "cosmic_sigma",
+                       "filter_lowcut", "filter_highcut", "alpha"],
+        "remove_cosmics": ["sigma_upper"],
+        "select_orders": ["orders", "remove"],
+        "trim": ["n_trim", "n_trim_left", "n_trim_right", "clean_margins", "remove_nans"],
+    },
+    "Template": {
+        "broaden_instrumental": ["resolution"],
+        "broaden_rotational": ["vsini", "epsilon"],
+        "cut_multiorder": ["wv_bounds"],
+        "cut_multiorder_like": ["spectrum", "margins"],
+        "doppler": ["vel", "wv", "velocity_convention"],
+        "from_arrays": ["wave", "flux"],
+        "from_mask": ["path", "wave_range", "allow_download"],
+        "from_phoenix": ["teff", "logg", "feh", "alpha", "wave_range", "air",
+                         "allow_download"],
+        "integrate_spec": ["integration_ratio", "wv", "sp"],
+        "save_template_model": ["title", "path"],
+    },
+    "CCF1d": {
+        "calc_bis": ["x", "y", "bisect_val", "n_ord"],
+        "combine": [],
+        "cross_correlate": ["spectrum", "template", "dv", "vel_bound", "errors_per_order",
+                            "velocity_convention"],
+        "extract_rv": ["x", "y", "vel", "n_ord"],
+        "plot": ["plot_combined", "plot_orders", "orders", "alpha"],
+        "subpixel_peak": ["vels", "ccf", "v", "npts"],
+    },
+    "CCF2d": {
+        "best_fit_spectrum": ["order"],
+        "cross_correlate": ["spectrum", "template1", "template2", "dv", "vel_bound", "dvel",
+                            "v1_grid", "v2_grid", "sigma", "alpha", "nonneg", "zeta_max",
+                            "continuum", "orders", "keep_windows", "velocity_convention"],
+        "plot": ["levels", "marginals", "figsize"],
+    },
+    "TIRAVEL": {
+        "build_template": ["spectra", "velocities", "orders", "reference", "margin", "kind",
+                           "keep_aligned"],
+        "plot_template": ["order", "show_epochs", "alpha", "figsize"],
+        "plot_weights": ["times", "figsize"],
+    },
+    "Observations": {
+        "build_tiravel_template": ["velocities", "kwargs"],
+        "calc_bis": ["bisect_val", "use_combined"],
+        "calc_rv_against_template": ["template", "dv", "vel_bound", "errors_per_order",
+                                     "combine_ccfs"],
+        "calc_rv_against_two_templates": ["template1", "template2", "dv", "vel_bound", "dvel",
+                                          "sigma", "nonneg", "kwargs"],
+        "clean_time_series": ["max_vel", "min_vel", "max_time", "nan_flag", "sample_rate"],
+        "init_periodicity_detector": ["freq_range", "periodogram_grid_resolution"],
+        "preprocess": ["n_trim", "clean_margins", "remove_nans", "delta", "cosmic_sigma",
+                       "filter_lowcut", "filter_highcut", "alpha"],
+        "select_orders": ["orders", "remove"],
+    },
+    "TimeSeries": {
+        "plot_velocities": ["figsize", "sty"],
+    },
+    "PeriodicityDetector": {
+        "calc_gls": [],
+        "calc_partial_periodogram": ["partial_type"],
+        "calc_pdc": ["calc_biased_flag", "calc_unbiased_flag", "errors"],
+        "calc_pdc_pval": ["values", "inverse_sf"],
+        "calc_usurper": ["calc_biased_flag", "calc_unbiased_flag"],
+        "plot_periodograms": ["plot_vals", "annotate_pval", "figsize"],
+    },
+}
+
 _PROBE = r"""
 import importlib, inspect, json, sys
 import sparta
@@ -82,14 +165,25 @@ def kind(obj):
         return "class " + obj.__module__ + "." + obj.__qualname__
     return type(obj).__name__
 
+def params(member):
+    if isinstance(member, property):
+        return "property"
+    func = member.__func__ if isinstance(member, (classmethod, staticmethod)) else member
+    return [p for p in inspect.signature(func).parameters if p not in ("self", "cls")]
+
 top = {n: kind(getattr(sparta, n)) for n in dir(sparta) if not n.startswith("_")}
+methods = {n: {m: params(v) for m, v in vars(getattr(sparta, n)).items()
+               if not m.startswith("_") and (callable(v) or isinstance(v, property)
+                                             or isinstance(v, (classmethod, staticmethod)))}
+           for n in sparta.__all__ if inspect.isclass(getattr(sparta, n))}
 deep = {m: [n for n in json.loads(sys.argv[1])[m] if hasattr(importlib.import_module(m), n)]
         for m in json.loads(sys.argv[1])}
 print(json.dumps({"top": top, "deep": deep, "all": sparta.__all__,
-                  "version": sparta.__version__}))
+                  "methods": methods, "version": sparta.__version__}))
 """
 
 
+@functools.lru_cache(maxsize=None)
 def _probe():
     env = dict(os.environ, PYTHONPATH=_PATH + os.pathsep + os.environ.get("PYTHONPATH", ""))
     proc = subprocess.run([sys.executable, "-c", _PROBE, json.dumps(DEEP)],
@@ -103,4 +197,14 @@ def test_import_sparta_surface_is_pinned():
     assert probe["top"] == TOP_LEVEL
     assert probe["deep"] == DEEP
     assert probe["all"] == ALL
-    assert isinstance(probe["version"], str) and probe["version"]
+
+
+def test_public_methods_and_parameters_are_pinned():
+    assert _probe()["methods"] == METHODS
+
+
+def test_version_is_the_newest_changelog_section():
+    changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    newest = re.search(r"^## \[?(\d+\.\d+\.\d+)", changelog, flags=re.M)
+    assert newest is not None, "CHANGELOG.md has no '## <version>' section"
+    assert _probe()["version"] == newest.group(1)

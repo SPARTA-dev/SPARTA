@@ -42,7 +42,10 @@ class PeriodicityDetector:
 
         The grid is ``self.frequency_grid`` (1/day). Every periodogram is
         stored under its name in ``self.results_frequency`` and
-        ``self.results_power``. ``self.period_truth`` (a list of periods,
+        ``self.results_power``: 'GLS'; 'PDC_unbiased' / 'PDC_biased';
+        'PDC_errors_unbiased' / 'PDC_errors_biased' (error-aware PDC);
+        'USURPER_unbiased' / 'USURPER_biased'; 'partial_shift' /
+        'partial_shape'. ``self.period_truth`` (a list of periods,
         days; default None) marks known periods in ``plot_periodograms``.
 
         Raises TypeError if freq_range or periodogram_grid_resolution is missing,
@@ -74,7 +77,7 @@ class PeriodicityDetector:
 
     # =============================================================================
     # =============================================================================
-    def calc_PDC(self, calc_biased_flag=False, calc_unbiased_flag=True, errors=False):
+    def calc_pdc(self, calc_biased_flag=False, calc_unbiased_flag=True, errors=False):
         '''
         PDC periodogram of a scalar series: the values themselves, or, for a
         spectrum series, the RVs in time_series.calculated_vrad_list.
@@ -83,7 +86,9 @@ class PeriodicityDetector:
         :param calc_unbiased_flag: bool, compute the unbiased PDC ('PDC_unbiased').
         :param errors: bool, use the error-aware distance (Binnenfeld, Shahaf &
                        Zucker 2024, Eq. 3) with time_series.errors (same unit
-                       as the values).
+                       as the values); the results are then stored as
+                       'PDC_errors_biased' / 'PDC_errors_unbiased', so both
+                       variants can sit side by side.
         :raises ValueError: for a spectrum series without RVs, or n <= 3 for
                             the unbiased PDC.
         '''
@@ -92,17 +97,18 @@ class PeriodicityDetector:
             distance = pdc.error_aware_distance_matrix(y, self.time_series.errors)
         else:
             distance = pdc.scalar_distance_matrix(y)
-        self._scan(distance, "PDC_biased", "PDC_unbiased", calc_biased_flag, calc_unbiased_flag)
+        name = "PDC_errors" if errors else "PDC"
+        self._scan(distance, name, calc_biased_flag, calc_unbiased_flag)
 
     # =============================================================================
     # =============================================================================
-    def calc_USURPER(self, calc_biased_flag=False, calc_unbiased_flag=True):
+    def calc_usurper(self, calc_biased_flag=False, calc_unbiased_flag=True):
         '''
         USuRPER periodogram of a single-order spectrum series: the PDC of the
         spectra's chord distances on the unit sphere.
 
         :param calc_biased_flag: bool, compute the biased statistic ('USURPER_biased').
-        :param calc_unbiased_flag: bool, compute the unbiased one ('USURPER').
+        :param calc_unbiased_flag: bool, compute the unbiased one ('USURPER_unbiased').
         :raises ValueError: for a scalar series, multi-order or non-overlapping
                             spectra, or n <= 3 for the unbiased statistic.
         '''
@@ -110,7 +116,7 @@ class PeriodicityDetector:
             raise ValueError('USURPER is available for spectrum time-series only')
         waves, fluxes = _single_order_arrays(self.time_series.vals)
         distance = pdc.spectral_distance_matrix(waves, fluxes)
-        self._scan(distance, "USURPER_biased", "USURPER", calc_biased_flag, calc_unbiased_flag)
+        self._scan(distance, "USURPER", calc_biased_flag, calc_unbiased_flag)
 
     # =============================================================================
     # =============================================================================
@@ -127,7 +133,7 @@ class PeriodicityDetector:
         recomputed on every call.
 
         :param partial_type: 'shift' or 'shape'; the result is stored as
-                             '<partial_type>_periodogram'.
+                             'partial_<partial_type>'.
         :raises ValueError: for an unknown partial_type, a scalar series,
                             multi-order spectra, or not one RV per epoch.
         '''
@@ -150,11 +156,11 @@ class PeriodicityDetector:
         a_centered, control = pdc.partial_centering(a, c)
         power = pdc.pdc_power(self.time_series.times, self.frequency_grid, a_centered,
                               control=control)
-        self._store(partial_type + "_periodogram", power)
+        self._store("partial_" + partial_type, power)
 
     # =============================================================================
     # =============================================================================
-    def calc_GLS(self):
+    def calc_gls(self):
         '''
         Generalized Lomb-Scargle periodogram (astropy) of a scalar series: the
         values themselves, or the RVs in time_series.calculated_vrad_list.
@@ -186,19 +192,19 @@ class PeriodicityDetector:
         raise ValueError(f'{method} is available for scalar time-series only, or for a '
                          'spectrum series with RVs in time_series.calculated_vrad_list')
 
-    def _scan(self, distance, biased_name, unbiased_name, calc_biased_flag, calc_unbiased_flag):
+    def _scan(self, distance, name, calc_biased_flag, calc_unbiased_flag):
         '''
         Center ``distance`` and scan it over the frequency grid, biased and/or
-        unbiased, storing each result under its name.
+        unbiased, storing the results as '<name>_biased' / '<name>_unbiased'.
         '''
         times = self.time_series.times
         if calc_biased_flag:
-            self._store(biased_name, pdc.pdc_power(times, self.frequency_grid,
+            self._store(name + "_biased", pdc.pdc_power(times, self.frequency_grid,
                                                    pdc.double_centering(distance),
                                                    unbiased=False))
         if calc_unbiased_flag:
             centered = pdc.unbiased_u_centering(distance, len(times))
-            self._store(unbiased_name, pdc.pdc_power(times, self.frequency_grid, centered))
+            self._store(name + "_unbiased", pdc.pdc_power(times, self.frequency_grid, centered))
 
     def _store(self, name, power):
         self.results_frequency[name] = self.frequency_grid.copy()
@@ -250,8 +256,10 @@ class PeriodicityDetector:
             axs[index, 0].plot(self.results_frequency[method],
                                self.results_power[method], 'k', linewidth=1.0)
             l = [method]
+            # The p-value levels (Shen et al. 2019) hold for the unbiased
+            # statistics only.
             if (annotate_pval is not None) and (method != 'GLS') and \
-                    (method != "USURPER_biased") and (method != "PDC_biased"):
+                    not method.endswith("_biased"):
                 for anlev_ind, anlev in enumerate(annotate_levels):
                     axs[index, 0].hlines(y=anlev, xmin=self.freq_range[0], xmax=self.freq_range[1],
                                          linewidth=0.5, alpha=0.5, ls='--', color=colors[anlev_ind % 6])
@@ -296,7 +304,7 @@ def _single_order_arrays(sp_list):
             raise ValueError(
                 f"Spectrum {i} has {len(s.wv)} orders, but USuRPER and the partial "
                 "periodograms use a single order. Select one first (e.g. "
-                "Observations.SelectOrders).")
+                "Observations.select_orders).")
         w = np.asarray(s.wv[0], float)
         if not np.all(np.diff(w) > 0):
             raise ValueError(

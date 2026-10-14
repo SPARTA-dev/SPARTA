@@ -108,8 +108,8 @@ PRODUCTS = (
         multi_order=True,
         recommended=Recommended(
             dv_kms=0.05,
-            preprocess=dict(Ntrim=100, CleanMargins=True, RemoveNaNs=True, delta=0.5,
-                            RemCosmicNum=3, FilterLC=4, FilterHC=0.15, alpha=0.3),
+            preprocess=dict(n_trim=100, clean_margins=True, remove_nans=True, delta=0.5,
+                            cosmic_sigma=3, filter_lowcut=4, filter_highcut=0.15, alpha=0.3),
             drop_orders=tuple(range(10)) + tuple(range(50, 67))),
         verified=True,
         load=load_e91,

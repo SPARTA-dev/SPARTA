@@ -56,9 +56,9 @@ class Recommended:
         (min_wv, max_wv) wavelength window (Angstrom) for single-order
         products; None for multi-order ones.
     preprocess : dict
-        Keyword arguments for ``Spectrum.SpecPreProccess``.
+        Keyword arguments for ``Spectrum.preprocess`` (or ``Observations.preprocess``).
     drop_orders : tuple of int
-        Order indices to drop (``SelectOrders(..., remove=True)``).
+        Order indices to drop (``select_orders(..., remove=True)``).
     """
     dv_kms: Optional[float] = None
     window_A: Optional[tuple] = None
