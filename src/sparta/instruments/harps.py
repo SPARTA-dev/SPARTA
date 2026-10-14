@@ -21,7 +21,7 @@ HARPS = Instrument(
     notes="R and the native step follow the ESO instrument description: R_S = 120,000 "
           "(measured) and 4.1 px per FWHM, i.e. ~0.609 km/s per detector pixel. The ESO "
           "overview page and the ADP SPEC_RES header quote the nominal R = 115,000. "
-          "Recommended settings are those of examples/TIRAVEL_Quickstart.ipynb, not "
+          "Recommended settings are the project's empirical defaults (examples/04_template_from_data_tiravel.ipynb), not "
           "instrument documentation.",
 )
 

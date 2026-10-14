@@ -16,7 +16,7 @@ NRES = Instrument(
           "48,000' (4.47 pixels per fiber width) in the optical-design section. "
           "native_step_kms is measured, not documented: the median c * dlambda / lambda "
           "of the bundled TOI677 e91 files (1.44-1.52 km/s over the 67 orders). "
-          "Recommended settings are those of examples/UNICOR_quickstart.ipynb, not "
+          "Recommended settings are the project's empirical defaults (examples/02_radial_velocity_unicor.ipynb), not "
           "instrument documentation.",
 )
 

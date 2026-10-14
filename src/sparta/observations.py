@@ -172,8 +172,11 @@ class Observations:
         '''
         self.file_list = []
         count = 0
-        for root, _, files in os.walk(target_visits_lib):
-            for file in files:
+        # Sorted walk: os.walk order is filesystem-dependent, and epoch order
+        # (and sample_rate's selection) must not depend on the machine.
+        for root, dirs, files in os.walk(target_visits_lib):
+            dirs.sort()
+            for file in sorted(files):
                 if (file.endswith(".fits") or file.endswith(".fits.gz") or file.endswith(".fts.gz") or file.endswith(".fits.Z")) and not file.startswith('~'):
                     if count % sample_rate == 0:
                         self.file_list.append(os.path.join(root, file))

@@ -8,7 +8,7 @@ that follows can be proven behaviour-preserving:
 * a seeded simulated SB2 through ``Observations.calc_rv_against_two_templates``
   (TODCOR): RV1, RV2, eRV1, eRV2 (km/s) and the amplitudes a1, a2;
 * TIRAVEL on the bundled TOI-193 HARPS spectra, as in
-  ``examples/TIRAVEL_Quickstart.ipynb``: the library-template RVs, rho and the
+  the former TIRAVEL quickstart (now ``examples/04_template_from_data_tiravel.ipynb``): the library-template RVs, rho and the
   co-addition weights;
 * periodograms (frequencies in 1/day): GLS, biased and unbiased PDC and the
   error-aware PDC on a seeded scalar series; GLS, USuRPER and the shift/shape
@@ -163,20 +163,21 @@ def _record_scalar_periodograms():
 
 
 def _tiravel_files():
-    """Every second bundled TOI-193 file (the quickstart's sample_rate=2), in
+    """Every second bundled TOI-193 file (the former quickstart's sample_rate=2), in
     name order -- os.walk order is filesystem-dependent, so it is not used."""
     return sorted(TOI193.glob("*.fits"))[::2]
 
 
 def _record_tiravel(directory):
-    """TIRAVEL_Quickstart.ipynb: library-template RVs, then the TIRAVEL template."""
+    """Library-template RVs, then the TIRAVEL template (HARPS air wavelengths:
+    the PHOENIX template is converted to air to match)."""
     obs = Observations(survey="HARPS", target_visits_lib=str(directory),
                        min_wv=4990, max_wv=5090)
     for spec in obs.time_series.vals:
         spec.preprocess()
 
     lib = Template.from_phoenix(5500, 4.5, 0, 0, wave_range=(4980, 5100),
-                                air=False, allow_download=False)
+                                air=True, allow_download=False)
     lib = Template(Spectrum(wv=lib.model.wv, sp=lib.model.sp).interpolate())
     lib.broaden_rotational(epsilon=0.5, vsini=1.5)
     lib = Template(Spectrum(wv=lib.model.wv, sp=lib.model.sp).preprocess())

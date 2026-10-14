@@ -36,10 +36,10 @@ GOLDEN_PATH = pathlib.Path(__file__).resolve().parent / "golden" / "instruments.
 
 DATASETS = {
     # survey: (directory, wavelength window in Angstrom as passed to the loader)
-    "HARPS": ("TOI193", {"min_wv": 4990.0, "max_wv": 5090.0}),   # TIRAVEL_Quickstart
+    "HARPS": ("TOI193", {"min_wv": 4990.0, "max_wv": 5090.0}),   # the TIRAVEL example window
     "NRES": ("TOI677", {"min_wv": 5150.0, "max_wv": 5300.0}),    # ignored by NRES
 }
-# UNICOR_quickstart.ipynb, run on two of the NRES epochs.
+# the former UNICOR quickstart (now examples/02), run on two of the NRES epochs.
 UNICOR_FILES = ("lscnrs01-fa09-20190522-0037-e91.fits",
                 "lscnrs01-fa09-20190616-0018-e91.fits")
 
@@ -116,7 +116,7 @@ def _record_observations(survey, directory):
 
 
 def _record_unicor(directory):
-    """RV / eRV (km/s) per epoch, exactly as UNICOR_quickstart.ipynb computes them."""
+    """RV / eRV (km/s) per epoch, as the former UNICOR quickstart computed them."""
     from sparta.template import Template
     obs = Observations(survey="NRES", target_visits_lib=str(directory))
     obs.select_orders([10 + i for i in np.arange(40)], remove=False)

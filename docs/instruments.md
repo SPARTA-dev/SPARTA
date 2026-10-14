@@ -26,7 +26,7 @@ Pass the survey key to `Observations(survey=...)` or `sparta.instruments.get(...
 
 - Resolving power: 120,000
 - Native step: 0.609334 km/s per pixel
-- Notes: R and the native step follow the ESO instrument description: R_S = 120,000 (measured) and 4.1 px per FWHM, i.e. ~0.609 km/s per detector pixel. The ESO overview page and the ADP SPEC_RES header quote the nominal R = 115,000. Recommended settings are those of examples/TIRAVEL_Quickstart.ipynb, not instrument documentation.
+- Notes: R and the native step follow the ESO instrument description: R_S = 120,000 (measured) and 4.1 px per FWHM, i.e. ~0.609 km/s per detector pixel. The ESO overview page and the ADP SPEC_RES header quote the nominal R = 115,000. Recommended settings are the project's empirical defaults (examples/04_template_from_data_tiravel.ipynb), not instrument documentation.
 - References: <https://www.eso.org/sci/facilities/lasilla/instruments/harps/inst/description.html>, <https://www.eso.org/sci/facilities/lasilla/instruments/harps/overview.html>, <https://www.eso.org/sci/observing/phase3/p3sdpstd.pdf>
 
 ### `HARPS`
@@ -55,7 +55,7 @@ HARPS spectrum reduced with the CERES pipeline: a cube whose data[0] / data[3] h
 
 - Resolving power: 53,000
 - Native step: 1.45 km/s per pixel
-- Notes: LCO quotes R ~ 53,000 in its summary and a 'typical spectral resolution of 48,000' (4.47 pixels per fiber width) in the optical-design section. native_step_kms is measured, not documented: the median c * dlambda / lambda of the bundled TOI677 e91 files (1.44-1.52 km/s over the 67 orders). Recommended settings are those of examples/UNICOR_quickstart.ipynb, not instrument documentation.
+- Notes: LCO quotes R ~ 53,000 in its summary and a 'typical spectral resolution of 48,000' (4.47 pixels per fiber width) in the optical-design section. native_step_kms is measured, not documented: the median c * dlambda / lambda of the bundled TOI677 e91 files (1.44-1.52 km/s over the 67 orders). Recommended settings are the project's empirical defaults (examples/02_radial_velocity_unicor.ipynb), not instrument documentation.
 - References: <https://lco.global/observatory/instruments/nres/>, <https://banzai-nres.readthedocs.io>
 
 ### `NRES`
