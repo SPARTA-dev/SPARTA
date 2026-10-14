@@ -23,7 +23,7 @@
 # 9) cut_multiorder - cuts the template according to a given wavelength bound.
 # 10) cut_multiorder_like - cuts the template to the shape of a given Spectrum object.
 #
-# Dependencies: numpy, astropy, shutil, pathlib, os and pandas.
+# Dependencies: numpy, astropy, shutil, pathlib and os.
 # Last update: Avraham Binnenfeld, 20210510.
 
 
@@ -35,7 +35,6 @@ import numpy as np
 from pathlib import Path
 import os
 import shutil
-import pandas as pd
 from astropy import units as u
 from astropy.table import Table
 
@@ -384,14 +383,24 @@ class Template:
     # =============================================================================
     def save_template_model(self, title="export_template", path='template_files/'):
         '''
-        This function export the template model, possibly after being edited and manipulated.
-        :param: title - str, output file name, preferably describes the template characteristics
-        :param: path - str, dir path in which the template will be saved
+        Export the template model, possibly after editing, as a NumPy ``.npz``.
+
+        Each order is stored under its own keys -- ``wv_0``, ``sp_0``,
+        ``wv_1``, ... -- so orders of different lengths round-trip exactly.
+        (The former CSV export wrote numpy's truncated text form of each
+        array, which could not be read back.)
+
+        :param: title - str, output file name (without extension).
+        :param: path  - str, directory in which the file is written.
+        :return: the path of the written file.
         '''
-        output_data = pd.DataFrame.from_dict({"wv": self.model.wv,
-                                              "sp": self.model.sp,},
-                                             orient="index")
-        output_data.to_csv(path + title + '.csv')
+        arrays = {}
+        for I, (w, s) in enumerate(zip(self.model.wv, self.model.sp)):
+            arrays[f'wv_{I}'] = np.asarray(w, float)   # Angstrom
+            arrays[f'sp_{I}'] = np.asarray(s, float)
+        target = os.path.join(path, title + '.npz')
+        np.savez(target, **arrays)
+        return target
 
     # =============================================================================
     # =============================================================================

@@ -33,6 +33,7 @@ from astropy.stats import sigma_clip, mad_std
 from astropy import constants as consts, units as u
 from specutils import Spectrum as Spec1D, SpectrumList
 from specutils.manipulation import SplineInterpolatedResampler
+from unicor import dsp
 
 
 class Spectrum:
@@ -117,6 +118,25 @@ class Spectrum:
 
 # =============================================================================
 # =============================================================================
+    def native_steps(self):
+        '''
+        Velocity step (km/s) of each order *as originally sampled*.
+
+        Resampling onto a finer grid adds samples but no information:
+        neighbouring resampled pixels share the same noise. Error estimates
+        (UNICOR's ML uncertainty, TODCOR's CRLB) therefore need the native
+        sampling, which ``InterpolateSpectrum`` records the first time it runs.
+        A spectrum that was never resampled is taken to be honestly sampled
+        on its current grid.
+
+        :return: list of floats, one per order: c * median(d(lambda)/lambda).
+        '''
+        if 'NativeStep' in self.Info:
+            return list(self.Info['NativeStep'])
+        return [dsp.dv_from_wave(w) for w in self.wv]
+
+# =============================================================================
+# =============================================================================
     def SpecPreProccess(self, Ntrim=10, CleanMargins=True, RemoveNaNs=True,
                         delta=0.5, RemCosmicNum=3, FilterLC=3, FilterHC=0.15,
                         alpha=0.3):
@@ -164,6 +184,10 @@ class Spectrum:
         '''
         # Initialize data
         wvI, spI, wnt = [], [], self.Info['WavelengthUnits']
+
+        # Remember how the data were sampled before the first resampling, so
+        # later error estimates can count independent pixels (native_steps).
+        self.Info.setdefault('NativeStep', self.native_steps())
 
         # Set the interpolation deltas
         if InterpMethod == 'linear':
@@ -435,6 +459,8 @@ class Spectrum:
 
         wv = [self.wv[I] for I in np.sort(x)]
         sp = [self.sp[I] for I in np.sort(x)]
+        if 'NativeStep' in self.Info:
+            self.Info['NativeStep'] = [self.Info['NativeStep'][I] for I in np.sort(x)]
 
         self.wv = wv
         self.sp = sp

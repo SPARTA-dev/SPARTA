@@ -13,14 +13,13 @@
 # 2) retrieve_all_spectrum_parameters - returns the visit parameters read.
 # 3) APOGEE_masking - removes bad pixels from an APOGEE spectra.
 #
-# Dependencies: numpy, astropy, specutils, pandas and datetime.
+# Dependencies: numpy, astropy, specutils and datetime.
 # Last update: Avraham Binnenfeld, 20210510.
 
 import numpy as np
 from astropy.io import fits
 from astropy import units as u
 from datetime import datetime
-import pandas as pd
 from specutils import Spectrum as Spec1D, SpectrumList
 
 
@@ -521,16 +520,20 @@ class ReadSpec:
         '''
 
         if self.survey != "APOGEE":
-            assert False, "APOGEE_masking function only takes APOGEE spectra"
+            raise ValueError("APOGEE_masking only takes APOGEE spectra")
 
-        spR = pd.Series(self.s[0])
-        for i, flag in enumerate(self.bool_mask):
-            if flag[3] == '1' or flag[2] == '1':  # sky flux and telluric line reduction
-                spR[i] = float('nan')
-        spR.interpolate(inplace=True)
-
-        spR.replace(to_replace=float('nan'), value=0, inplace=True)
-
-        self.s[0] = np.array(spR.tolist())
+        # Bits 12/13 of APOGEE_PIXMASK (sky line / telluric), read from the
+        # bit strings the loader stores, plus any pixel that is already NaN.
+        flux = np.asarray(self.s[0], float).copy()
+        bad = np.array([flag[3] == '1' or flag[2] == '1' for flag in self.bool_mask])
+        bad |= ~np.isfinite(flux)
+        if bad.all():
+            raise ValueError("every APOGEE pixel is masked; nothing to interpolate from")
+        # Linear interpolation across masked pixels (in pixel index, as before);
+        # masked runs at the edges take the nearest good value instead of the
+        # former zero flux, which a CCF would read as a deep line.
+        idx = np.arange(len(flux))
+        flux[bad] = np.interp(idx[bad], idx[~bad], flux[~bad])
+        self.s[0] = flux
 
         return self

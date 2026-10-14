@@ -58,3 +58,16 @@ def test_broadening_keeps_every_order():
     for w, s, s0 in zip(t.model.wv, t.model.sp, sps):
         assert len(s) == len(w)
         assert s.min() > s0.min()          # each order was actually broadened
+
+
+def test_save_template_model_round_trips_every_order(tmp_path):
+    import numpy as np
+    from sparta.UNICOR.Spectrum import Spectrum
+    waves = [np.linspace(5000.0, 5010.0, 30), np.linspace(5100.0, 5120.0, 45)]
+    sps = [np.linspace(0.5, 1.0, 30), np.linspace(1.0, 0.7, 45)]
+    t = Template(template=Spectrum(wv=waves, sp=sps, name="two-order"))
+    target = t.save_template_model(title="t", path=str(tmp_path))
+    with np.load(target) as f:
+        for I in range(2):
+            np.testing.assert_array_equal(f[f"wv_{I}"], waves[I])
+            np.testing.assert_array_equal(f[f"sp_{I}"], sps[I])

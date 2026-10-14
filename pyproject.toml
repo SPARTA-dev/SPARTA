@@ -26,7 +26,6 @@ dependencies = [
     "astropy>=6.0",
     "specutils>=2.0",
     "matplotlib>=3.6",
-    "pandas>=1.5",
     "tqdm",
 ]
 

@@ -54,7 +54,7 @@ top of them.
 | --- | --- | --- | --- |
 | UNICOR engine (`sparta-unicor`) | `unicor` | [`packages/unicor`](packages/unicor) | numpy, scipy |
 | TODCOR engine (`sparta-todcor`) | `todcor` | [`packages/todcor`](packages/todcor) | numpy, scipy, `unicor` |
-| SPARTA (`SPARTA`) | `sparta` | [`src/sparta`](src/sparta) | both engines, astropy, specutils, matplotlib, pandas, tqdm |
+| SPARTA (`SPARTA`) | `sparta` | [`src/sparta`](src/sparta) | both engines, astropy, specutils, matplotlib, tqdm |
 
 The engines carry a `sparta-` prefix on PyPI because `unicor` there is an
 unrelated project; likewise `pip install sparta` installs an unrelated RDF
