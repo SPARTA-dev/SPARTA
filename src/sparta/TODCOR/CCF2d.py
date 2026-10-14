@@ -29,10 +29,11 @@
 # Conventions: radial velocities in km/s; wavelengths in Angstrom; the fit is
 # performed on a log-lambda (velocity-even) grid.
 #
-# Dependencies: numpy, astropy, matplotlib, copy.
+# Dependencies: numpy, astropy, matplotlib, copy, functools.
 """Two-dimensional (TODCOR) cross-correlation of an SB2 against two templates."""
 
 from copy import deepcopy
+from functools import lru_cache
 import warnings
 
 import numpy as np
@@ -45,7 +46,7 @@ from todcor.estimator import (
     combine_stats, crlb_from_map, profile_from_stats, resampled_noise_psd,
     window_stats,
 )
-from sparta.UNICOR.Spectrum import Spectrum
+from sparta.UNICOR.Spectrum import resample_flux
 
 
 class CCF2d:
@@ -107,7 +108,8 @@ class CCF2d:
         the errors are NaN.
 
         Each order counts its *native* pixels, not its resampled ones: the
-        spectrum's ``native_steps()`` (captured before any resampling) give
+        spectrum's ``native_steps()`` (the coarsest sampling it has had before
+        this call) give
         ``oversampling = max(1, dv_native / dv)``, and the Fisher weights are
         divided by it. Otherwise the ~``dv_native / dv`` analysis pixels that
         interpolate one native pixel would each count as independent, and the
@@ -132,8 +134,9 @@ class CCF2d:
                             orders) or one value per order; taken at face value.
                             Default None: fit at unit noise and estimate one
                             common noise level from the fit, scaling the errors
-                            by sqrt(chi2_red). Either way it sets the absolute
-                            scale of the uncertainties only, not the RVs.
+                            by sqrt(chi2_red at unit noise). Either way it sets
+                            the absolute scale of the uncertainties only, not
+                            the RVs.
         :param: alpha      - Tukey apodisation parameter applied to each window.
                             Set 0 to skip (e.g. if the spectrum was already
                             tapered by ``SpecPreProccess``).
@@ -163,15 +166,28 @@ class CCF2d:
                                 'RV1', 'RV2' (km/s, refined), 'eRV1', 'eRV2'
                                 (km/s), 'rho12' (v1-v2 correlation), 'cov'
                                 (2x2, km^2/s^2), 'peak' (the coarse argmax
-                                node, km/s), 'a1_best', 'a2_best', 'chi2_best'
-                                (at the refined RVs), 'chi2_red' (chi2_best per
-                                noise degree of freedom, see below), 'sigma'
-                                (the native per-pixel noise behind the errors:
-                                the input, or the fitted estimate) and
-                                'sigma_from_fit'.
+                                node, km/s), 'a1_best', 'a2_best' (at the
+                                refined RVs), 'sigma' (the native per-pixel
+                                noise behind the errors: the input, or the
+                                fitted estimate), 'sigma_from_fit', and the
+                                misfit at the refined RVs:
+                                'chi2_best' and 'chi2_red' (chi2_best per noise
+                                degree of freedom, see below) at the noise
+                                'sigma' -- so under sigma=None chi2_red is 1 by
+                                construction and 'sigma' carries the
+                                information -- and 'chi2_map', the same chi2 on
+                                the noise scale of the maps (equal to chi2_best
+                                for an explicit sigma; at unit noise, i.e.
+                                chi2_best * sigma**2, under sigma=None).
+                                With sigma=None the maps ('logL_profile',
+                                'logL_marginal', 'chi2', and those under
+                                'fine') are evaluated at unit noise: their
+                                shape and argmax are those of the fit, their
+                                scale is 1 / sigma**2 too large.
                  self.stats   - the *combined* coarse-map sufficient statistics,
-                                enough to re-profile (e.g. with a different
-                                'nonneg') without touching the spectrum again.
+                                on the maps' noise scale, enough to re-profile
+                                (e.g. with a different 'nonneg') without
+                                touching the spectrum again.
                  self.windows - per-order diagnostics: the order index, the
                                 window's own 'S11'/'S22'/'SD', 'oversampling'
                                 (dv_native / dv, at least 1), 'n_eff' (the
@@ -179,14 +195,30 @@ class CCF2d:
                                 'nu' (the expected chi2 of its pure noise), and
                                 (if keep_windows) the prepared arrays.
                  self.n_ord   - the number of pooled windows.
-                 self.crlb    - the crlb_from_map output behind the RVs.
+                 self.crlb    - the crlb_from_map output behind the RVs, on the
+                                maps' noise scale (its sigmas and cov are not
+                                rescaled under sigma=None; eRV1/eRV2 are).
 
         chi2_red = chi2_best / (sum(nu) - 4). Interpolated noise is smoother
-        than the native noise -- a cubic spline keeps ~0.87 of its variance,
-        and the taper ~0.94 more -- so dividing by the bare n_eff would leave
-        chi2_red ~0.8 for honest noise. ``nu`` instead counts the noise power
-        the fit actually sees (todcor.estimator.resampled_noise_psd, from the
-        resampler's impulse response), so chi2_red ~ 1 for honest noise.
+        than the native noise -- a cubic spline keeps ~0.87 of its variance
+        when its nodes fall at random between the native pixels, and the
+        taper ~0.94 more -- so dividing by the bare n_eff would leave chi2_red
+        ~0.8 for honest noise. ``nu`` instead counts the noise power the fit
+        actually sees (todcor.estimator.resampled_noise_psd, from the
+        resampler's impulse responses at the sub-pixel phases of the native
+        pixels), so chi2_red ~ 1 for honest noise on any analysis step, finer
+        or coarser than native. The phases are measured when CCF2d does the
+        resampling itself (native positions known); for a spectrum resampled
+        beforehand they are taken as uniformly spread.
+
+        That calibration -- nu, chi2_red, the sigma=None estimate, and the
+        native-pixel count behind the CRLB -- assumes white noise on the
+        native pixels, resampled once. It does not hold after
+        ``FilterSpectrum`` / ``SpecPreProccess`` (band-pass filtering,
+        per-order normalisation, a linear resampling before the log one): in
+        Monte Carlo on such spectra the RV scatter is only 0.72-0.74 of eRV,
+        i.e. the errors are ~1.4x conservative. Calibrate eRV by simulation
+        (or by the RV scatter of a constant star) for preprocessed spectra.
         '''
         spec = deepcopy(spec_in)
         template1 = deepcopy(template1_in)
@@ -198,10 +230,14 @@ class CCF2d:
             dv = float(dv) << u.kilometer / u.second
 
         native = spec.native_steps()
+        # Where the native pixels sit is known only if nothing has resampled
+        # the spectrum yet: then they are its current grid.
+        native_wv = None if 'NativeStep' in spec.Info else [np.asarray(w, float) for w in spec.wv]
 
         # The Fourier shift theorem holds only on a velocity-even grid.
         if spec.Info.get('GridType') != 'log':
             spec.InterpolateSpectrum(delta=dv, InterpMethod='log')
+        resampled = 'NativeStep' in spec.Info
         if 'GridDelta' not in spec.Info:
             raise ValueError(
                 "the spectrum claims a log-lambda grid but carries no "
@@ -246,8 +282,12 @@ class CCF2d:
 
             ratio = native[I] / dv_kms
             oversampling = max(1.0, ratio)
-            noise_psd = taper_power * self._resampling_noise_psd(
-                w, native[I], dv, ratio)
+            if resampled:
+                phases = None if native_wv is None else _native_phases(native_wv[I], w, dv_kms)
+                psd = _resampling_noise_psd(len(w), native[I], dv_kms, phases)
+            else:
+                psd = np.ones(len(w) // 2)
+            noise_psd = taper_power * psd
             kw = dict(sigma=sigma[I], zeta_max=zeta_max,
                       oversampling=oversampling, noise_psd=noise_psd)
             st = window_stats(data_g, g1, g2, dv_kms, v1_grid, v2_grid, **kw)
@@ -295,25 +335,25 @@ class CCF2d:
 
         rv1, rv2 = crlb['peak_refined']
         at_peak = self._profile_at(prepared, dv_kms, rv1, rv2, nonneg)
-        chi2_red = at_peak['chi2_red']
+        chi2_map, chi2_red_map = at_peak['chi2'], at_peak['chi2_red']
         noise, scale = sigma_in, 1.0
         if sigma_from_fit:
-            if not (np.isfinite(chi2_red) and chi2_red > 0):
+            if not (np.isfinite(chi2_red_map) and chi2_red_map > 0):
                 raise ValueError(
-                    f"cannot estimate the noise from the fit (chi2_red = {chi2_red}); "
+                    f"cannot estimate the noise from the fit (chi2_red = {chi2_red_map}); "
                     "pass an explicit sigma")
             # The fit ran at unit noise, so sqrt(chi2_red) *is* the common
             # native per-pixel noise; chi2 and the map curvature scale as
             # 1/sigma^2, the velocity errors as sigma.
-            noise = scale = float(np.sqrt(chi2_red))
+            noise = scale = float(np.sqrt(chi2_red_map))
 
         res.update(RV1=rv1, RV2=rv2,
                    eRV1=crlb['sigma_v1'] * scale, eRV2=crlb['sigma_v2'] * scale,
                    rho12=crlb['rho'], cov=crlb['cov'] * scale ** 2,
                    peak=coarse['peak'],
                    a1_best=at_peak['a1'], a2_best=at_peak['a2'],
-                   chi2_best=at_peak['chi2'], chi2_red=chi2_red,
-                   sigma=noise, sigma_from_fit=sigma_from_fit)
+                   chi2_best=chi2_map / scale ** 2, chi2_red=chi2_red_map / scale ** 2,
+                   chi2_map=chi2_map, sigma=noise, sigma_from_fit=sigma_from_fit)
 
         self.windows = windows
         self.n_ord = len(windows)
@@ -469,42 +509,6 @@ class CCF2d:
         return profile_from_stats(stats, g1_, g2_, nonneg=nonneg)['best']
 
     @staticmethod
-    def _resampling_noise_psd(wave, dv_native, dv, ratio, n_imp=8, spacing=40):
-        '''
-        Noise spectrum (todcor.estimator.resampled_noise_psd) of one order's
-        native white noise after Spectrum.InterpolateSpectrum to step ``dv``.
-
-        Resampling is linear, so it is fully described by its impulse response:
-        unit impulses on a synthetic native log grid of step ``dv_native``
-        (km/s), well separated (``spacing`` native pixels, far beyond the
-        spline's support) are pushed through the same InterpolateSpectrum call
-        CCF2d uses. This models a single resampling from a uniform native grid;
-        earlier filtering or repeated resampling is not represented.
-
-        :param: wave      - the order's analysis wavelength grid (Angstrom).
-        :param: dv_native - the order's native velocity step (km/s).
-        :param: dv        - the analysis step (astropy Quantity, km/s).
-        :param: ratio     - dv_native / dv (dimensionless).
-        :return: relative noise power per positive Fourier mode, length
-                 len(wave) // 2 -- all ones for an order on its native sampling.
-        '''
-        n = len(wave)
-        if np.isclose(ratio, 1.0, rtol=1e-3):
-            return np.ones(n // 2)
-        lam0 = float(np.median(wave))
-        native, _ = dsp.log_lambda_grid(
-            lam0, lam0 * np.exp((n_imp + 1) * spacing * dv_native / dsp.C_KMS), dv_native)
-        hits = spacing // 2 + spacing * np.arange(n_imp)
-        flux = np.zeros(len(native))
-        flux[hits] = 1.0
-        probe = Spectrum(wv=[native], sp=[flux]).InterpolateSpectrum(
-            delta=dv, InterpMethod='log')
-        wa, ya = np.asarray(probe.wv[0]), np.asarray(probe.sp[0])
-        responses = [ya[np.abs(dsp.C_KMS * np.log(wa / native[h]))
-                        < 0.5 * spacing * dv_native] for h in hits]
-        return resampled_noise_psd(responses, n, ratio)
-
-    @staticmethod
     def _template_on_grid(template, order, wave):
         '''
         Resample one template order onto the observation's wavelength grid.
@@ -535,3 +539,97 @@ class CCF2d:
         flux = np.asarray(flux, float)
         level = np.median(flux) if continuum == 'median' else float(continuum)
         return flux - level
+
+
+# =============================================================================
+# The resampled-noise model
+# =============================================================================
+def _resampling_noise_psd(n, dv_native, dv, phases=None, n_phase=32):
+    '''
+    Noise spectrum (todcor.estimator.resampled_noise_psd) of one order's white
+    native noise after Spectrum.InterpolateSpectrum onto a log grid of step
+    ``dv``, finer or coarser than native.
+
+    Each native pixel's impulse response depends on its sub-pixel phase
+    relative to the analysis nodes, so the responses at ``n_phase`` phases
+    (:func:`_impulse_responses`) are averaged with weights counting the
+    order's native pixels at each phase. With unknown native positions the
+    phases are taken as uniformly spread -- true for a linear-wavelength
+    native grid, whose velocity step drifts across the order, but not for a
+    commensurate log grid (e.g. one exactly half as fine), whose few fixed
+    phases can change the noise power by ~15 per cent.
+
+    This models a single resampling from a uniform native grid; earlier
+    filtering or repeated resampling is not represented.
+
+    :param: n         - length of the analysis window (pixels).
+    :param: dv_native - the order's native velocity step (km/s).
+    :param: dv        - the analysis step (km/s).
+    :param: phases    - sub-pixel phases in [0, 1) of the order's native pixels
+                        on the analysis grid (analysis pixels), or None.
+    :param: n_phase   - number of phase bins probed.
+    :return: relative noise power per positive Fourier mode, length n // 2.
+    '''
+    # Rounded keys let near-identical steps (the same grid, epoch after
+    # epoch) share one probe.
+    responses = _impulse_responses(round(float(dv_native), 9), round(float(dv), 9), n_phase)
+    weights = None
+    if phases is not None:
+        bins = np.floor(np.asarray(phases) * n_phase).astype(int) % n_phase
+        weights = np.bincount(bins, minlength=n_phase)
+    return resampled_noise_psd(responses, n, dv_native / dv, weights=weights)
+
+
+@lru_cache(maxsize=256)
+def _impulse_responses(dv_native, dv, n_phase=32, half=20):
+    '''
+    Analysis-grid responses of the InterpolateSpectrum resampler to a unit
+    impulse in one native pixel, at ``n_phase`` sub-pixel phases.
+
+    The native grid is synthetic: log-uniform with step ``dv_native``, with
+    impulses ``2 * half`` pixels apart. Impulse k is evaluated at analysis
+    nodes placed so that it sits (k + 0.5) / n_phase analysis pixels above the
+    node below it, out to ``half`` native pixels either side -- far beyond the
+    cubic spline's support (its cardinal function decays as 0.27 per pixel).
+    One spline evaluation serves every phase: the nodes of all impulses are
+    concatenated. The responses depend on the two steps only (a log grid is
+    the same at every wavelength), so they are cached on them.
+
+    :param: dv_native - native velocity step (km/s).
+    :param: dv        - analysis velocity step (km/s).
+    :param: n_phase   - number of phases.
+    :param: half      - native pixels kept either side of each impulse.
+    :return: tuple of n_phase read-only ndarrays (analysis pixels).
+    '''
+    lam0 = 5000.0                            # Angstrom; the response is scale-free
+    step_native, step = dv_native / dsp.C_KMS, dv / dsp.C_KMS
+    hits = half + 2 * half * np.arange(n_phase)
+    ln_native = np.log(lam0) + step_native * np.arange(2 * half * n_phase + 1)
+    flux = np.zeros(ln_native.size)
+    flux[hits] = 1.0
+
+    reach = half * dv_native / dv            # analysis pixels within `half` native ones
+    nodes = []
+    for k, j in enumerate(hits):
+        phase = (k + 0.5) / n_phase
+        m = np.arange(np.floor(phase - reach) + 1, np.ceil(phase + reach))
+        nodes.append(ln_native[j] + (m - phase) * step)
+    response = resample_flux(np.exp(ln_native), flux, np.exp(np.concatenate(nodes)))
+    out = np.split(response, np.cumsum([len(x) for x in nodes])[:-1])
+    for h in out:
+        h.flags.writeable = False
+    return tuple(out)
+
+
+def _native_phases(native_wave, wave, dv):
+    '''
+    Sub-pixel phase of each native pixel on a log analysis grid.
+
+    :param: native_wave - the order's native wavelengths (Angstrom).
+    :param: wave        - the log analysis grid (Angstrom), step ``dv``.
+    :param: dv          - analysis velocity step (km/s).
+    :return: phases in [0, 1) (analysis pixels) of the native pixels inside
+             the analysis grid.
+    '''
+    x = dsp.C_KMS * np.log(np.asarray(native_wave, float) / wave[0]) / dv
+    return np.mod(x[(x >= 0) & (x <= len(wave) - 1)], 1.0)

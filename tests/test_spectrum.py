@@ -121,3 +121,65 @@ def test_remove_cosmics_keeps_zero_valued_and_below_median_pixels():
     np.testing.assert_array_equal(sp.wv[0], w)
     below = s < np.median(s)
     np.testing.assert_array_equal(sp.sp[0][below], s[below])
+
+
+def _native_log_spec(n_ord=1, dv_native=1.0):
+    from unicor import dsp
+    waves = [dsp.log_lambda_grid(5000.0 + 100.0 * k, 5050.0 + 100.0 * k, dv_native)[0]
+             for k in range(n_ord)]
+    fluxes = [1 - 0.5 * np.exp(-0.5 * ((w - w.mean()) / 0.3) ** 2) for w in waves]
+    return Spectrum(wv=waves, sp=fluxes, name="t")
+
+
+def test_orders_round_trip_keeps_the_native_sampling():
+    # A resampled spectrum sent through .orders and back used to claim its
+    # current step as native: 10x too many independent bins.
+    sp = _native_log_spec(n_ord=2).InterpolateSpectrum(delta=0.1, InterpMethod="log")
+    orders = sp.orders
+    assert [o.meta["NativeStep"] for o in orders] == pytest.approx(sp.native_steps())
+    back = Spectrum.from_spectrum1d(orders)
+    assert back.native_steps() == pytest.approx(sp.native_steps())
+    assert back.native_steps() == pytest.approx([1.0, 1.0], rel=1e-4)
+    assert back.Info["GridType"] == "log"
+    assert back.Info["GridDelta"] == sp.Info["GridDelta"]
+    # Orders that disagree on their grid are taken as raw (to be resampled).
+    orders[1].meta["GridType"] = "linear"
+    assert Spectrum.from_spectrum1d(orders).Info["GridType"] == "raw"
+
+
+def test_from_spectrum1d_without_sparta_meta_is_native():
+    sp = _native_log_spec()
+    back = Spectrum.from_spectrum1d(sp.orders)
+    assert "NativeStep" not in back.Info
+    assert back.native_steps() == pytest.approx([1.0], rel=1e-4)
+
+
+def test_a_coarser_resampling_raises_the_native_step():
+    # An intermediate coarser resampling sets the noise scale: the CCF must
+    # not count the original (finer) pixels afterwards.
+    sp = _native_log_spec()
+    lam = np.median(sp.wv[0])
+    sp.InterpolateSpectrum(delta=3.0)                  # linear, 3 x median step
+    coarse = 3.0 * np.median(np.diff(_native_log_spec().wv[0])) / lam * 299792.458
+    assert sp.native_steps() == pytest.approx([coarse], rel=1e-3)
+    sp.InterpolateSpectrum(delta=0.25, InterpMethod="log")   # finer: unchanged
+    assert sp.native_steps() == pytest.approx([coarse], rel=1e-3)
+    sp.InterpolateSpectrum(delta=5.0, InterpMethod="log")    # coarser again
+    assert sp.native_steps() == pytest.approx([5.0], rel=1e-3)
+
+
+@pytest.mark.parametrize("steps, match", [([1.0], "2 orders"),
+                                          ([1.0, 0.0], "finite and positive"),
+                                          ([1.0, np.nan], "finite and positive")])
+def test_native_steps_are_validated_against_the_orders(steps, match):
+    sp = _native_log_spec(n_ord=2)
+    sp.Info["NativeStep"] = steps
+    with pytest.raises(ValueError, match=match):
+        sp.native_steps()
+
+
+def test_select_orders_keeps_native_steps_aligned():
+    sp = _native_log_spec(n_ord=3)
+    sp.Info["NativeStep"] = [1.0, 2.0, 3.0]
+    sp.SelectOrders(orders=[1], remove=True)
+    assert sp.native_steps() == [1.0, 3.0]

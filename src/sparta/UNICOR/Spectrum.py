@@ -23,6 +23,8 @@
 #  8) SpecPreProccess       - run the above in a recommended order.
 # The ``orders`` property and ``from_spectrum1d`` classmethod convert to/from
 # specutils Spectrum1D, the interchange representation.
+# The module function ``resample_flux`` is the spline resampler that
+# InterpolateSpectrum applies to each order.
 #
 # Dependencies: numpy, scipy, astropy, specutils.
 # Last update: Avraham Binnenfeld, 20200607.
@@ -34,6 +36,24 @@ from astropy import constants as consts, units as u
 from specutils import Spectrum as Spec1D, SpectrumList
 from specutils.manipulation import SplineInterpolatedResampler
 from unicor import dsp
+
+
+def resample_flux(wave, flux, new_wave, unit=u.Angstrom):
+    '''
+    Resample one order's flux with the cubic spline of ``InterpolateSpectrum``
+    (specutils ``SplineInterpolatedResampler``). Other code that must model
+    this resampling exactly (CCF2d's noise model) calls it too.
+
+    :param: wave     - 1-D increasing wavelength array, in ``unit``.
+    :param: flux     - 1-D flux array matching ``wave``.
+    :param: new_wave - 1-D increasing wavelengths (``unit``) inside the span
+                       of ``wave``; outside it the flux is NaN.
+    :param: unit     - astropy unit of both wavelength arrays (default Angstrom).
+    :return: ndarray, the flux at ``new_wave``.
+    '''
+    src = Spec1D(flux=np.asarray(flux, float) * u.dimensionless_unscaled,
+                 spectral_axis=np.asarray(wave, float) * unit)
+    return SplineInterpolatedResampler()(src, np.asarray(new_wave, float) * unit).flux.value
 
 
 class Spectrum:
@@ -79,7 +99,8 @@ class Spectrum:
         The spectrum as a specutils ``SpectrumList`` -- one ``Spectrum1D`` per
         order, with a real ``SpectralAxis`` (Angstrom) and (normalized,
         dimensionless) flux. Per-order ``meta`` carries this Spectrum's ``Info``
-        plus ``bjd``/``bcv``/``name``.
+        plus ``bjd``/``bcv``/``name``; a recorded ``NativeStep`` is split into
+        the order's own value (km/s), so ``from_spectrum1d`` can restore it.
 
         This is the interchange representation for the specutils ecosystem. The
         working ``.wv`` / ``.sp`` lists remain the mutable store used by the
@@ -87,10 +108,13 @@ class Spectrum:
         '''
         wunit = self.Info.get('WavelengthUnits', 1.0 * u.Angstrom)
         wunit = getattr(wunit, 'unit', wunit)
+        native = self.native_steps() if 'NativeStep' in self.Info else None
         out = []
-        for w, s in zip(self.wv, self.sp):
+        for I, (w, s) in enumerate(zip(self.wv, self.sp)):
             meta = dict(self.Info)
             meta.update(bjd=self.bjd, bcv=self.bcv, name=self.name)
+            if native is not None:
+                meta['NativeStep'] = native[I]
             out.append(Spec1D(flux=np.asarray(s, float) * u.dimensionless_unscaled,
                               spectral_axis=np.asarray(w, float) * wunit,
                               meta=meta))
@@ -105,16 +129,33 @@ class Spectrum:
         (a single object, a list, or a ``SpectrumList``). Each becomes one
         order. ``bjd``/``bcv``/``name`` are taken from the first object's
         ``meta`` when present, else from the arguments.
+
+        The sampling bookkeeping that ``orders`` writes is restored, so the
+        error estimates still count the native pixels: the grid description
+        (``GridType``, ``GridDelta``, ``GridUnits``) when every order agrees on
+        it (otherwise the grid is taken as 'raw', to be resampled), and the
+        per-order ``NativeStep`` (km/s; an order without one counts its own
+        grid as native).
         '''
         if isinstance(spectra, Spec1D):
             spectra = [spectra]
         wv = [np.asarray(o.spectral_axis.to(u.Angstrom).value, float) for o in spectra]
         sp = [np.asarray(o.flux.value, float) for o in spectra]
-        meta = getattr(spectra[0], 'meta', None) or {}
-        return cls(wv=wv, sp=sp,
+        metas = [getattr(o, 'meta', None) or {} for o in spectra]
+        meta = metas[0]
+        spec = cls(wv=wv, sp=sp,
                    bjd=meta.get('bjd', bjd),
                    bcv=meta.get('bcv', bcv),
                    name=meta.get('name', name))
+
+        grid_keys = ('GridType', 'GridDelta', 'GridUnits')
+        if 'GridType' in meta and all(_same(m.get(k), meta.get(k))
+                                      for m in metas[1:] for k in grid_keys):
+            spec.Info.update({k: meta[k] for k in grid_keys if k in meta})
+        if any('NativeStep' in m for m in metas):
+            spec.Info['NativeStep'] = [float(m.get('NativeStep', dsp.dv_from_wave(w)))
+                                       for m, w in zip(metas, wv)]
+        return spec
 
 # =============================================================================
 # =============================================================================
@@ -125,15 +166,28 @@ class Spectrum:
         Resampling onto a finer grid adds samples but no information:
         neighbouring resampled pixels share the same noise. Error estimates
         (UNICOR's ML uncertainty, TODCOR's CRLB) therefore need the native
-        sampling, which ``InterpolateSpectrum`` records the first time it runs.
-        A spectrum that was never resampled is taken to be honestly sampled
-        on its current grid.
+        sampling, which ``InterpolateSpectrum`` records (and coarsens, if a
+        resampling is coarser than anything before it) in
+        ``Info['NativeStep']``. A spectrum that was never resampled is taken
+        to be honestly sampled on its current grid.
 
-        :return: list of floats, one per order: c * median(d(lambda)/lambda).
+        :return: list of floats (km/s), one per order: the recorded
+                 ``Info['NativeStep']``, else c * median(d(lambda)/lambda) of
+                 each order's current grid.
+        :raises ValueError: if ``Info['NativeStep']`` does not hold one finite,
+                            positive value per current order (e.g. orders
+                            were added or dropped without updating it).
         '''
-        if 'NativeStep' in self.Info:
-            return list(self.Info['NativeStep'])
-        return [dsp.dv_from_wave(w) for w in self.wv]
+        if 'NativeStep' not in self.Info:
+            return [dsp.dv_from_wave(w) for w in self.wv]
+        steps = [float(x) for x in self.Info['NativeStep']]
+        if len(steps) != len(self.wv):
+            raise ValueError(f"Info['NativeStep'] holds {len(steps)} values for "
+                             f"{len(self.wv)} orders; it must have one per order")
+        if not all(np.isfinite(x) and x > 0 for x in steps):
+            raise ValueError("Info['NativeStep'] must be finite and positive (km/s), "
+                             f"got {steps}")
+        return steps
 
 # =============================================================================
 # =============================================================================
@@ -185,9 +239,9 @@ class Spectrum:
         # Initialize data
         wvI, spI, wnt = [], [], self.Info['WavelengthUnits']
 
-        # Remember how the data were sampled before the first resampling, so
-        # later error estimates can count independent pixels (native_steps).
-        self.Info.setdefault('NativeStep', self.native_steps())
+        # Remember the sampling that sets the noise scale, so later error
+        # estimates can count independent pixels (native_steps).
+        previous = self.native_steps()
 
         # Set the interpolation deltas
         if InterpMethod == 'linear':
@@ -206,7 +260,6 @@ class Spectrum:
 
         # Resample the flux onto the new grid with specutils (cubic spline).
         wunit = getattr(wnt, 'unit', u.Angstrom)
-        resampler = SplineInterpolatedResampler()
 
         # Interpolate per order
         for I, w in enumerate(self.wv):
@@ -230,9 +283,15 @@ class Spectrum:
             # Resample the flux onto the new grid. The target grid lies strictly
             # inside the input span (built with a one-median-step margin), so no
             # extrapolation occurs.
-            src = Spec1D(flux=np.asarray(self.sp[I], float) * u.dimensionless_unscaled,
-                         spectral_axis=np.asarray(w, float) * wunit)
-            spI.append(resampler(src, wvI[I] * wunit).flux.value)
+            spI.append(resample_flux(w, self.sp[I], wvI[I], unit=wunit))
+
+        # Resampling onto a finer grid adds no independent pixels; resampling
+        # onto a coarser one leaves fewer. So the coarsest sampling seen so far
+        # is the native one. dv_from_wave takes the median d(lambda)/lambda:
+        # a linear grid's velocity step falls from the blue to the red end of
+        # the order, and this is its mid-order value.
+        self.Info['NativeStep'] = [max(old, dsp.dv_from_wave(new))
+                                   for old, new in zip(previous, wvI)]
 
         # Replace the data with the interpolated wavelengths
         self.wv, self.sp = wvI, spI
@@ -461,7 +520,8 @@ class Spectrum:
         wv = [self.wv[I] for I in np.sort(x)]
         sp = [self.sp[I] for I in np.sort(x)]
         if 'NativeStep' in self.Info:
-            self.Info['NativeStep'] = [self.Info['NativeStep'][I] for I in np.sort(x)]
+            native = self.native_steps()
+            self.Info['NativeStep'] = [native[I] for I in np.sort(x)]
 
         self.wv = wv
         self.sp = sp
@@ -469,3 +529,9 @@ class Spectrum:
 
         return self
 
+
+def _same(a, b):
+    '''True if two Info values are both absent or compare equal.'''
+    if a is None or b is None:
+        return a is b
+    return bool(np.all(a == b))

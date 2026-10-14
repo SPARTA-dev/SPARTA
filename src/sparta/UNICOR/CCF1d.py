@@ -70,7 +70,16 @@ class CCF1d:
         independent spectral bins. Resampling onto a finer grid adds samples
         but no information, so order i counts
         ``len(order) * min(1, dv / native_step_i)`` bins, with the native step
-        from ``spec_in.native_steps()`` (km/s).
+        from ``spec_in.native_steps()`` (km/s; the coarsest sampling the
+        spectrum has had).
+
+        That count assumes white noise on the native pixels. Filtering and
+        per-order normalisation (``FilterSpectrum`` / ``SpecPreProccess``)
+        remove noise power and correlate it, so the uncertainty is then no
+        longer calibrated: in Monte Carlo the ratio eRV / (RV scatter) is
+        1.17 with SpecPreProccess's default FilterHC=0.15 and 1.38 with
+        FilterHC=0.9, i.e. the errors are 17-38% conservative. Calibrate by
+        simulation for preprocessed spectra.
 
         :return: self.Corr - a dictionary with the following fields:
                          'vel' - velocity vector at which correlation
@@ -102,14 +111,10 @@ class CCF1d:
         # Symmetric velocity half-range for the CCF scan (both signs valid).
         vmax = np.max(np.abs(VelBound))
 
-        # Read before any resampling below; InterpolateSpectrum preserves it,
-        # but the sampling that sets the noise is the one the data arrived on.
+        # Read before any resampling below: the sampling that sets the noise
+        # is the one the data arrived on (native_steps validates it against
+        # the orders).
         native_steps = np.asarray(spec.native_steps(), float)
-        if native_steps.shape != (len(spec.wv),):
-            raise ValueError(f"{native_steps.size} native steps recorded for "
-                             f"{len(spec.wv)} orders")
-        if not np.all(np.isfinite(native_steps) & (native_steps > 0)):
-            raise ValueError(f"native steps must be finite and positive, got {native_steps}")
 
         # Ensure the observed spectrum is on a log-lambda (velocity-even) grid.
         if spec.Info.get('GridType') != 'log':

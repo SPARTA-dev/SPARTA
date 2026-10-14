@@ -357,13 +357,21 @@ class Template:
 
         :param: integration_ration - integer. Reduce the the resolution
                                      by this factor.
+
+        Only the first order is kept. A native step recorded for the model
+        (Spectrum.native_steps) is coarsened to the summed pixels' step if
+        that is larger; explicit ``wv``/``sp`` replace the model, so its
+        record is dropped.
         '''
         new_sp = []
         new_wv = []
 
+        native = None
         if len(wv) == 0:
             wv = self.model.wv
             sp = self.model.sp
+            if 'NativeStep' in self.model.Info:
+                native = self.model.native_steps()[0]
 
         l = len(wv[0])
 
@@ -376,6 +384,9 @@ class Template:
 
         self.model.sp = new_sp
         self.model.wv = new_wv
+        self.model.Info.pop('NativeStep', None)
+        if native is not None:
+            self.model.Info['NativeStep'] = [max(native, dsp.dv_from_wave(new_wv[0]))]
 
         return new_wv, new_sp
 
@@ -410,7 +421,12 @@ class Template:
         :param: wv_bounds - an NordX2 numpy array with the upper and lower
                             limit of each order.
         :return: The template model, trimmed to the provided shapes.
+
+        Every new order is cut from order 0 of the model, so a recorded native
+        step (Spectrum.native_steps) is that of order 0 for each of them.
         '''
+        native = (self.model.native_steps()[0]
+                  if 'NativeStep' in self.model.Info else None)
 
         wvRangeInd = []
         for ordInd, bnd in enumerate(wv_bounds):
@@ -422,6 +438,8 @@ class Template:
 
         self.model.sp = spMO
         self.model.wv = wvMO
+        if native is not None:
+            self.model.Info['NativeStep'] = [native] * len(wvMO)
 
         return self
 

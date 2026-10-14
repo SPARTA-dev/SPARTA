@@ -13,7 +13,8 @@ import pytest
 from astropy.io import fits
 from astropy.time import Time
 
-from sparta.Auxil.ReadSpec import ReadSpec, _wavelength_window, _ascending
+from sparta.Auxil.ReadSpec import (ReadSpec, _wavelength_window, _ascending,
+                                   _iraf_multispec_wavelengths)
 from sparta.Observations import Observations
 
 
@@ -218,6 +219,60 @@ def test_tres_spline_dispersion_is_not_implemented(tmp_path):
     with pytest.raises(NotImplementedError):
         _load("TRES", _tres(tmp_path, {1: attr}), min_wv=4975.0, max_wv=5025.0)
 
+
+
+def test_tres_trimmed_image_counts_physical_pixels(tmp_path):
+    # An image section (columns 101-2304: LTV1 = -100, LTM1_1 = 1) keeps the
+    # physical-pixel dispersion functions; its logical pixel l is physical
+    # l + 100. Order 3 has only 2200 valid physical pixels, i.e. 2100 logical
+    # ones in the section -- not the first 2200.
+    attrs = dict(TRES_ORDERS)
+    attrs[3] = _cheb_attr(3, 88, 5170.0, [5170.0, 31.0, -0.27, 0.012], n_pix=2200)
+    full = _tres(tmp_path, attrs, name="full.fits")
+    with fits.open(full) as hdul:
+        hdr = hdul[0].header.copy()
+        data = hdul[0].data[:, 100:].copy()
+    hdr["LTV1"] = -100.0
+    trimmed = _write(tmp_path, [fits.PrimaryHDU(data, hdr)], "trimmed.fits")
+
+    # specutils evaluates physical pixels 1..NAXIS1, ignoring LTV1 and nw, so
+    # it can only check the untrimmed, full-length orders.
+    from specutils import SpectrumCollection
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        oracle = SpectrumCollection.read(_tres(tmp_path, TRES_ORDERS, name="oracle.fits"),
+                                         format="iraf").spectral_axis.to_value("Angstrom")
+    waves_full = _iraf_multispec_wavelengths(fits.getheader(full))
+    waves_trim = _iraf_multispec_wavelengths(fits.getheader(trimmed))
+    for line in (1, 2):
+        np.testing.assert_allclose(waves_full[line], oracle[line - 1], rtol=0, atol=1e-9)
+    for line in (1, 2, 3):
+        np.testing.assert_array_equal(waves_trim[line], waves_full[line][100:])
+    assert waves_trim[3].size == 2100
+
+    rs = _load("TRES", trimmed, min_wv=5100.0, max_wv=5120.0)
+    order = int(rs.s[0, 0] // 1e4)
+    pix = (rs.s[0] - 1e4 * order).astype(int)       # flux encodes the physical pixel - 1
+    np.testing.assert_allclose(rs.w[0], oracle[order][pix], rtol=0, atol=1e-9)
+
+
+def test_multispec_log_linear_doppler_factor_divides_the_wavelength(tmp_path):
+    # IRAF's multispec driver (sys/mwcs/wfmspec.x, wf_msp_fwd) evaluates
+    # 10 ** (w1 + dw (p - 1)) and then divides the *wavelength* by (1 + z), as
+    # does specutils' reader; the code used to divide the exponent instead.
+    w1, dw, n = 3.70, 1.0e-5, 2304
+    zs = {1: 0.0, 2: 3e-4}
+    path = _tres(tmp_path, {k: f"{k} {90 - k} 1 {w1!r} {dw!r} {n} {z!r} 10.0 20.0"
+                            for k, z in zs.items()})
+    from specutils import SpectrumCollection
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        oracle = SpectrumCollection.read(path, format="iraf").spectral_axis.to_value("Angstrom")
+    waves = _iraf_multispec_wavelengths(fits.getheader(path))
+    p = np.arange(1, n + 1)
+    for k, z in zs.items():
+        np.testing.assert_allclose(waves[k], 10 ** (w1 + dw * (p - 1)) / (1 + z), rtol=1e-13)
+        np.testing.assert_allclose(waves[k], oracle[k - 1], rtol=1e-12)
 
 # --------------------------------------------------------------------------
 # ESO Phase-3 SDP: UVES and FEROS

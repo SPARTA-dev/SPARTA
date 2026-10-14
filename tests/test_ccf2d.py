@@ -313,3 +313,78 @@ def test_ccf2d_refinement_does_not_need_kept_windows():
     assert 'data_g' not in dropped.windows[0]
     for k in ('RV1', 'RV2', 'eRV1', 'eRV2', 'a1_best', 'chi2_red'):
         assert dropped.Corr2d[k] == kept.Corr2d[k]
+
+
+@pytest.mark.parametrize('factor', [1.5, 2.0, 3.0])
+def test_ccf2d_noise_budget_on_a_grid_coarser_than_native(factor):
+    # The analysis grid is 1.5-3x coarser than the 1 km/s native grid. The
+    # noise model's impulse probes all sat at one sub-pixel phase whenever
+    # 40 * dv_native / dv was an integer: nu ~ 0.001 at 2x (chi2_red nan, and
+    # sigma=None refused to run), chi2_red 1.12 / 1.30 at 1.5x / 3x for
+    # honest noise.
+    v1, v2, sigma = 37.3, -52.6, 0.01
+    wave, flux0, tmpl1, tmpl2 = _narrow_case(v1, v2)
+    g1, g2 = _local_grids(v1, v2)
+    rng = np.random.default_rng(5)
+    chi2_red, sig, rv1, rv2, e1, e2 = [], [], [], [], [], []
+    for _ in range(30):
+        spec = Spectrum(wv=[wave], sp=[flux0 + rng.normal(0.0, sigma, wave.size)])
+        kw = dict(dv=factor, v1_grid=g1, v2_grid=g2, keep_windows=False)
+        r = CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, sigma=sigma, **kw).Corr2d
+        est = CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, **kw).Corr2d
+        chi2_red.append(r['chi2_red'])
+        sig.append(est['sigma'])
+        rv1.append(r['RV1'])
+        rv2.append(r['RV2'])
+        e1.append(r['eRV1'])
+        e2.append(r['eRV2'])
+    assert np.mean(chi2_red) == pytest.approx(1.0, abs=0.05)
+    assert np.mean(sig) == pytest.approx(sigma, rel=0.03)
+    assert 0.7 < np.std(rv1) / np.mean(e1) < 1.4
+    assert 0.7 < np.std(rv2) / np.mean(e2) < 1.4
+
+
+def test_ccf2d_noise_psd_is_cached_per_sampling():
+    # The probe depends only on the native and analysis steps; it must not be
+    # rebuilt for every order of every epoch.
+    from sparta.TODCOR.CCF2d import _impulse_responses
+    _impulse_responses.cache_clear()
+    wave, flux, tmpl1, tmpl2 = _narrow_case(37.3, -52.6)
+    g1, g2 = _local_grids(37.3, -52.6)
+    for _ in range(3):
+        CCF2d().CrossCorrelateSpec(Spectrum(wv=[wave, wave], sp=[flux, flux]),
+                                   tmpl1, tmpl2, v1_grid=g1, v2_grid=g2, sigma=0.01)
+    info = _impulse_responses.cache_info()
+    assert info.misses == 1 and info.hits == 5
+
+
+def test_ccf2d_sigma_none_reports_chi2_at_the_estimated_noise():
+    # chi2_best / chi2_red describe the fit at the noise behind the errors.
+    # Under sigma=None that is the fitted noise, so chi2_red is 1 by
+    # construction (it used to be reported at unit noise, i.e. ~sigma^2).
+    # chi2_map is on the noise scale of the maps: unit noise under sigma=None.
+    v1, v2 = 37.3, -52.6
+    wave, flux0, tmpl1, tmpl2 = _narrow_case(v1, v2)
+    g1, g2 = _local_grids(v1, v2)
+    noisy = flux0 + np.random.default_rng(4).normal(0.0, 0.01, wave.size)
+    est = CCF2d().CrossCorrelateSpec(Spectrum(wv=[wave], sp=[noisy]), tmpl1, tmpl2,
+                                     v1_grid=g1, v2_grid=g2).Corr2d
+    ref = CCF2d().CrossCorrelateSpec(Spectrum(wv=[wave], sp=[noisy]), tmpl1, tmpl2,
+                                     v1_grid=g1, v2_grid=g2, sigma=est['sigma']).Corr2d
+    assert est['chi2_red'] == pytest.approx(1.0, rel=1e-9)
+    assert ref['chi2_red'] == pytest.approx(1.0, rel=1e-6)
+    assert est['chi2_best'] == pytest.approx(ref['chi2_best'], rel=1e-6)
+    assert est['eRV1'] == pytest.approx(ref['eRV1'], rel=1e-6)
+    assert est['eRV2'] == pytest.approx(ref['eRV2'], rel=1e-6)
+    assert est['chi2_map'] == pytest.approx(est['chi2_best'] * est['sigma'] ** 2, rel=1e-9)
+    assert ref['chi2_map'] == ref['chi2_best']
+    # The maps sit on chi2_map's scale: their minimum is next to it.
+    for r in (est, ref):
+        assert r['fine']['chi2'].min() == pytest.approx(r['chi2_map'], rel=1e-3)
+
+
+def test_ccf2d_refuses_native_steps_that_do_not_match_the_orders():
+    spec, tmpl1, tmpl2 = _sparta_case(n_ord=2)
+    spec.Info['NativeStep'] = [1.0]
+    with pytest.raises(ValueError, match="NativeStep"):
+        CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, VelBound=120, dvel=4.0)

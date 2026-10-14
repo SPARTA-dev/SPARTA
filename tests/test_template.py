@@ -71,3 +71,32 @@ def test_save_template_model_round_trips_every_order(tmp_path):
         for I in range(2):
             np.testing.assert_array_equal(f[f"wv_{I}"], waves[I])
             np.testing.assert_array_equal(f[f"sp_{I}"], sps[I])
+
+
+def test_cut_multiorder_like_keeps_native_steps_aligned():
+    # Cutting a one-order template into the observation's orders multiplies
+    # the order count; a recorded native step must follow.
+    import numpy as np
+    from unicor import dsp
+    from sparta.UNICOR.Spectrum import Spectrum
+    wave, _ = dsp.log_lambda_grid(4990.0, 5110.0, 0.5)
+    model = Spectrum(wv=[wave], sp=[np.ones_like(wave)])
+    model.InterpolateSpectrum(delta=0.1, InterpMethod="log")
+    tmpl = Template(template=model)
+    obs = Spectrum(wv=[np.linspace(5000.0, 5040.0, 100), np.linspace(5060.0, 5100.0, 100)],
+                   sp=[np.ones(100), np.ones(100)])
+    tmpl.cut_multiorder_like(obs)
+    assert len(tmpl.model.wv) == 2
+    assert tmpl.model.native_steps() == pytest.approx([0.5, 0.5], rel=1e-3)
+
+
+def test_integrate_spec_records_the_coarser_sampling():
+    import numpy as np
+    from unicor import dsp
+    from sparta.UNICOR.Spectrum import Spectrum
+    wave, _ = dsp.log_lambda_grid(4990.0, 5010.0, 0.5)
+    model = Spectrum(wv=[wave, wave], sp=[np.ones_like(wave), np.ones_like(wave)])
+    model.Info["NativeStep"] = [0.5, 0.5]
+    tmpl = Template(template=model)
+    tmpl.integrate_spec(4)
+    assert tmpl.model.native_steps() == pytest.approx([2.0], rel=1e-3)

@@ -108,10 +108,12 @@ freedom.  For white noise on the analysis grid ``nu`` is the number of retained
 Fourier modes; on an oversampled grid it is ``~ kappa * n / M``, where
 ``kappa < 1`` is the interpolator's noise-variance factor (2/3 for linear,
 ~0.87 for a cubic spline) -- the resampled noise is smoother, not just
-correlated.  Pass the resampled-noise spectrum (:func:`resampled_noise_psd`,
-times ``mean(taper**2)`` for an apodised window) as ``noise_psd`` and
-``chi2_red = chi2 / (sum nu - 4)`` is ~1 for honest noise; then
-``sigma *= sqrt(chi2_red)`` is a calibrated noise estimate.
+correlated.  On a *coarser* grid the resampled noise is coloured too, and
+its variance depends on the sub-pixel phases at which the analysis nodes
+sample the native pixels.  Pass the resampled-noise spectrum
+(:func:`resampled_noise_psd`, times ``mean(taper**2)`` for an apodised window)
+as ``noise_psd`` and ``chi2_red = chi2 / (sum nu - 4)`` is ~1 for honest
+noise; then ``sigma *= sqrt(chi2_red)`` is a calibrated noise estimate.
 
 Assumptions (exact only under these)
 ------------------------------------
@@ -254,18 +256,26 @@ def window_stats(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None,
 
 # =============================================================================
 # =============================================================================
-def resampled_noise_psd(responses, n, ratio):
-    """Noise spectrum of white native noise after resampling onto a finer grid.
+def resampled_noise_psd(responses, n, ratio, weights=None):
+    """Noise spectrum of white native noise after resampling.
 
     Resampling is linear in the flux, so white noise ``sigma`` on the native
     pixels becomes ``sum_j eps_j h_j`` on the analysis grid, where ``h_j`` is
     the response to a unit impulse in native pixel ``j``.  Its expected power
-    per Fourier mode is ``sigma^2 * (n / ratio) * |H_k|^2`` (``n / ratio``
-    native pixels in the window), which this returns relative to white noise
-    ``sigma^2`` on the analysis grid -- the ``noise_psd`` of
+    per Fourier mode is ``sigma^2 * (n / ratio) * mean_j |H_j,k|^2``
+    (``n / ratio`` native pixels in the window), which this returns relative
+    to white noise ``sigma^2`` on the analysis grid -- the ``noise_psd`` of
     :func:`window_stats`.  Its mean over modes is the interpolator's
-    noise-variance factor ``kappa``.  Averaging a few impulses at different
-    sub-pixel phases smooths the (cyclostationary) phase dependence.
+    noise-variance factor ``kappa``.  Valid for any ``ratio``: finer
+    (``ratio > 1``) or coarser (``ratio < 1``) analysis grids.
+
+    ``|H_j|^2`` depends on where native pixel ``j`` falls between two analysis
+    nodes (its sub-pixel phase), so the mean over native pixels needs
+    responses at representative phases: e.g. one per phase bin, weighted by
+    the number of native pixels in that bin.  Equal weights over uniformly
+    spaced phases model grids with no fixed phase relation; a grid commensurate
+    with the native one (e.g. exactly twice as coarse) has only a few phases,
+    and its weights must say so.
 
     Parameters
     ----------
@@ -277,6 +287,10 @@ def resampled_noise_psd(responses, n, ratio):
     ratio : float
         Native velocity step over analysis step, ``dv_native / dv``
         (dimensionless).
+    weights : array_like or None
+        Non-negative relative frequency of each response among the window's
+        native pixels (dimensionless; normalised here).  Default None: equal
+        weights.
 
     Returns
     -------
@@ -287,19 +301,30 @@ def resampled_noise_psd(responses, n, ratio):
     responses = [np.asarray(h, float) for h in responses]
     if not responses:
         raise ValueError("resampled_noise_psd needs at least one impulse response")
+    if not ratio > 0:
+        raise ValueError(f"ratio must be positive, got {ratio}")
+    weights = np.ones(len(responses)) if weights is None else np.asarray(weights, float)
+    if weights.shape != (len(responses),) or not (np.all(weights >= 0) and weights.sum() > 0):
+        raise ValueError("weights must be one non-negative value per response, "
+                         f"not all zero; got {weights}")
+    responses = [h for h, wt in zip(responses, weights) if wt > 0]
+    weights = weights[weights > 0]
     longest = max(len(h) for h in responses)
     if longest > n:
         raise ValueError(f"an impulse response ({longest} pixels) is longer than "
                          f"the window ({n} pixels)")
-    if not ratio > 0:
-        raise ValueError(f"ratio must be positive, got {ratio}")
     # |rfft(h, n)|^2 is the transform of h's autocorrelation wrapped modulo n,
     # so average the (short) autocorrelations and transform once instead of
-    # paying one length-n FFT per impulse.
-    padded = [np.pad(h, (0, longest - len(h))) for h in responses]
-    acf = np.mean([np.correlate(h, h, mode="full") for h in padded], axis=0)
+    # paying one length-n FFT per impulse. Padding to 2 * longest keeps the
+    # short autocorrelation free of wrap-around.
+    padded = np.array([np.pad(h, (0, longest - len(h))) for h in responses])
+    m = 2 * longest
+    power_short = np.average(np.abs(np.fft.rfft(padded, n=m, axis=1)) ** 2,
+                             axis=0, weights=weights)
+    acf = np.fft.irfft(power_short, n=m)
+    lags = np.concatenate([np.arange(longest), np.arange(-longest, 0)])
     circ = np.zeros(n)
-    np.add.at(circ, np.arange(-(longest - 1), longest) % n, acf)
+    np.add.at(circ, lags % n, acf)
     power = np.fft.rfft(circ).real[1:]
     return power / ratio
 

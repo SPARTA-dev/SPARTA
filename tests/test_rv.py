@@ -186,3 +186,20 @@ def test_per_order_and_bisector_errors_use_the_same_bin_count(forest_template):
     # A single order of a two-order spectrum: which order's bins is ambiguous.
     with pytest.raises(ValueError, match="subset"):
         ccf.extract_RV(ccf.Corr["vel"], ccf.Corr["corr"][0], n_ord=1)
+
+
+def test_effective_bins_follow_an_intermediate_coarser_resampling(forest_template):
+    # A 3x coarser linear resampling before the CCF leaves ~1/3 of the native
+    # pixels independent; n_eff used to count the original ones (2166 vs ~727).
+    obs = Spectrum(wv=[MC_WAVE.copy()], sp=[_forest(MC_WAVE, 0.0)], name="o")
+    obs.InterpolateSpectrum(delta=3.0)
+    ccf = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=forest_template,
+                                     dv=0.25, VelBound=20)
+    assert ccf.Corr["n_eff"][0] == pytest.approx(MC_WAVE.size / 3.0, rel=0.02)
+
+
+def test_ccf1d_refuses_native_steps_that_do_not_match_the_orders(forest_template):
+    obs = Spectrum(wv=[MC_WAVE.copy()], sp=[_forest(MC_WAVE, 0.0)], name="o")
+    obs.Info["NativeStep"] = [1.0, 1.0]
+    with pytest.raises(ValueError, match="NativeStep"):
+        CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=forest_template, VelBound=20)

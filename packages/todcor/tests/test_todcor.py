@@ -347,6 +347,25 @@ def test_resampled_noise_psd_counts_native_pixels():
         ops.resampled_noise_psd([np.ones(n + 1)], n, M)
 
 
+
+def test_resampled_noise_psd_weights_average_the_responses():
+    # Responses at different sub-pixel phases are averaged with the number of
+    # native pixels at each phase; a phase no native pixel has drops out.
+    n, M = 400, 0.5
+    h1, h2 = np.array([1.0]), np.array([0.6, 0.6, -0.1])
+    one = ops.resampled_noise_psd([h1], n, M)
+    two = ops.resampled_noise_psd([h2], n, M)
+    np.testing.assert_allclose(ops.resampled_noise_psd([h1, h2], n, M, weights=[3, 1]),
+                               (3 * one + two) / 4, rtol=1e-12)
+    np.testing.assert_allclose(ops.resampled_noise_psd([h1, h2], n, M, weights=[1, 0]),
+                               one, rtol=1e-12)
+    # A unit response per native pixel: white, with n / M native pixels' power.
+    np.testing.assert_allclose(one, 1.0 / M, rtol=1e-12)
+    with pytest.raises(ValueError, match="weights"):
+        ops.resampled_noise_psd([h1, h2], n, M, weights=[0, 0])
+    with pytest.raises(ValueError, match="weights"):
+        ops.resampled_noise_psd([h1, h2], n, M, weights=[1])
+
 def test_crlb_and_chi2_red_honest_on_an_oversampled_grid():
     # Noise drawn on a ~1 km/s native grid, then interpolated onto a 0.1 km/s
     # analysis grid: ~10 analysis pixels share each native noise value. With

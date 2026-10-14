@@ -195,7 +195,7 @@ above partly compensated). `window_stats(..., oversampling=M)` divides the
 weights by M (equivalently `σ → σ√M`), which restores the native-pixel
 information for any line resolved by the native sampling; `CCF2d` takes
 `M_i = max(1, dv_native,i/dv)` per order from `Spectrum.native_steps()`
-(recorded at the first resampling). Monte Carlo scatter / CRLB is then 0.92 / 0.97
+(the coarsest sampling the spectrum has had). Monte Carlo scatter / CRLB is then 0.92 / 0.97
 for the two components.
 
 **Noise budget and scale.** Each window also returns `nu`, the expected χ² of
@@ -214,27 +214,60 @@ sees, and
 
     χ²_red = χ²_best / (Σ_windows ν − 4)          (four fitted parameters)
 
-is ≈ 1 for honest noise (1.004 in the Monte Carlo above). Since χ² and the map
-curvature scale as `1/σ²`, a single common σ does not move the argmax and
-rescales the errors by `√χ²_red`. `CCF2d`'s default `sigma=None` uses exactly
-that: fit at unit σ, report `sigma = √χ²_red` (the native per-pixel noise) and
-errors scaled by it. An explicit `sigma` (scalar or per order) is taken at face
-value — no rescale — but χ²_red is still reported as a consistency check.
+is ≈ 1 for honest noise (1.004 in the Monte Carlo above).
+
+The impulse response of a native pixel depends on its sub-pixel phase between
+two analysis nodes, so `CCF2d` probes the resampler at 32 phases (cached per
+`(dv_native, dv)`) and averages them weighted by how many of the order's native
+pixels sit at each phase. This matters most on a grid *coarser* than native:
+nodes that fall on native pixels pass their noise unchanged (κ = 1, white),
+nodes between them average it down and correlate neighbours (κ ≈ 0.87 over
+random phases). A grid commensurate with a log-λ native grid (e.g. exactly 2×
+coarser) has only a few phases, a linear-λ native grid sweeps them all. When
+`CCF2d` resamples the spectrum itself it measures the phases; for a spectrum
+resampled beforehand it assumes them uniform (which can be off by ~15 % for a
+commensurate log grid). Monte Carlo (100 realisations, 1 km/s native, log-λ and
+linear-λ native grids): χ²_red = 1.006–1.014 for dv = 0.25, 0.5, 1, 1.5, 2,
+3 × native. (Probing a single phase had given ν ≈ 0 at 2× — χ²_red undefined —
+and χ²_red 1.11–1.34 at 1.5× and 3×.)
+
+Since χ² and the map curvature scale as `1/σ²`, a single common σ does not
+move the argmax and rescales the errors by `√χ²_red`. `CCF2d`'s default
+`sigma=None` uses exactly that: fit at unit σ, report `sigma = √χ²_red` (the
+native per-pixel noise, χ²_red at unit σ) and errors scaled by it. The reported
+`chi2_best` / `chi2_red` are at the noise behind the errors, so under
+`sigma=None` χ²_red = 1 by construction; `chi2_map` is the same χ² on the
+maps' noise scale (unit σ under `sigma=None`, where the logL/χ² maps, the fine
+maps, `self.stats` and `self.crlb` all stay at unit σ). An explicit `sigma`
+(scalar or per order) is taken at face value — no rescale — and χ²_red is a
+consistency check.
 
 ## 9. Assumptions and caveats
 
 Exact **only** under these; the first is the one to watch:
 
 - **White native noise `σ` per native pixel, resampled once by a linear
-  interpolator.** `oversampling` and `noise_psd` model that resampling (in
-  `CCF2d`: one `InterpolateSpectrum` call from a uniform native grid, probed
-  with unit impulses). Repeated resampling (e.g. `SpecPreProccess`'s linear
-  resampling followed by `CCF2d`'s log resampling), filtering, or
-  wavelength-dependent native steps across an order are not modelled; χ²_red
-  then drifts from 1 and `sigma=None` absorbs only its mean scale. The taper
-  makes the noise heteroscedastic (`σ_n = w_n σ`); only its mean square enters
-  `ν`. The weights stay white, so an interpolator that attenuates in-band noise
-  (linear interpolation's passband droop) leaves the CRLB mildly conservative.
+  interpolator.** `oversampling`, `noise_psd` and the native-pixel count
+  behind the CRLB model that resampling (in `CCF2d`: one `InterpolateSpectrum`
+  call from a uniform native grid, probed with unit impulses). **After
+  `FilterSpectrum` / `SpecPreProccess` this calibration does not hold**:
+  band-pass filtering, per-order normalisation and the double resampling
+  (`SpecPreProccess`'s linear resampling, then `CCF2d`'s log one) remove and
+  correlate noise power that ν and the CRLB do not know about. Measured by
+  Monte Carlo on preprocessed spectra: TODCOR RV scatter / eRV = 0.72–0.74,
+  i.e. errors ~1.4× too large; UNICOR eRV / RV scatter = 1.17 at
+  `SpecPreProccess`'s default `FilterHC = 0.15` and 1.38 at `FilterHC = 0.9`.
+  χ²_red then drifts from 1 and `sigma=None` absorbs only its mean scale.
+  Calibrate the errors by simulation (or a constant star) for preprocessed
+  spectra. The taper makes the noise heteroscedastic (`σ_n = w_n σ`); only its
+  mean square enters `ν`.
+- **White weights.** The Fisher weights ignore the colour of the resampled
+  noise. An interpolator that attenuates in-band noise (linear interpolation's
+  passband droop) leaves the CRLB mildly conservative; so does an analysis
+  grid coarser than native whose nodes fall between native pixels (smoothed,
+  correlated noise): Monte Carlo RV scatter / eRV = 0.82–0.91 at 1.5× native
+  (log- and linear-λ native grids) and 2× (linear-λ), against 0.97–1.06 at 3×
+  and at 2× on a log-λ native grid, whose nodes then all fall on native pixels.
 - **χ²_red counts four parameters.** When `nonneg=True` clamps an amplitude to
   zero only three are free; the difference is negligible against `Σν`.
 - **Local quadratic CRLB** (§8): valid for an isolated, well-resolved peak

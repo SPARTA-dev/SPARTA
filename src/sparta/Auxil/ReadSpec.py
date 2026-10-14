@@ -212,7 +212,14 @@ def _iraf_multispec_wavelengths(header):
     non-linear form is ``w = sum_i wt_i * (w0_i + W_i(p)) / (1 + z)`` with
     Chebyshev (ftype 1) or Legendre (ftype 2) ``W_i``. specutils' 'iraf'
     reader ignores the weight and zero-point terms and sums of functions,
-    which IRAF writes after shift-corrected dispersion solutions.
+    which IRAF writes after shift-corrected dispersion solutions, and also
+    the LTV/LTM logical-to-physical mapping of image sections.
+
+    The Doppler factor divides the *wavelength* in every case, including the
+    log-linear one: ``w = 10 ** (w1 + dw (p - 1)) / (1 + z)``. That is what
+    IRAF's multispec driver computes (sys/mwcs/wfmspec.x, wf_msp_fwd) and what
+    specwcs.hlp states in prose; its displayed log-linear equation, which puts
+    ``(1 + z)`` inside the exponent, disagrees with both.
 
     Parameters
     ----------
@@ -222,16 +229,18 @@ def _iraf_multispec_wavelengths(header):
     Returns
     -------
     dict
-        Physical image line N (1-based) -> float64 wavelengths of its first
-        ``nw`` valid pixels, in the units of WAT1 (Angstrom for TRES).
+        Physical image line N (1-based) -> float64 wavelengths of the image
+        columns whose physical pixel lies within the ``nw`` valid ones (a
+        leading run of columns), in the units of WAT1 (Angstrom for TRES).
 
     Raises
     ------
     ValueError
         If the header carries no multispec WAT2 attributes or they are malformed.
     NotImplementedError
-        For spline / sampled dispersion functions (ftype 3-6) or an
-        uncalibrated aperture (dtype -1).
+        For spline / sampled dispersion functions (ftype 3-6), an
+        uncalibrated aperture (dtype -1), or an image section whose valid
+        pixels do not start at its first column.
     '''
     keys = sorted(k for k in header if re.fullmatch(r'WAT2_\d{3}', k))
     # IRAF splits the attribute string into 68-character card values; astropy
@@ -252,13 +261,20 @@ def _iraf_multispec_wavelengths(header):
         if dtype == 0:
             wave = (w1 + dw * (pix - 1)) / (1 + z)
         elif dtype == 1:
-            wave = 10 ** ((w1 + dw * (pix - 1)) / (1 + z))
+            wave = 10 ** (w1 + dw * (pix - 1)) / (1 + z)
         elif dtype == 2:
             wave = _multispec_nonlinear(f[9:], pix, line) / (1 + z)
         else:
             raise NotImplementedError(f"spec{line} has dispersion type {dtype}: "
                                       "the aperture is not wavelength calibrated")
-        waves[int(line)] = wave[:nw]
+        # nw counts physical pixels; in an image section (LTV1 != 0) the
+        # valid columns are those that map onto physical pixels 1..nw.
+        valid = (pix > 0.5) & (pix < nw + 0.5)
+        n_valid = int(np.count_nonzero(valid))
+        if not valid[:n_valid].all():
+            raise NotImplementedError(f"spec{line}: the valid physical pixels 1..{nw} "
+                                      "do not start at the first image column")
+        waves[int(line)] = wave[:n_valid]
     return waves
 
 
