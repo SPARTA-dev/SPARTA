@@ -151,3 +151,25 @@ def test_timeseries_size_must_match_times():
 
 def test_timeseries_size_defaults_to_len_times():
     assert TimeSeries(times=list(TIMES), vals=list(VALS)).size == len(TIMES)
+
+
+# The error-aware PDC distance (Binnenfeld, Shahaf & Zucker 2024, Eq. 3, in its
+# published form -- deliberately without a sqrt(pi) on the x*erf(x) term).
+# Golden values captured 2026-10-14; the peak stays at P = 3 d.
+ERRORS = [0.1 * (1 + i % 3) for i in range(len(TIMES))]
+GOLDEN_POWER_ERRORS = np.array([
+    -0.083359353882, -0.084396542771, -0.108568005069, -0.125086976581,
+    -0.103570947238, 0.113113821665, 0.716716842014, -0.114300252979,
+    0.131395392636, -0.138188082812, -0.123696802047, -0.089531393859,
+    -0.033136650209, -0.141505792898, -0.143289838346, 0.126395626848,
+    -0.165025252659, 0.716770766716, 0.030133323429,
+])
+
+
+def test_error_aware_pdc_matches_golden():
+    ts = TimeSeries(times=list(TIMES), vals=list(VALS), errors=list(ERRORS))
+    det = PeriodicityDetector(time_series=ts, freq_range=(0.05, 1.0),
+                              periodogram_grid_resolution=20)
+    det.calc_PDC(calc_unbiased_flag=True, errors=True)
+    np.testing.assert_allclose(np.asarray(det.results_power["PDC_unbiased"]),
+                               GOLDEN_POWER_ERRORS, rtol=1e-8, atol=1e-10)

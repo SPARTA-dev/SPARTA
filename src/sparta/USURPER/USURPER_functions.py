@@ -225,6 +225,11 @@ def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbias
                                 + np.sqrt(base - l * (i_val[2] + j_val[2]) * sin + 0.5 * l * l * (1 + cos)))
                         a[i, j] = a[j, i] = temp / 2 - l
             elif errors:
+                # Error-aware distance of Binnenfeld, Shahaf & Zucker (2024),
+                # Eq. 3, as published: e^(-x^2) + x*erf(x) - y, without a
+                # sqrt(pi) on the erf term. An energy-distance derivation
+                # suggests one; the authors confirmed (2026-10-14) that the
+                # published form is intended. Pinned by test_pdc.py.
                 from scipy import special
                 y = np.asarray(vals, float)
                 err = np.asarray(periodicity_detector.time_series.errors, float)
