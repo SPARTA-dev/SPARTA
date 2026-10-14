@@ -5,6 +5,21 @@ Short, executed notebooks that teach SPARTA step by step. Each opens with
 printed numbers, and runs offline in seconds (synthetic data have fixed seeds;
 PHOENIX templates come from the bundled cache, never the network).
 
+## Quickstarts
+
+[`quickstart/`](quickstart/): one capability each, in about ten cells, with the
+high-level objects (`Observations`, `Template`, `CCF1d`, `CCF2d`, `TIRAVEL`,
+`PeriodicityDetector`) and their plot methods. Minimal prose; the series below
+explains the why.
+
+| Notebook | What it does |
+|---|---|
+| [`q01_rvs_nres`](quickstart/q01_rvs_nres.ipynb) | RVs of TOI-677 (NRES): recommended orders and preprocessing, a broadened PHOENIX template, `calc_rv_against_template`, the RV curve, `CCF1d.plot`, `output='loglike'`. |
+| [`q02_sb2_todcor`](quickstart/q02_sb2_todcor.ipynb) | A simulated double-lined binary: `calc_rv_against_two_templates`, the R and ln L maps (`CCF2d.plot`), velocities and amplitudes against `obs.truth`. |
+| [`q03_tiravel_harps`](quickstart/q03_tiravel_harps.ipynb) | HARPS TOI-193: RVs against an air-frame PHOENIX template, `build_tiravel_template` (ρ, the template), RVs against the TIRAVEL template. |
+| [`q04_periodograms`](quickstart/q04_periodograms.ipynb) | `PeriodicityDetector`: GLS, PDC and error-aware PDC with p-value levels on an RV series; USuRPER and the partial shift/shape periodograms on spectra; `plot_periodograms`. |
+| [`q05_simulated_data`](quickstart/q05_simulated_data.ipynb) | `instruments.Simulation` like HARPS and like NRES: seeds, noise models, `as_product`, barycentric correction, `obs.truth`; the instrument registry. |
+
 ## The series
 
 | Notebook | What it covers |
@@ -40,7 +55,8 @@ pip install -r requirements.txt
 pip install jupyterlab
 ```
 
-Then start Jupyter in this folder (the notebooks read `data/` relative to it):
+Then start Jupyter in this folder (the notebooks read `data/` relative to it;
+the quickstarts, `../data/`):
 
 ```bash
 cd examples
