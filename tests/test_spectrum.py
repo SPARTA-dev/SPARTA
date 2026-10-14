@@ -202,3 +202,35 @@ def test_default_spectra_do_not_share_their_order_lists():
     a, b = Spectrum(), Spectrum()
     a.wv.append(np.arange(3.0))
     assert b.wv == [] and b.n_ord == 0
+
+
+def test_trim_removes_noisy_unexposed_margins_before_filtering():
+    # NRES-like order: unexposed detector at both ends reads ~0 plus noise,
+    # not exact zeros. Those margins must go before the continuum is removed,
+    # or the filter turns the 0 -> continuum jump into a step at the edge.
+    rng = np.random.default_rng(3)
+    w = np.linspace(5120.0, 5230.0, 4000)
+    flux = 400.0 + rng.normal(0.0, 5.0, w.size)
+    pad = (w < 5131.0) | (w > 5224.0)
+    flux[pad] = rng.normal(0.0, 0.2, pad.sum())
+    spec = Spectrum(wv=[w.copy()], sp=[flux.copy()])
+    spec.trim(clean_margins=True)
+    kept = spec.wv[0]
+    assert kept[0] >= 5130.5 and kept[-1] <= 5224.5
+    assert kept[0] < 5131.5 and kept[-1] > 5223.5      # nothing exposed was lost
+    assert np.all(np.asarray(spec.sp[0]) > 100.0)
+
+
+def test_trim_keeps_the_last_exposed_pixel_and_handles_nans_first():
+    # Margins are found after NaNs are removed, and the bounds are inclusive.
+    w = np.arange(12, dtype=float) + 5000.0
+    flux = np.array([np.nan, np.nan, 0, 0, 1, 2, 3, 4, 5, 0, 0, 0], dtype=float)
+    spec = Spectrum(wv=[w], sp=[flux])
+    spec.trim(clean_margins=True, margin_window=1, margin_fraction=0.1)
+    np.testing.assert_array_equal(spec.sp[0], [1, 2, 3, 4, 5])
+
+
+def test_interpolate_refuses_an_empty_order():
+    spec = Spectrum(wv=[np.array([5000.0])], sp=[np.array([1.0])])
+    with pytest.raises(ValueError, match="cannot be resampled"):
+        spec.interpolate()

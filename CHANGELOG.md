@@ -208,6 +208,21 @@ Keys of `results_frequency` / `results_power`:
   sp=None)`, `Observations.calc_bis(bisect_val=(0.35, 0.95))`. Calls that
   pass these arguments behave as before.
 
+- **Changes results on NRES:** `Spectrum.trim(clean_margins=True)`, the
+  `preprocess` default, now removes padded order margins. These are the
+  leading and trailing runs whose running median is below `margin_fraction`
+  (default 0.1) of the order's median flux, so noisy unexposed detector is
+  caught as well as exact zeros. Before, only exact zeros were removed, so
+  the NRES margins survived. The band-pass filter then turned the jump from
+  about 0 to the continuum into a step at the order edge. `preprocess` order:
+  trim margins, resample, remove cosmics, remove the continuum by filtering,
+  taper. Margins are now found after NaNs are dropped, and the last exposed
+  pixel is kept (off-by-one fixed). `interpolate` raises a clear error for an
+  empty order. Effect on the bundled NRES TOI-677 data: RV scatter 82 -> 75
+  m/s, median eRV 26 -> 24 m/s.
+- `Observations` reads files in sorted order, so the epoch order no longer
+  depends on the filesystem.
+
 ### Documentation
 
 - A new README: what SPARTA does (PDC, error-aware PDC, USuRPER and the

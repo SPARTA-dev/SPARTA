@@ -91,7 +91,8 @@ METHODS = {
                        "filter_lowcut", "filter_highcut", "alpha"],
         "remove_cosmics": ["sigma_upper"],
         "select_orders": ["orders", "remove"],
-        "trim": ["n_trim", "n_trim_left", "n_trim_right", "clean_margins", "remove_nans"],
+        "trim": ["n_trim", "n_trim_left", "n_trim_right", "clean_margins", "remove_nans",
+                 "margin_fraction", "margin_window"],
     },
     "Template": {
         "broaden_instrumental": ["resolution"],

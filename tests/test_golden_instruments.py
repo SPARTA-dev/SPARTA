@@ -122,7 +122,8 @@ def _record_unicor(directory):
     obs.select_orders([10 + i for i in np.arange(40)], remove=False)
     obs.preprocess(n_trim=100, clean_margins=True, remove_nans=True, delta=0.5,
                    cosmic_sigma=3, filter_lowcut=4, filter_highcut=0.15, alpha=0.3)
-    template = Template.from_phoenix(5800, 3.5, 0.5, 0.0, wave_range=(4650, 7500),
+    # The template covers every selected order (4560-7600 A) with margin.
+    template = Template.from_phoenix(5800, 3.5, 0.5, 0.0, wave_range=(4500, 7700),
                                      air=False, allow_download=False)
     template.integrate_spec(integration_ratio=3)
     template.model.interpolate(delta=1)

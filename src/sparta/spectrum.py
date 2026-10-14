@@ -14,6 +14,7 @@ Cross-correlation needs a log-lambda (velocity-even) grid, step
 
 import numpy as np
 from scipy import signal
+from scipy.ndimage import median_filter
 from astropy.stats import sigma_clip, mad_std
 from astropy import constants as consts, units as u
 from specutils import Spectrum as Spec1D, SpectrumList
@@ -329,6 +330,12 @@ class Spectrum:
         if method not in ('linear', 'log'):
             raise ValueError(f"method must be 'linear' or 'log', not {method!r}")
 
+        for I, w in enumerate(self.wv):
+            if len(w) < 2:
+                raise ValueError(f"order {I} has {len(w)} pixels and cannot be resampled; "
+                                 "it was trimmed away or a template does not cover it "
+                                 "(drop it with select_orders)")
+
         # Initialize data
         wvI, spI, wnt = [], [], self.Info['WavelengthUnits']
 
@@ -401,12 +408,16 @@ class Spectrum:
     # =============================================================================
     # =============================================================================
     def trim(self, n_trim=None, n_trim_left=0, n_trim_right=0,
-             clean_margins=False, remove_nans=True):
+             clean_margins=False, remove_nans=True, margin_fraction=0.1,
+             margin_window=15):
         '''
         Trim the edges of every order, in place.
 
-        Spectra are often zero-padded at the edges, which would disturb the
-        filtering stage.
+        Echelle orders are often padded at their ends: either with exact
+        zeros, or -- as in the NRES pipeline -- with unexposed, background-
+        subtracted detector that reads zero plus noise. Those margins must go
+        *before* the continuum is removed: filtering a jump from ~0 to the
+        continuum level turns it into a step at the order edge.
 
         Parameters
         ----------
@@ -414,12 +425,21 @@ class Spectrum:
             Pixels to remove from each end; overrides ``n_trim_left`` /
             ``n_trim_right``.
         n_trim_left, n_trim_right : int
-            Pixels to remove from the blue / red end.
+            Pixels to remove from the blue / red end, counted inside the
+            margins when ``clean_margins`` is set.
         clean_margins : bool
-            Count the trimmed pixels from the first and last non-zero flux,
-            i.e. drop the zero padding too.
+            Drop the padded margins: the leading and trailing runs whose
+            running median (``margin_window`` pixels) is below
+            ``margin_fraction`` of the order's median flux. This catches exact
+            zero padding and noisy unexposed detector alike.
         remove_nans : bool
             Drop NaN pixels first.
+        margin_fraction : float
+            Flux level, as a fraction of the order's median, below which an
+            edge pixel counts as padding.
+        margin_window : int
+            Width (pixels) of the running median that smooths the noise before
+            the threshold is applied.
 
         Returns
         -------
@@ -432,27 +452,31 @@ class Spectrum:
         if n_trim is not None:
             n_trim_left, n_trim_right = n_trim, n_trim
 
-        # Interpolate per order
-        for I, w in enumerate(self.wv):
-            s = self.sp[I]
+        for w, s in zip(self.wv, self.sp):
+            w = np.asarray(w, float)
+            s = np.asarray(s, float)
 
             if remove_nans:
-                w = w[~np.isnan(s)]
-                s = s[~np.isnan(s)]
+                keep = ~np.isnan(s)
+                w, s = w[keep], s[keep]
 
-            if clean_margins:
-                non_zero_loc = np.nonzero(self.sp[I])
-                first_non_zero = np.min(non_zero_loc)
-                last_non_zero = np.max(non_zero_loc)
-            else:
-                first_non_zero = 0
-                last_non_zero = len(w)
+            # Inclusive bounds of the exposed part, on the arrays as they now
+            # are (after NaN removal).
+            first, last = 0, len(s) - 1
+            if clean_margins and len(s):
+                level = margin_fraction * np.nanmedian(s)
+                smooth = median_filter(np.nan_to_num(s), size=margin_window,
+                                       mode='nearest')
+                exposed = np.flatnonzero(smooth > level)
+                if exposed.size == 0:
+                    raise ValueError("an order has no flux above the margin level; "
+                                     "drop it (select_orders) or lower margin_fraction")
+                first, last = exposed[0], exposed[-1]
 
-            s = s[(first_non_zero+n_trim_left):(last_non_zero-n_trim_right)]
-            w = w[(first_non_zero+n_trim_left):(last_non_zero-n_trim_right)]
-
-            spT.append(s)
-            wvT.append(w)
+            lo = first + n_trim_left
+            hi = last - n_trim_right + 1
+            wvT.append(w[lo:hi])
+            spT.append(s[lo:hi])
 
         self.wv, self.sp = wvT, spT
         return self
