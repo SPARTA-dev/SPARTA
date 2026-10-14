@@ -295,3 +295,40 @@ def test_sb2_driver_passes_the_velocity_convention_to_todcor():
         vels[convention] = np.column_stack([obs.vels1, obs.vels2])
     np.testing.assert_allclose(vels["cz"] - vels["relativistic"], rv ** 2 / (2 * C_KMS),
                                atol=2e-4)
+
+
+def test_observations_never_imports_tqdm_by_default():
+    # tqdm is optional: a default run (load, preprocess, RVs) must not import
+    # it. Checked in a fresh interpreter so other tests cannot pollute it.
+    import subprocess
+    import sys
+    import textwrap
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    code = textwrap.dedent('''
+        import sys
+        import numpy as np
+        from sparta import Observations, Template
+        from sparta.instruments import Simulation
+        sim = Simulation(like="HARPS", components=[dict(teff=5800, logg=3.5, feh=0.5)],
+                         windows_A=[(5000.0, 5060.0)], times=np.arange(4.0),
+                         rv_kms=np.zeros((4, 1)), snr=100, seed=1)
+        obs = Observations(survey="SIMULATED", simulation=sim)
+        obs.preprocess()
+        print("tqdm" in sys.modules)
+    ''')
+    env = {"PYTHONPATH": ":".join(str(root / p) for p in
+                                  ("src", "packages/unicor/src", "packages/todcor/src"))}
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         env={**__import__("os").environ, **env})
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip().endswith("False")
+
+
+def test_progress_true_without_tqdm_explains_how_to_install(monkeypatch):
+    import sys
+    from sparta.observations import _progress
+    monkeypatch.setitem(sys.modules, "tqdm", None)   # makes `import tqdm` fail
+    assert _progress([1, 2], False) == [1, 2]
+    with pytest.raises(ImportError, match=r"SPARTA\[progress\]"):
+        _progress([1, 2], True)

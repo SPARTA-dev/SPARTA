@@ -220,6 +220,10 @@ Keys of `results_frequency` / `results_power`:
   pixel is kept (off-by-one fixed). `interpolate` raises a clear error for an
   empty order. Effect on the bundled NRES TOI-677 data: RV scatter 82 -> 75
   m/s, median eRV 26 -> 24 m/s.
+- tqdm is no longer a required dependency and progress bars are off by
+  default. `Observations.preprocess`, `calc_rv_against_template` and
+  `calc_rv_against_two_templates` take `progress=False`; `progress=True`
+  needs the optional extra (`pip install "SPARTA[progress]"`).
 - `Observations` reads files in sorted order, so the epoch order no longer
   depends on the filesystem.
 

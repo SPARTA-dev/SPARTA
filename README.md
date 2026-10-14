@@ -202,7 +202,7 @@ object layer on top of them.
 | --- | --- | --- |
 | [UNICOR engine](https://github.com/SPARTA-dev/SPARTA/blob/master/packages/unicor/README.md) (`sparta-unicor`) | `unicor` | numpy, scipy |
 | [TODCOR engine](https://github.com/SPARTA-dev/SPARTA/blob/master/packages/todcor/README.md) (`sparta-todcor`) | `todcor` | numpy, `unicor` |
-| SPARTA (`SPARTA`) | `sparta` | both engines, astropy, specutils, matplotlib, tqdm |
+| SPARTA (`SPARTA`) | `sparta` | both engines, astropy, specutils, matplotlib (optional: tqdm for progress bars, `SPARTA[progress]`) |
 
 The `sparta` classes are importable from the top level
 (`from sparta import Observations, Template`):

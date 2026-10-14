@@ -26,12 +26,13 @@ dependencies = [
     "astropy>=6.0",
     "specutils>=2.0",
     "matplotlib>=3.6",
-    "tqdm",
 ]
 
 [project.optional-dependencies]
 # nbclient + ipykernel run the example notebooks (tests/test_notebooks.py, -m slow).
 test = ["pytest", "nbclient", "ipykernel"]
+# Optional progress bars (Observations methods take progress=True).
+progress = ["tqdm"]
 
 [project.urls]
 Source = "https://github.com/SPARTA-dev/SPARTA"

@@ -36,7 +36,6 @@ from sparta.periodogram import PeriodicityDetector
 from sparta.ccf1d import CCF1d
 from sparta.ccf2d import CCF2d
 from sparta.tiravel import TIRAVEL
-from tqdm import tqdm
 
 class Observations:
     '''
@@ -277,7 +276,7 @@ class Observations:
 # =============================================================================
     def preprocess(self, n_trim=10, clean_margins=True, remove_nans=True,
                    delta=0.5, cosmic_sigma=3, filter_lowcut=3, filter_highcut=0.15,
-                   alpha=0.3):
+                   alpha=0.3, progress=False):
         '''
         Apply ``Spectrum.preprocess`` to every epoch, in place.
 
@@ -286,18 +285,19 @@ class Observations:
         n_trim, clean_margins, remove_nans, delta, cosmic_sigma, filter_lowcut, filter_highcut, alpha
             Passed through; see ``Spectrum.preprocess``. The per-instrument
             recommendations are in docs/instruments.md.
+        progress : bool
+            Show a tqdm progress bar over the epochs. Off by default; needs the
+            optional ``tqdm`` package (``pip install "SPARTA[progress]"``).
 
         Returns
         -------
         Observations
             self.
         '''
-        with tqdm(total=self.sample_size) as pbar:
-            for s in self.spec_list:
-                s.preprocess(n_trim=n_trim, clean_margins=clean_margins, remove_nans=remove_nans,
-                             delta=delta, cosmic_sigma=cosmic_sigma, filter_lowcut=filter_lowcut,
-                             filter_highcut=filter_highcut, alpha=alpha)
-                pbar.update(1)
+        for s in _progress(self.spec_list, progress):
+            s.preprocess(n_trim=n_trim, clean_margins=clean_margins, remove_nans=remove_nans,
+                         delta=delta, cosmic_sigma=cosmic_sigma, filter_lowcut=filter_lowcut,
+                         filter_highcut=filter_highcut, alpha=alpha)
 
         return self
 
@@ -358,7 +358,7 @@ class Observations:
 # =============================================================================
     def calc_rv_against_template(self, template, dv=0.1, vel_bound=150,
                                  errors_per_order=False, combine_ccfs=True,
-                                 velocity_convention='cz'):
+                                 velocity_convention='cz', progress=False):
         '''
         Single-lined (SB1) radial velocities of every epoch, by UNICOR.
 
@@ -381,6 +381,9 @@ class Observations:
             the combined CCF. If False, make only the per-order measurements.
         velocity_convention : {'cz', 'relativistic'}
             Doppler convention of the RVs (see ``CCF1d.cross_correlate``).
+        progress : bool
+            Show a tqdm progress bar over the epochs. Off by default; needs the
+            optional ``tqdm`` package (``pip install "SPARTA[progress]"``).
 
         Returns
         -------
@@ -407,7 +410,7 @@ class Observations:
         spectra = self._spectra('RV calculation')
 
         ccfs = []
-        for spec in tqdm(spectra):
+        for spec in _progress(spectra, progress):
             ccf = CCF1d().cross_correlate(spec, template,
                                           dv=dv,
                                           vel_bound=vel_bound,
@@ -439,7 +442,8 @@ class Observations:
 # =============================================================================
     def calc_rv_against_two_templates(self, template1, template2, dv=0.1,
                                       vel_bound=150, dvel=None, sigma=None,
-                                      nonneg=True, velocity_convention='cz', **kwargs):
+                                      nonneg=True, velocity_convention='cz', progress=False,
+                                      **kwargs):
         '''
         Double-lined (SB2) radial velocities of every epoch, by TODCOR.
 
@@ -471,6 +475,9 @@ class Observations:
             Constrain both amplitudes to be non-negative.
         velocity_convention : {'cz', 'relativistic'}
             Doppler convention of the RVs (see ``CCF2d.cross_correlate``).
+        progress : bool
+            Show a tqdm progress bar over the epochs. Off by default; needs the
+            optional ``tqdm`` package (``pip install "SPARTA[progress]"``).
         **kwargs
             Passed to ``CCF2d.cross_correlate`` (e.g. ``alpha``,
             ``zeta_max``, ``orders``); ``keep_windows`` defaults to False
@@ -495,7 +502,7 @@ class Observations:
                                         nonneg=nonneg,
                                         velocity_convention=velocity_convention,
                                         **kwargs)
-                for spec in tqdm(spectra)]
+                for spec in _progress(spectra, progress)]
 
         fields = ('RV1', 'RV2', 'eRV1', 'eRV2', 'a1_best', 'a2_best')
         vels1, vels2, evels1, evels2, amps1, amps2 = (
@@ -733,3 +740,36 @@ class Observations:
         ts.size = self.sample_size
         self.spec_list = ts.vals
         self.time_list = ts.times
+
+
+def _progress(iterable, enabled):
+    '''
+    Wrap an iterable in a tqdm progress bar if asked; otherwise return it as is.
+
+    tqdm is an optional dependency, imported only when a bar is requested.
+
+    Parameters
+    ----------
+    iterable : iterable
+        The epochs to loop over.
+    enabled : bool
+        Whether to show the progress bar.
+
+    Returns
+    -------
+    iterable
+        ``iterable`` itself, or a tqdm wrapper around it.
+
+    Raises
+    ------
+    ImportError
+        If ``enabled`` and tqdm is not installed.
+    '''
+    if not enabled:
+        return iterable
+    try:
+        from tqdm import tqdm
+    except ImportError as err:
+        raise ImportError('progress=True needs the optional tqdm package: '
+                          'pip install "SPARTA[progress]"') from err
+    return tqdm(iterable)
