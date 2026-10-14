@@ -452,20 +452,16 @@ class ReadSpec:
     # =============================================================================
     # =============================================================================
     def _load_kek(self, hdul_sp, min_wv, max_wv):
+        '''
+        KEK loader placeholder: the reader was never completed (it set no
+        flux, wavelength or observation date).
 
-        self.n_orders = 1
-
-
-
-
-
-        s = hdul_sp[0].data
-
-        x = hdul_sp[0].header["CRVAL1"]
-
-        d = hdul_sp[0].header["CDELT1"]
-
-        w = np.arange(x, x + d * (len(s)), d)[:-1]
+        :raises NotImplementedError: always.
+        '''
+        raise NotImplementedError(
+            "The KEK FITS loader is not implemented: it never set the flux, "
+            "wavelengths or observation date. Convert the data to a supported "
+            "format or implement ReadSpec._load_kek.")
 
     # =============================================================================
     # =============================================================================

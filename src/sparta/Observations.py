@@ -28,7 +28,7 @@
 # 7) clean_time_series - enables systematically removing observation data.
 #
 #
-# Dependencies: os, sys, tqdm, numpy and matplotlib.
+# Dependencies: os, contextlib, tqdm and numpy.
 # Last update: Sahar Shahaf, 20220327.
 
 import os
@@ -38,7 +38,6 @@ from sparta.UNICOR.Spectrum import Spectrum
 from sparta.Auxil.ReadSpec import ReadSpec
 from sparta.Auxil.TimeSeries import TimeSeries
 from sparta.Auxil.PeriodicityDetector import PeriodicityDetector
-import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 class Observations:
@@ -326,85 +325,71 @@ class Observations:
 
 # =============================================================================
 # =============================================================================
-    def clean_time_series(self, max_vel=[], min_vel=[], max_time=[], nan_flag=True, sample_rate=1):
+    def clean_time_series(self, max_vel=None, min_vel=None, max_time=None, nan_flag=True, sample_rate=1):
         """
-        This functions enables systematically removing observations, according to either min or max values, max time,
-        nan values or sampling rate.
+        Systematically remove observations by sampling rate, RV value or time.
+
+        One boolean epoch mask is built from all the criteria and applied to
+        every per-epoch array the object holds (the TimeSeries times, values,
+        RVs and errors; time_list, spec_list, vrad_list, bcv, snr, air_mass;
+        and any computed RV products such as vels/evels/ccf_list).
+
+        :param max_vel: float or None, keep epochs with RV <= max_vel (km/s).
+        :param min_vel: float or None, keep epochs with RV >= min_vel (km/s).
+        :param max_time: float or None, keep epochs with time <= max_time (days).
+        :param nan_flag: bool, drop epochs whose RV is NaN. Ignored when no RVs
+                         are stored in time_series.calculated_vrad_list.
+        :param sample_rate: nonzero int; k > 0 keeps every k-th epoch, k < 0
+                            drops every |k|-th epoch.
+        :raises ValueError: for sample_rate=0, for an RV cut with no stored RVs,
+                            or when a per-epoch array has the wrong length.
         """
+        ts = self.time_series
+        n = len(ts.times)
+        index = np.arange(n)
 
-        self.air_mass = self.time_list
+        if sample_rate == 0:
+            raise ValueError("sample_rate must be a nonzero integer.")
+        keep = (index % sample_rate == 0) if sample_rate > 0 else (index % abs(sample_rate) != 0)
 
-        if sample_rate != 1:
-            ok_index = []
-            for i in range(len(self.time_series.times)):
-                if sample_rate > 0 :
-                    if i % sample_rate == 0:
-                        ok_index.append(True)
-                    else:
-                        ok_index.append(False)
-                elif sample_rate < 0:
-                    if i % abs(sample_rate) == 0:
-                        ok_index.append(False)
-                    else:
-                        ok_index.append(True)
-            ok_index = np.where(ok_index)[0]
-            self.time_series.times = [self.time_series.times[i] for i in ok_index]
-            self.time_series.vals = [self.time_series.vals[i] for i in ok_index]
-            self.time_series.calculated_vrad_list = [self.time_series.calculated_vrad_list[i] for i in
-                                                     ok_index]
-            self.air_mass = [self.air_mass[i] for i in ok_index]
+        vrads = np.asarray(ts.calculated_vrad_list, float)
+        has_rvs = vrads.size > 0
+        if (max_vel is not None or min_vel is not None) and not has_rvs:
+            raise ValueError("A velocity cut needs RVs in time_series.calculated_vrad_list, which is empty.")
+        if has_rvs and (nan_flag or max_vel is not None or min_vel is not None):
+            if vrads.shape != (n,):
+                raise ValueError(f"time_series.calculated_vrad_list has shape {vrads.shape}; "
+                                 f"expected one RV per epoch ({n},).")
+            if nan_flag:
+                keep &= ~np.isnan(vrads)
+            # NaN RVs fail both comparisons, so they drop out of a cut regardless.
+            if max_vel is not None:
+                keep &= vrads <= max_vel
+            if min_vel is not None:
+                keep &= vrads >= min_vel
 
+        if max_time is not None:
+            keep &= np.asarray(ts.times, float) <= max_time
 
-        if nan_flag:
-            ok_index = np.where(~np.isnan(self.time_series.calculated_vrad_list))[0]
-            self.time_series.times = [self.time_series.times[i] for i in ok_index]
-            self.time_series.vals = [self.time_series.vals[i] for i in ok_index]
-            self.time_series.calculated_vrad_list = [self.time_series.calculated_vrad_list[i] for i in ok_index]
-            self.air_mass = [self.air_mass[i] for i in ok_index]
+        for owner, names in ((ts, ('times', 'vals', 'calculated_vrad_list', 'errors',
+                                   'calculated_ccf_peaks')),
+                             (self, ('vrad_list', 'bcv', 'snr', 'air_mass',
+                                     'ccf_list', 'vels', 'evels', 'ccf_peaks',
+                                     'ccf2d_list', 'vels1', 'vels2', 'evels1', 'evels2',
+                                     'amps1', 'amps2', 'BIS', 'eBIS'))):
+            for name in names:
+                seq = getattr(owner, name, None)
+                if seq is None or len(seq) == 0:
+                    continue
+                if len(seq) != n:
+                    raise ValueError(f"{name} has {len(seq)} entries but the time series has "
+                                     f"{n} epochs; cannot filter it consistently.")
+                if isinstance(seq, np.ndarray):
+                    setattr(owner, name, seq[keep])
+                else:
+                    setattr(owner, name, [x for x, k in zip(seq, keep) if k])
 
-        if max_vel:
-
-            ok_index = [i for i, x in enumerate(self.time_series.calculated_vrad_list) if x <= max_vel]
-            self.time_series.times = [self.time_series.times[i] for i in ok_index]
-            self.time_series.vals = [self.time_series.vals[i] for i in ok_index]
-            self.time_series.calculated_vrad_list = [self.time_series.calculated_vrad_list[i] for i in ok_index]
-            self.air_mass = [self.air_mass[i] for i in ok_index]
-
-        if min_vel:
-
-            ok_index = [i for i, x in enumerate(self.time_series.calculated_vrad_list) if x >= min_vel]
-            self.time_series.times = [self.time_series.times[i] for i in ok_index]
-            self.time_series.vals = [self.time_series.vals[i] for i in ok_index]
-            self.time_series.calculated_vrad_list = [self.time_series.calculated_vrad_list[i] for i in ok_index]
-            self.air_mass = [self.air_mass[i] for i in ok_index]
-
-        if max_time:
-
-            ok_index = [i for i, x in enumerate(self.time_series.times) if x <= max_time]
-            self.time_series.times = [self.time_series.times[i] for i in ok_index]
-            self.time_series.vals = [self.time_series.vals[i] for i in ok_index]
-            self.time_series.calculated_vrad_list = [self.time_series.calculated_vrad_list[i] for i in ok_index]
-            self.air_mass = [self.air_mass[i] for i in ok_index]
-
-
-        self.sample_size = len(self.time_series.vals)
-        self.time_series.size = self.sample_size
-        self.spec_list = self.time_series.vals
-
-
-if __name__ == '__main__':
-    '''
-    An examploratory code showing reading of an APOGEE observation directory,
-    creating GLS and USURPER periodograms for it and plotting them.
-    '''
-
-    obs_data = Observations(survey="APOGEE")
-
-    obs_data.initialize_periodicity_detector(freq_range=(0, 1), periodogram_grid_resolution=10_000)
-
-    obs_data.periodicity_detector.run_USURPER_process(calc_biased_flag=False, calc_unbiased_flag=True)
-    obs_data.periodicity_detector.run_GLS_process()
-
-    obs_data.periodicity_detector.periodogram_plots()
-
-    plt.show()
+        self.sample_size = len(ts.times)
+        ts.size = self.sample_size
+        self.spec_list = ts.vals
+        self.time_list = ts.times

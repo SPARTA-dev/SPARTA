@@ -76,3 +76,78 @@ def test_unbiased_u_centering_golden():
                          [1/3, 1/3, 0., -2/3],
                          [1/3, 1/3, -2/3, 0.]])
     np.testing.assert_allclose(unbiased_u_centering(m, 4), expected, atol=1e-12)
+
+
+# --- input validation (audited bug fixes) -----------------------------------
+
+@pytest.mark.parametrize("n", [2, 3])
+def test_unbiased_pdc_rejects_n_le_3(n):
+    # U-centering's 1/(n(n-3)) and /(n-2) factors are singular for n <= 3:
+    # n=2 used to give NaN power, n=3 rounding noise.
+    ts = TimeSeries(size=n, times=TIMES[:n], vals=VALS[:n])
+    det = PeriodicityDetector(time_series=ts, freq_range=(0.05, 1.0),
+                              periodogram_grid_resolution=20)
+    with pytest.raises(ValueError, match="n <= 3"):
+        det.calc_PDC(calc_unbiased_flag=True)
+
+
+def test_unbiased_u_centering_rejects_n_le_3():
+    with pytest.raises(ValueError, match="n <= 3"):
+        unbiased_u_centering(np.zeros((3, 3)), 3)
+
+
+@pytest.mark.parametrize("f_min", [0.0, -0.1])
+def test_frequency_grid_must_exclude_zero(f_min):
+    ts = TimeSeries(size=len(TIMES), times=list(TIMES), vals=list(VALS))
+    with pytest.raises(ValueError, match="1/day"):
+        PeriodicityDetector(time_series=ts, freq_range=(f_min, 1.0),
+                            periodogram_grid_resolution=20)
+
+
+def test_frequency_grid_must_be_increasing():
+    ts = TimeSeries(size=len(TIMES), times=list(TIMES), vals=list(VALS))
+    with pytest.raises(ValueError, match="freq_range"):
+        PeriodicityDetector(time_series=ts, freq_range=(1.0, 0.5),
+                            periodogram_grid_resolution=20)
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"freq_range": (0.05, 1.0)},
+                                    {"periodogram_grid_resolution": 20}])
+def test_detector_requires_frequency_grid(kwargs):
+    ts = TimeSeries(size=len(TIMES), times=list(TIMES), vals=list(VALS))
+    with pytest.raises(TypeError, match="freq_range"):
+        PeriodicityDetector(time_series=ts, **kwargs)
+
+
+def test_pdc_accepts_float32_values():
+    vals32 = list(np.asarray(VALS, dtype=np.float32))
+    ts = TimeSeries(size=len(TIMES), times=list(TIMES), vals=vals32)
+    det = PeriodicityDetector(time_series=ts, freq_range=(0.05, 1.0),
+                              periodogram_grid_resolution=20)
+    det.calc_PDC(calc_unbiased_flag=True)
+    power = np.asarray(det.results_power["PDC_unbiased"])
+    np.testing.assert_allclose(power, GOLDEN_POWER, atol=1e-5)
+
+
+def test_gls_accepts_integer_values():
+    ivals = [int(round(10 * v)) for v in VALS]
+    ts = TimeSeries(size=len(TIMES), times=list(TIMES), vals=ivals)
+    det = PeriodicityDetector(time_series=ts, freq_range=(0.05, 1.0),
+                              periodogram_grid_resolution=20)
+    _, power = det.calc_GLS()
+    assert np.all(np.isfinite(power))
+
+
+def test_timeseries_rejects_spectrum_ops_on_float32_scalars():
+    ts = TimeSeries(times=[0.0, 1.0], vals=[np.float32(1.0), np.float32(2.0)])
+    with pytest.raises(ValueError, match="spectrum time-series only"):
+        ts.calc_rv_against_template(ts.vals, template=None)
+
+
+def test_timeseries_size_must_match_times():
+    with pytest.raises(ValueError, match="size"):
+        TimeSeries(size=5, times=list(TIMES), vals=list(VALS))
+
+
+def test_timeseries_size_defaults_to_len_times():
+    assert TimeSeries(times=list(TIMES), vals=list(VALS)).size == len(TIMES)

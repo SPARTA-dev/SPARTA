@@ -14,7 +14,7 @@
 #   calc_pdc_distance_matrix - build and U-center the value/phase distance matrices.
 #
 # Spectrum helpers (USuRPER; single-order):
-#   get_wv_grid, resample_spec_to_common_grid, _gram.
+#   _single_order_arrays, get_wv_grid, resample_spec_to_common_grid, _gram.
 #
 # Conventions: times in days, frequency in 1/day. U-centering uses 1/(n(n-3))
 # and /(n-2), /(n-1) factors -- singular for n <= 3. The pairwise distance
@@ -59,7 +59,14 @@ def unbiased_u_centering(a, n):
     :param a: distance matrix (numpy nXn array)
     :param n: integer (length of a...)
     :return: U-centered distance matrix (unbiased; zero diagonal)
+    :raises ValueError: for n <= 3, where the /(n-2) factor here and the
+                        1/(n(n-3)) of the U-centered inner product are singular
+                        or negative.
     '''
+    if n <= 3:
+        raise ValueError(
+            f"The unbiased (U-centered) PDC needs at least 4 epochs; got n = {n}. "
+            "Its 1/(n(n-3)) and /(n-2) factors are singular or negative for n <= 3.")
     a = np.asarray(a, float)
     row_sum = a.sum(axis=1) / (n - 2)
     col_sum = a.sum(axis=0) / (n - 2)
@@ -169,13 +176,20 @@ def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbias
         c = np.zeros((n, n))
 
         if periodicity_detector.method == 'USURPER':
-            sp_matrix =  resample_spec_to_common_grid(periodicity_detector.time_series.vals, factor=1)
+            waves, fluxes = _single_order_arrays(periodicity_detector.time_series.vals)
+            sp_matrix = resample_spec_to_common_grid(waves, fluxes, factor=1)
 
         if (periodicity_detector.method.split('_')[0] == "shift") or (periodicity_detector.method.split('_')[0] == "shape"):
-            for i, s in enumerate(periodicity_detector.time_series.vals):
-                vel_tmp = periodicity_detector.time_series.calculated_vrad_list[i]
-                periodicity_detector.time_series.vals[i].wv[0] = dsp.doppler_shift_wave(s.wv[0], -vel_tmp)
-            sp_matrix =  resample_spec_to_common_grid(periodicity_detector.time_series.vals, factor=1)
+            # Shift copies to rest: writing back into the caller's spectra made
+            # every repeated call shift again and drift the periodogram.
+            waves, fluxes = _single_order_arrays(periodicity_detector.time_series.vals)
+            vrads = periodicity_detector.time_series.calculated_vrad_list
+            if len(vrads) != len(waves):
+                raise ValueError(
+                    f"The partial periodogram needs one RV (km/s) per epoch in "
+                    f"time_series.calculated_vrad_list; got {len(vrads)} for {len(waves)} epochs.")
+            waves =[dsp.doppler_shift_wave(w, -v) for w, v in zip(waves, vrads)]
+            sp_matrix = resample_spec_to_common_grid(waves, fluxes, factor=1)
 
         method = periodicity_detector.method
         vals = periodicity_detector.time_series.vals
@@ -257,40 +271,74 @@ def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbias
 
 # =============================================================================
 # =============================================================================
-def get_wv_grid(sp_list, factor):
+def _single_order_arrays(sp_list):
     '''
-    This is only for 1d spectra
-    Does not support orders for now
-    (USuRPER in general does not support multioprder).
+    The wavelength and flux arrays of single-order spectra, validated for the
+    common-grid resampling.
+
+    :param sp_list: list of Spectrum-like objects (``.wv``/``.sp`` lists of
+                    per-order arrays); wavelengths in Angstrom.
+    :return: (waves, fluxes) -- lists of 1-D float arrays, one per spectrum.
+    :raises ValueError: if a spectrum has more than one order, or its
+                        wavelengths are not strictly increasing.
     '''
-
-    min_wv = np.array([-1.0])
-    max_wv = np.array([1000000.0])
-    delta_wv = np.median(np.diff(sp_list[0].wv))
-
-    for s in sp_list:
-      mintmp = np.min(s.wv[0])
-      maxtmp = np.max(s.wv[0])
-      diftmp = np.median(np.diff(s.wv[0]))
-
-      if mintmp > min_wv:
-          min_wv = mintmp
-      if maxtmp < max_wv:
-          max_wv = maxtmp
-      if diftmp < delta_wv:
-          delta_wv = diftmp
-
-    return np.arange(start=min_wv, stop=max_wv, step=delta_wv*factor)
-
-
-# =============================================================================
-# =============================================================================
-
-def resample_spec_to_common_grid(sp_list, factor):
-    wv_grid   = get_wv_grid(sp_list, factor)
-    sp_matrix = np.zeros((len(wv_grid), len(sp_list)))
+    waves, fluxes = [], []
     for i, s in enumerate(sp_list):
-        sp_tmp = dsp.resample(s.wv[0], s.sp[0], wv_grid)
-        sp_matrix[:, i] = dsp.normalize(sp_tmp)
-    return sp_matrix
+        if len(s.wv) != 1:
+            raise ValueError(
+                f"Spectrum {i} has {len(s.wv)} orders, but USuRPER and the partial "
+                "periodograms use a single order. Select one first (e.g. "
+                "Observations.SelectOrders).")
+        w = np.asarray(s.wv[0], float)
+        if not np.all(np.diff(w) > 0):
+            raise ValueError(
+                f"Spectrum {i}: wavelengths must be strictly increasing for the "
+                "common-grid resampling.")
+        waves.append(w)
+        fluxes.append(s.sp[0])
+    return waves, fluxes
 
+
+# =============================================================================
+# =============================================================================
+def get_wv_grid(waves, factor):
+    '''
+    The uniform wavelength grid common to all spectra: their overlap, sampled at
+    the finest median pixel step.
+
+    :param waves: list of 1-D increasing wavelength arrays (Angstrom).
+    :param factor: float, multiplies the grid step.
+    :return: 1-D wavelength grid (Angstrom).
+    :raises ValueError: if the spectra do not overlap (fewer than two common
+                        grid points).
+    '''
+    min_wv = np.max([np.min(w) for w in waves])
+    max_wv = np.min([np.max(w) for w in waves])
+    delta_wv = np.min([np.median(np.diff(w)) for w in waves])
+
+    grid = np.arange(start=min_wv, stop=max_wv, step=delta_wv*factor)
+    if len(grid) < 2:
+        raise ValueError(
+            f"The spectra do not overlap in wavelength (common range "
+            f"{min_wv:.4f}-{max_wv:.4f} Angstrom); no common grid to resample onto.")
+    return grid
+
+
+# =============================================================================
+# =============================================================================
+
+def resample_spec_to_common_grid(waves, fluxes, factor):
+    '''
+    Resample spectra onto their common grid and normalize each one.
+
+    :param waves: list of 1-D increasing wavelength arrays (Angstrom).
+    :param fluxes: list of the matching 1-D flux arrays.
+    :param factor: float, multiplies the common-grid step (see get_wv_grid).
+    :return: (n_grid x n_spectra) array; each column mean-subtracted and
+             L2-normalized.
+    '''
+    wv_grid   = get_wv_grid(waves, factor)
+    sp_matrix = np.zeros((len(wv_grid), len(waves)))
+    for i, (w, f) in enumerate(zip(waves, fluxes)):
+        sp_matrix[:, i] = dsp.normalize(dsp.resample(w, f, wv_grid))
+    return sp_matrix

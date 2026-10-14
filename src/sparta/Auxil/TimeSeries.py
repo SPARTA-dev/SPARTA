@@ -26,6 +26,7 @@
 from sparta.UNICOR.CCF1d import CCF1d
 from sparta.TODCOR.CCF2d import CCF2d
 from sparta.TIRAVEL.TIRAVEL import TIRAVEL
+from sparta.Auxil.PeriodicityDetector import _is_numeric_scalar
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -41,13 +42,17 @@ class TimeSeries:
                with its keyword. Below appears a list of the possible input
                variables.
 
-              size: integer, number of data points.
-              times: float list, observation times
+              size: integer, number of data points. Optional: derived from
+                    len(times); a ValueError is raised if it disagrees.
+              times: float list, observation times (days)
               vals: list, observation values
         '''
-        self.size = kwargs['size']
         self.times = kwargs['times']
         self.vals = kwargs['vals']
+        self.size = kwargs.get('size', len(self.times))
+        if self.size != len(self.times):
+            raise ValueError(f"size={self.size} disagrees with len(times)={len(self.times)}; "
+                             "omit size to derive it from times.")
 
         if 'calculated_vrad_list' in kwargs:
             self.calculated_vrad_list = kwargs['calculated_vrad_list']
@@ -81,7 +86,7 @@ class TimeSeries:
         :return: ccfs - A list of CCF1d objects, one for each observation.
 
         '''
-        if isinstance(spec_list[0], float):
+        if _is_numeric_scalar(spec_list[0]):
             raise ValueError('RV calculation is available for spectrum time-series only')
 
         calculated_vrad_list = []
@@ -130,7 +135,7 @@ class TimeSeries:
 
         :return: ccfs - a list of CCF2d objects, one per observation.
         '''
-        if isinstance(spec_list[0], float):
+        if _is_numeric_scalar(spec_list[0]):
             raise ValueError('RV calculation is available for spectrum time-series only')
 
         kwargs.setdefault('keep_windows', False)
@@ -190,7 +195,7 @@ class TimeSeries:
         '''
         This function plots the time series.
         '''
-        if not isinstance(self.vals[0], float):
+        if not _is_numeric_scalar(self.vals[0]):
             raise ValueError('plot_velocities is available for scalar values time-series only')
 
         fig, axs = plt.subplots(2, figsize=figsize)
@@ -235,7 +240,7 @@ class TimeSeries:
         :return: a TIRAVEL object, carrying .template (a Template), .rho (the
                  alignment measure), .weights, .correlation and .diagnostics.
         '''
-        if isinstance(spec_list[0], float):
+        if _is_numeric_scalar(spec_list[0]):
             raise ValueError('TIRAVEL is available for spectrum time-series only')
 
         return TIRAVEL().BuildTemplate(spec_list, velocities, **kwargs)
