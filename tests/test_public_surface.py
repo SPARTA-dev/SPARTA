@@ -26,7 +26,7 @@ _PATH = os.pathsep.join(str(ROOT / p) for p in ("src", "packages/unicor/src",
                                                   "packages/todcor/src"))
 
 ALL = ["Spectrum", "Template", "Observations", "TimeSeries", "CCF1d", "CCF2d",
-       "TIRAVEL", "PeriodicityDetector", "instruments"]
+       "TIRAVEL", "PeriodicityDetector", "instruments", "plotting"]
 
 # name -> "class <module>.<qualname>" or "module <name>"
 TOP_LEVEL = {
@@ -44,6 +44,7 @@ TOP_LEVEL = {
     "observations": "module sparta.observations",
     "pdc": "module sparta.pdc",
     "periodogram": "module sparta.periodogram",
+    "plotting": "module sparta.plotting",
     "spectrum": "module sparta.spectrum",
     "template": "module sparta.template",
     "timeseries": "module sparta.timeseries",
@@ -70,6 +71,11 @@ DEEP = {
                    "scalar_distance_matrix", "spectral_distance_matrix",
                    "unbiased_u_centering"],
     "sparta.observations": ["Observations"],
+    "sparta.plotting": ["CONTOUR_INNER_LW", "CONTOUR_LW", "DATA_COLOR", "EXTRA_COLOR", "GREY",
+                        "MODEL_COLOR", "SIGMA_LEVELS", "STYLE", "apply_style", "contour_map",
+                        "dlnl_legend_entries", "dlnl_levels", "dlnl_linewidths", "mark_fit",
+                        "mark_truth", "plot_curve", "plot_data", "plot_extra", "plot_model",
+                        "plot_points"],
     "sparta.instruments": ["Component", "Instrument", "LoadedSpectrum", "MODULES", "Product",
                            "REGISTRY", "Recommended", "Simulation", "Truth", "get",
                            "render_markdown"],
@@ -144,7 +150,7 @@ METHODS = {
         "select_orders": ["orders", "remove"],
     },
     "TimeSeries": {
-        "plot_velocities": ["figsize", "sty"],
+        "plot_velocities": ["figsize"],
     },
     "PeriodicityDetector": {
         "calc_gls": [],

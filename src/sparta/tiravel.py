@@ -21,6 +21,7 @@ from copy import deepcopy
 import numpy as np
 import matplotlib.pyplot as plt
 
+from sparta import plotting as sp_plot
 from sparta.tiravel_ops import (
     align_spectra, alignment, coadd, common_grid, correlation_matrix,
     normalize_rows,
@@ -189,7 +190,7 @@ class TIRAVEL:
     # =============================================================================
     def plot_weights(self, times=None, figsize=(7, 3.5)):
         '''
-        Plot the per-epoch co-addition weights.
+        Plot the per-epoch co-addition weights, as black stems.
 
         A near-uniform set means every epoch contributes; a few dominant weights
         mean the template rests on a handful of spectra, which ``n_eff`` in
@@ -210,11 +211,13 @@ class TIRAVEL:
         '''
         x = np.arange(len(self.weights)) if times is None else np.asarray(times)
 
-        fig, ax = plt.subplots(figsize=figsize)
-        ax.stem(x, self.weights, basefmt=' ')
-        ax.axhline(0.0, color='k', lw=0.6)
-        ax.set_xlabel('epoch' if times is None else 'time [d]')
-        ax.set_ylabel('co-addition weight')
+        fig, ax = plt.subplots(figsize=figsize, layout='constrained')
+        markers, stems, _ = ax.stem(x, self.weights, basefmt=' ')
+        markers.set(color=sp_plot.DATA_COLOR, markersize=3.5)
+        stems.set(color=sp_plot.DATA_COLOR, linewidth=0.8)
+        ax.axhline(0.0, color=sp_plot.GREY, lw=0.6)
+        ax.set_xlabel('Epoch' if times is None else 'Time (days)')
+        ax.set_ylabel('Co-addition weight')
         ax.set_title(rf'$\rho$ = {self.rho:.4f},  '
                      rf'$n_{{\rm eff}}$ = {self.diagnostics["n_eff"]:.1f}'
                      rf' of {len(self.weights)}')
@@ -227,6 +230,9 @@ class TIRAVEL:
         '''
         Plot the co-added template over the aligned epochs that made it.
 
+        The epochs are data (black, mid-centred steps, faint); the template is
+        the model (red line), as in ``sparta.plotting``.
+
         Parameters
         ----------
         order : int
@@ -234,7 +240,7 @@ class TIRAVEL:
         show_epochs : bool
             Underlay the individual aligned spectra.
         alpha : float
-            Transparency of the individual epochs.
+            Opacity of the individual epochs.
         figsize : (float, float)
             Figure size (inches).
 
@@ -252,13 +258,13 @@ class TIRAVEL:
                              'build_template with keep_aligned=True')
 
         grid = self.grids[order]
-        fig, ax = plt.subplots(figsize=figsize)
+        fig, ax = plt.subplots(figsize=figsize, layout='constrained')
         if show_epochs:
-            for row in self.aligned[order]:
-                ax.plot(grid, row, 'k', lw=0.5, alpha=alpha)
-        ax.plot(grid, self.template.model.sp[order], 'C3', lw=1.2,
-                label='TIRAVEL template')
-        ax.set_xlabel(r'rest-frame wavelength [$\AA$]')
-        ax.set_ylabel('normalized flux')
+            for k, row in enumerate(self.aligned[order]):
+                sp_plot.plot_data(ax, grid, row, lw=0.5, alpha=alpha,
+                                  label='aligned epochs' if k == 0 else None)
+        sp_plot.plot_model(ax, grid, self.template.model.sp[order], label='TIRAVEL template')
+        ax.set_xlabel(r'Rest-frame wavelength ($\AA$)')
+        ax.set_ylabel('Normalized flux')
         ax.legend(loc='lower right')
         return fig

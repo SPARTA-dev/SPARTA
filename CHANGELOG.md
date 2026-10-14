@@ -165,8 +165,9 @@ caller used `add_noise(-1)`, which returned the model flux unchanged.
 | `calc_USURPER(...)` | `calc_usurper(...)` |
 | `calc_GLS()` | `calc_gls()` |
 
-`calc_partial_periodogram`, `calc_pdc_pval`, `plot_periodograms` and
-`TimeSeries.plot_velocities` are unchanged.
+`calc_partial_periodogram`, `calc_pdc_pval` and `plot_periodograms` keep
+their names and parameters; `TimeSeries.plot_velocities` loses `sty` (see
+the plot style under Other changes).
 
 ### Periodogram result keys
 
@@ -226,6 +227,19 @@ Keys of `results_frequency` / `results_power`:
   needs the optional extra (`pip install "SPARTA[progress]"`).
 - `Observations` reads files in sorted order, so the epoch order no longer
   depends on the filesystem.
+- One plot style for every figure, in the new `sparta.plotting` module
+  (exported): data as thin black mid-centred steps (`plot_data`), scattered
+  epochs as black points with error bars (`plot_points`), models red
+  (`plot_model`), one extra series blue (`plot_extra`), derived curves such as
+  CCFs and periodograms black lines (`plot_curve`), maps as black unfilled
+  contours of Delta lnL at -0.5, -2, -4.5, -10, -30, ... (`contour_map`,
+  `dlnl_levels`), best fit a red `+`, truth a blue `x`; `apply_style()` sets
+  the matching rcParams. `CCF2d.plot` draws no colour map or colour bar any
+  more: `levels` is now a sequence of Delta lnL values (default
+  `dlnl_levels`), not a number of filled levels. `TimeSeries.plot_velocities`
+  loses `sty` and returns the figure instead of showing it;
+  `plot_periodograms` returns the figure. All the example notebooks use the
+  style.
 
 ### Documentation
 

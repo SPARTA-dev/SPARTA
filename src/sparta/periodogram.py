@@ -21,6 +21,7 @@ from astropy.timeseries import LombScargle
 from scipy.stats.distributions import chi2
 from unicor import dsp
 from sparta import pdc
+from sparta import plotting as sp_plot
 from sparta.timeseries import is_numeric_scalar
 
 
@@ -334,11 +335,18 @@ class PeriodicityDetector:
         '''
         Plot the calculated periodograms, one panel each.
 
+        A periodogram is a derived curve on the chosen frequency grid, drawn
+        as a black line; the known periods (``period_truth``) are blue dashed
+        vertical lines (blue is the truth throughout ``sparta.plotting``) and
+        the p-value levels grey lines of different styles.
+
         Parameters
         ----------
         plot_vals : bool
-            Add a panel of the scalar values (or stored RVs, km/s) against
-            time (days), folded at ``period_truth[0]`` when that is set.
+            Add a panel of the scalar values (or stored RVs, km/s) as black
+            points, with error bars when ``time_series.errors`` holds one per
+            epoch, against time (days) -- or against phase when
+            ``period_truth`` is set, folded at ``period_truth[0]``.
         annotate_pval : iterable of float, optional
             p-values whose power levels (``calc_pdc_pval``) are drawn on the
             unbiased PDC / USuRPER / partial panels.
@@ -347,51 +355,52 @@ class PeriodicityDetector:
 
         Returns
         -------
-        None
+        matplotlib.figure.Figure
         '''
-
-        index = 0
         count = len(self.results_frequency) + plot_vals
-        colors = ['red', 'orange', 'blue', 'green', 'purple', 'dodgerblue']
+        linestyles = ['--', ':', '-.', (0, (5, 1, 1, 1, 1, 1))]
         if annotate_pval is not None:
             annotate_levels = self.calc_pdc_pval(annotate_pval, inverse_sf=True)
 
-        fig, axs = plt.subplots(count, squeeze=False,
+        fig, axs = plt.subplots(count, squeeze=False, layout='constrained',
                                 figsize=(figsize[0], count * figsize[1]))
+        axs = axs[:, 0]
 
-        for method in self.results_frequency:
-            axs[index, 0].plot(self.results_frequency[method],
-                               self.results_power[method], 'k', linewidth=1.0)
-            l = [method]
+        for ax, method in zip(axs, self.results_frequency):
+            sp_plot.plot_curve(ax, self.results_frequency[method], self.results_power[method],
+                               label=method)
             # The p-value levels (Shen et al. 2019) hold for the unbiased
             # statistics only.
             if (annotate_pval is not None) and (method != 'GLS') and \
                     not method.endswith("_biased"):
-                for anlev_ind, anlev in enumerate(annotate_levels):
-                    axs[index, 0].hlines(y=anlev, xmin=self.freq_range[0], xmax=self.freq_range[1],
-                                         linewidth=0.5, alpha=0.5, ls='--', color=colors[anlev_ind % 6])
-                    l.append(f"p-value: {annotate_pval[anlev_ind]:.2g}")
-            axs[index, 0].legend(l)
-
+                for k, level in enumerate(annotate_levels):
+                    ax.axhline(level, color=sp_plot.GREY, lw=0.8,
+                               ls=linestyles[k % len(linestyles)],
+                               label=f"p-value: {annotate_pval[k]:.2g}")
             if self.period_truth is not None:
-                for p in self.period_truth:
-                    axs[index, 0].axvline(x=1/p, alpha=0.5, ls='--')
-            index = index + 1
+                for k, p in enumerate(self.period_truth):
+                    ax.axvline(1 / p, color=sp_plot.EXTRA_COLOR, lw=0.8, ls='--',
+                               label='known period' if k == 0 else None)
+            ax.set_ylabel('Power')
+            ax.legend(loc='upper right')
+        if len(self.results_frequency):
+            axs[len(self.results_frequency) - 1].set_xlabel('Frequency (1/day)')
 
         if plot_vals:
-            v_list = self._scalar_values('plot_vals')
+            ax = axs[-1]
+            v_list = np.asarray(self._scalar_values('plot_vals'), float)
             times = np.asarray(self.time_series.times, float)
+            errors = np.asarray(self.time_series.errors, float)
+            errors = errors if errors.shape == v_list.shape else None
             if self.period_truth is not None:
-                times = times % self.period_truth[0]
+                times = (times / self.period_truth[0]) % 1.0
+                ax.set_xlabel(f'Phase (P = {self.period_truth[0]:g} days)')
+            else:
+                ax.set_xlabel('Time (days)')
+            sp_plot.plot_points(ax, times, v_list, errors)
+            ax.set_ylabel('RV (km/s)')
 
-            axs[index, 0].scatter(times, v_list, alpha=0.6)
-            axs[index, 0].set(xlabel="time (days)", ylabel="Vrad (km/s)")
-            axs[index, 0].set_ylim(min(v_list), max(v_list))
-
-        if index == 0:
-            axs[index, 0].set(xlabel="Frequency [1/day]")
-        else:
-            axs[count - 1 - plot_vals, 0].set(xlabel="Frequency [1/day]")
+        return fig
 
 
 def _single_order_arrays(sp_list):

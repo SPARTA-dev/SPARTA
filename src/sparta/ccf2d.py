@@ -22,6 +22,7 @@ import warnings
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 from astropy import units as u
 
 from unicor import dsp
@@ -30,6 +31,7 @@ from todcor.estimator import (
     chi2_from_stats, combine_stats, crlb_from_map, profile_from_stats,
     resampled_noise_psd, window_stats,
 )
+from sparta import plotting as sp_plot
 from sparta.spectrum import resample_flux
 
 
@@ -456,16 +458,24 @@ class CCF2d:
 
     # =============================================================================
     # =============================================================================
-    def plot(self, levels=30, marginals=True, figsize=(6.5, 6.0)):
+    def plot(self, levels=None, marginals=True, figsize=(6.5, 6.0)):
         '''
-        Plot the (v1, v2) profile log-likelihood surface.
+        Plot the (v1, v2) profile log-likelihood surface as unfilled contours.
+
+        The map is drawn as Delta lnL below its maximum, in black contour lines
+        (``sparta.plotting.contour_map``); the best fit is a red ``+``, also
+        marked by red lines on the marginals. A legend lists the levels.
 
         Parameters
         ----------
-        levels : int
-            Number of filled contour levels.
+        levels : sequence of float, optional
+            Delta lnL contour levels (negative). Default
+            ``sparta.plotting.dlnl_levels``: -0.5, -2, -4.5 (1-3 sigma for one
+            parameter, drawn thicker), then -10, -30, -100, ... to the map's
+            depth.
         marginals : bool
-            Add the two profile cuts through the peak.
+            Add the two profile cuts through the peak (Delta lnL against v1
+            and against v2, km/s), as black lines.
         figsize : (float, float)
             Figure size (inches).
 
@@ -477,34 +487,53 @@ class CCF2d:
         v1, v2, logL = res['v1_grid'], res['v2_grid'], res['logL_profile']
         # Plot Delta-logL relative to the peak: the absolute level carries the
         # arbitrary SD offset and swamps the structure.
-        dlogL = logL - logL.max()
+        dlogL = logL - np.nanmax(logL)
+        if levels is None:
+            levels = sp_plot.dlnl_levels(np.nanmin(dlogL))
+        levels = np.sort(np.asarray(levels, float))
 
-        fig = plt.figure(figsize=figsize)
+        fig = plt.figure(figsize=figsize, layout='constrained')
         if marginals:
-            gs = fig.add_gridspec(2, 2, width_ratios=(4, 1), height_ratios=(1, 4),
-                                  wspace=0.05, hspace=0.05)
+            gs = fig.add_gridspec(2, 2, width_ratios=(4, 1), height_ratios=(1, 4))
             ax = fig.add_subplot(gs[1, 0])
             ax_top = fig.add_subplot(gs[0, 0], sharex=ax)
             ax_right = fig.add_subplot(gs[1, 1], sharey=ax)
+            ax_key = fig.add_subplot(gs[0, 1])
+            ax_key.axis('off')
         else:
             ax = fig.add_subplot(111)
 
         # The map is indexed [v1, v2]; transpose so v1 runs along x.
-        im = ax.contourf(v1, v2, dlogL.T, levels=levels)
-        ax.plot(res['RV1'], res['RV2'], 'w+', markersize=12, markeredgewidth=1.5)
-        ax.set_xlabel(r'$v_1$ [km s$^{-1}$]')
-        ax.set_ylabel(r'$v_2$ [km s$^{-1}$]')
+        sp_plot.contour_map(ax, v1, v2, dlogL.T, levels=levels,
+                            linewidths=sp_plot.dlnl_linewidths(levels))
+        sp_plot.mark_fit(ax, res['RV1'], res['RV2'])
+        ax.set_xlabel(r'$v_1$ (km s$^{-1}$)')
+        ax.set_ylabel(r'$v_2$ (km s$^{-1}$)')
 
         if marginals:
             i, j = np.unravel_index(np.argmax(logL), logL.shape)
-            ax_top.plot(v1, dlogL[:, j], 'k')
-            ax_right.plot(dlogL[i, :], v2, 'k')
+            sp_plot.plot_curve(ax_top, v1, dlogL[:, j])
+            sp_plot.plot_curve(ax_right, dlogL[i, :], v2)
+            ax_top.axvline(res['RV1'], color=sp_plot.MODEL_COLOR, lw=0.8)
+            ax_right.axhline(res['RV2'], color=sp_plot.MODEL_COLOR, lw=0.8)
             ax_top.tick_params(labelbottom=False)
             ax_right.tick_params(labelleft=False)
             ax_top.set_ylabel(r'$\Delta\ln L$')
             ax_right.set_xlabel(r'$\Delta\ln L$')
+            # High-S/N maps run to |Delta lnL| ~ 1e5: keep the tick labels short.
+            ax_top.ticklabel_format(axis='y', style='sci', scilimits=(-3, 3))
+            ax_right.ticklabel_format(axis='x', style='sci', scilimits=(-3, 3))
+
+        handles, labels = sp_plot.dlnl_legend_entries(levels)
+        handles.append(Line2D([], [], color=sp_plot.MODEL_COLOR, marker='+', ms=10,
+                              mew=1.6, ls='none'))
+        labels.append('best fit')
+        key = dict(title=r'$\Delta\ln L$ contours', fontsize=8, title_fontsize=8,
+                   alignment='left', borderaxespad=0)
+        if marginals:
+            ax_key.legend(handles, labels, loc='center left', **key)
         else:
-            fig.colorbar(im, ax=ax, label=r'$\Delta\ln L$')
+            fig.legend(handles, labels, loc='outside right upper', **key)
 
         return fig
 

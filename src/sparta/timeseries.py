@@ -12,6 +12,8 @@ Conventions: velocities in km/s, times in days.
 import numpy as np
 import matplotlib.pyplot as plt
 
+from sparta import plotting as sp_plot
+
 
 def is_numeric_scalar(v):
     '''
@@ -85,21 +87,22 @@ class TimeSeries:
 
     # =============================================================================
     # =============================================================================
-    def plot_velocities(self, figsize=(7,7), sty='ok'):
+    def plot_velocities(self, figsize=(7, 6)):
         '''
         Plot a scalar time series against time and, if ``fold_period`` is
-        set, against time modulo the period (days); the figure is shown.
+        set, against orbital phase.
+
+        Black points, with error bars when ``errors`` is set
+        (``sparta.plotting.plot_points``).
 
         Parameters
         ----------
         figsize : (float, float)
             Figure width and height (inches).
-        sty : str
-            Matplotlib format string, used when there are no errors.
 
         Returns
         -------
-        None
+        matplotlib.figure.Figure
 
         Raises
         ------
@@ -109,22 +112,16 @@ class TimeSeries:
         if not is_numeric_scalar(self.vals[0]):
             raise ValueError('plot_velocities is available for scalar values time-series only')
 
-        fig, axs = plt.subplots(2, figsize=figsize)
-        if len(self.errors) == 0:
-            axs[0].plot(self.times, self.vals,sty)
-        else:
-            axs[0].errorbar(self.times, self.vals, self.errors, fmt='o')
-
-        axs[0].set_title("Time VS. Value")
+        times = np.asarray(self.times, float)
+        errors = np.asarray(self.errors, float) if len(self.errors) else None
+        n_panels = 2 if self.fold_period else 1
+        fig, axs = plt.subplots(n_panels, squeeze=False, figsize=figsize,
+                                layout='constrained')
+        sp_plot.plot_points(axs[0, 0], times, self.vals, errors)
+        axs[0, 0].set_xlabel('Time (days)')
+        axs[0, 0].set_ylabel('RV (km/s)')
         if self.fold_period:
-            times_phased = [t % self.fold_period for t in self.times]
-            if len(self.errors) == 0:
-                axs[1].plot(times_phased, self.vals, sty)
-            else:
-                axs[1].errorbar(times_phased, self.vals, self.errors, fmt='o')
-            axs[1].set_title("Phase Folded Values")
-        else:
-            axs[1] = None
-        plt.tight_layout()
-
-        plt.show()
+            sp_plot.plot_points(axs[1, 0], (times / self.fold_period) % 1.0, self.vals, errors)
+            axs[1, 0].set_xlabel(f'Phase (P = {self.fold_period:g} days)')
+            axs[1, 0].set_ylabel('RV (km/s)')
+        return fig

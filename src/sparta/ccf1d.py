@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 from copy import deepcopy
 import warnings
 from unicor import ccf as unicor_ccf, dsp
+from sparta import plotting as sp_plot
 
 class CCF1d:
     '''
@@ -471,6 +472,10 @@ class CCF1d:
         '''
         Plot the per-order and combined CCFs against velocity.
 
+        The CCFs are derived curves on the lag grid, drawn as black lines (the
+        orders faint, the combined CCF bold); the combined RV and its +- eRV
+        band are red (``sparta.plotting``).
+
         Parameters
         ----------
         plot_combined : bool
@@ -480,7 +485,7 @@ class CCF1d:
         orders : sequence of int, optional
             Orders to plot; default all.
         alpha : float
-            Transparency of the per-order CCFs.
+            Opacity of the per-order CCFs.
 
         Returns
         -------
@@ -488,27 +493,26 @@ class CCF1d:
         '''
         if orders is None:
             orders = np.arange(self.n_ord)
+        vel = u.Quantity(self.Corr['vel'], u.km / u.s).value
 
-        fig = plt.figure(figsize=(13, 4), dpi= 80, facecolor='w', edgecolor='k')
+        fig, ax = plt.subplots(figsize=(8, 3.2), layout='constrained')
 
         if plot_orders:
             for o in orders:
-                plt.plot(self.Corr['vel'].value,
-                         self.Corr['corr'][o], 'k', alpha=alpha, linewidth=0.75)
+                sp_plot.plot_curve(ax, vel, self.Corr['corr'][o], lw=0.75, alpha=alpha)
 
-        if plot_combined:
-            try:
-                plt.plot(self.CorrCombined['vel'],
-                         self.CorrCombined['corr'], 'k', linewidth=2.5)
-                plt.axvspan(self.CorrCombined['RV']-self.CorrCombined['eRV'],
-                            self.CorrCombined['RV']+self.CorrCombined['eRV'],
-                            color='red', alpha=0.35)
-            except AttributeError:
-                pass
+        combined = getattr(self, 'CorrCombined', None)
+        if plot_combined and combined is not None:
+            sp_plot.plot_curve(ax, vel, combined['corr'], lw=1.6, label='combined CCF')
+            rv, erv = combined['RV'], combined['eRV']
+            if np.isfinite(rv):
+                ax.axvline(rv, color=sp_plot.MODEL_COLOR, lw=0.8,
+                           label=rf'RV = {rv:.3f} $\pm$ {erv:.3f} km/s')
+                ax.axvspan(rv - erv, rv + erv, color=sp_plot.MODEL_COLOR, alpha=0.25, lw=0)
+            ax.legend(loc='upper right')
 
-        plt.xlabel(r'Velocity ' + '[' + str(self.Corr['vel'].unit) + ']')
-        plt.ylabel(r'CCF')
-        plt.grid()
+        ax.set_xlabel('Radial velocity (km/s)')
+        ax.set_ylabel('CCF')
 
         return fig
 
