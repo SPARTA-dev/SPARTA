@@ -240,7 +240,7 @@ use:
 - PDC: Zucker, S. 2018, [MNRAS, 474, L86](https://ui.adsabs.harvard.edu/abs/2018MNRAS.474L..86Z/abstract)
 - USuRPER: Binnenfeld, A., Shahaf, S. & Zucker, S. 2020, [A&A, 642, A146](https://ui.adsabs.harvard.edu/abs/2020A%26A...642A.146B/abstract)
 - Partial PDC: Binnenfeld, A., et al. 2022, [A&A, 659, A189](https://ui.adsabs.harvard.edu/abs/2022A%26A...659A.189B/abstract)
-- Error-aware PDC: Binnenfeld, A., Shahaf, S. & Zucker, S. 2024
+- Error-aware PDC: Binnenfeld, A., Shahaf, S. & Zucker, S. 2024, [A&A, 686, A192](https://doi.org/10.1051/0004-6361/202347764)
 
 ## License
 

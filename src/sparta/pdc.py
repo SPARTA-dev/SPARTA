@@ -6,7 +6,7 @@ trial frequency (Zucker 2018). The values' distance matrix is one of
 
 * ``scalar_distance_matrix`` -- |y_i - y_j|, e.g. RVs (PDC);
 * ``error_aware_distance_matrix`` -- the same with per-point uncertainties
-  (Binnenfeld, Shahaf & Zucker 2024, Eq. 3);
+  (Binnenfeld, Shahaf & Zucker 2024, A&A 686, A192, Eq. 3);
 * ``spectral_distance_matrix`` -- the chord distance between spectra on the
   unit sphere (USuRPER, Binnenfeld, Shahaf & Zucker 2020).
 
