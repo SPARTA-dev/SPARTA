@@ -152,13 +152,17 @@ The calibration of UNICOR's and TODCOR's errors is summarised in
 - **`Spectrum` is not yet a specutils object.** It is a multi-order container
   of per-order arrays plus an `Info` dict; specutils is the interchange format
   (`Spectrum.orders`, `Spectrum.from_spectrum1d`), not the working store.
-- **The band-pass cut is in pixel units.** `filter_highcut` is a fraction of
-  each order's pixel Nyquist frequency (and `filter_lowcut` a multiple of its
-  span), so the same setting smooths two spectra on different pixel scales
-  differently, and changing `delta` changes the cut in 1/Å. In the NRES
+- **Preprocessing is set in pixel units.** `filter_highcut` is a fraction of
+  each order's pixel Nyquist frequency, so the same setting smooths two
+  spectra on different pixel scales differently and changing `delta` changes
+  the cut in 1/Å; `filter_lowcut` is a multiple of 1/span, so it depends on
+  each order's length (template orders are cut wider than the data's).
+  `n_trim` and the taper length (`alpha`) are in pixels too. In the NRES
   golden recipe, putting the unbroadened template on 0.018–0.029 Å pixels
   instead of 0.030 Å before `preprocess(delta=1)` moved the RVs by −12 and
-  −18 m/s (≲ 1σ). Preprocess template and data on comparable pixel scales.
+  −18 m/s (≲ 1σ); the band-pass cut is the likely main cause, but the
+  effect has not been isolated from the other pixel-unit steps. Preprocess
+  template and data on comparable pixel scales.
 - **`Spectrum.interpolate(method='linear')` reads `delta` as a multiple of
   the median step, even as a Quantity:** `delta=0.25 * u.AA` gives a step of
   0.25 × the order's median step, not 0.25 Å.

@@ -3500,7 +3500,7 @@ One joint fit of pooled windows: coarse map, fine map, CRLB, peak values.
 - `output` (*{'ccf', 'loglike'}*): The primary map, `'map'`, of `profile` and `fine`.
 - `half` (*int*): Half-width (nodes) of the quadratic patch of `crlb_from_map`.
 - `span, factor` (*int*): The fine grid (`refine_grid`).
-- `fine_cache` (*dict, optional*): Per-window fine statistics by coarse node `(i, j)`, read and filled here; pass the same dict to calls that should share them. Default None: a fresh one.
+- `fine_cache` (*dict, optional*): Per-window fine statistics by coarse node `(i, j)`, read and filled here; pass the same dict to calls that should share them. It is keyed by node only, so share it only between calls with the same `prepared` windows, grids, `span` and `factor` (e.g. the two noise passes of one epoch). Default None: a fresh one.
 
 **Returns**
 

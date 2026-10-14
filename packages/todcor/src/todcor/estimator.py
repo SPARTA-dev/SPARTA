@@ -945,8 +945,10 @@ def joint_fit(stats_list, weights, prepared, v1_grid, v2_grid, *, nonneg, output
         The fine grid (:func:`refine_grid`).
     fine_cache : dict, optional
         Per-window fine statistics by coarse node ``(i, j)``, read and filled
-        here; pass the same dict to calls that should share them. Default
-        None: a fresh one.
+        here; pass the same dict to calls that should share them. It is keyed
+        by node only, so share it only between calls with the same
+        ``prepared`` windows, grids, ``span`` and ``factor`` (e.g. the two
+        noise passes of one epoch). Default None: a fresh one.
 
     Returns
     -------

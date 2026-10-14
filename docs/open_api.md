@@ -48,7 +48,7 @@ The steps of `Spectrum.trim`, `interpolate`, `remove_cosmics`,
 | `resample_flux` | `sparta` | the cubic spline behind both resamplings, at arbitrary wavelengths | Å (or `unit`) | increasing grids; NaN outside the input span; specutils' `SplineInterpolatedResampler`, loaded on the first call |
 | `coarsest_native_step` | `sparta` | the native step after a regrid: max(previous, c·median(Δλ/λ) of the new grid) | km/s; Å | a finer grid adds samples, not independent pixels |
 | `remove_cosmics` | `sparta` | replace upward outliers by linear interpolation in λ between unclipped neighbours | Å; threshold in mad_std | upward only, iterated about the median; NaN pixels stay NaN |
-| `bandpass` | `sparta` | zero-phase Butterworth band-pass, output standardized | Å; `lowcut` in 1/(λ span), `highcut` in units of Nyquist | evenly sampled order (Nyquist from the first step); filters the flux minus its 80th percentile; output zero mean, unit variance — the error bars are then no longer calibrated |
+| `bandpass` | `sparta` | zero-phase Butterworth band-pass, output standardized | Å; `lowcut` in units of 1/(λ span), `highcut` in units of the pixel Nyquist frequency | evenly sampled order (Nyquist from the first step); the cuts in 1/Å therefore depend on the order's length and pixel step ([limitations](limitations.md#spectra-and-templates)); filters the flux minus its 80th percentile; output zero mean, unit variance — the error bars are then no longer calibrated |
 | `resampling_noise_psd` | `sparta` | the noise power per Fourier mode of white native noise after `resample_flux` onto a log grid | km/s; relative power (white = 1) | one resampling, no earlier filtering; native phases uniformly spread unless `phases` is given; the `noise_psd` of `todcor.window_stats` |
 | `native_phases` | `sparta` | sub-pixel phase of each native pixel on a log analysis grid | Å; `dv` km/s; phases in analysis pixels | the native wavelengths are known (the order was not resampled before) |
 | `phoenix_spectrum` | `sparta` | a PHOENIX-ACES-AGSS-COND-2011 HiRes model over a wavelength range, as arrays | Å; flux erg/s/cm²/cm ÷ 1e13; Teff K, log g cgs, [Fe/H] and [α/Fe] dex | vacuum unless `air=True` (Morton 2000); not normalized, not broadened; read from the bundled cache — any other model needs `allow_download=True` once |
@@ -66,7 +66,7 @@ The steps of `Spectrum.trim`, `interpolate`, `remove_cosmics`,
 | `shift_kms`, `velocity_from_log_shift` | `unicor` | velocity ↔ ln λ shift (as c ln(λ_obs/λ_rest)) | km/s; dimensionless | same conventions; computed with `log1p`/`expm1`, full precision for small v |
 | `C_KMS` | `unicor` | the speed of light | km/s (299792.458) | — |
 | `tukey_window` | `unicor` | Tukey (tapered-cosine) apodisation window | pixels | the taper makes the noise heteroscedastic, which the white-noise weighting does not model |
-| `rotational_kernel`, `broaden_rotational`, `broaden_gaussian` | `unicor` | rotational (Gray 2005) and Gaussian broadening of normalized flux | km/s (`vsini`, FWHM = c/R) | uniform velocity (ln λ) grid; continuum 1 beyond the ends; linear limb darkening `epsilon` |
+| `rotational_kernel`, `broaden_rotational`, `broaden_gaussian` | `unicor` | rotational (Gray 2005) and Gaussian broadening of normalized flux | km/s (`vsini`, FWHM = c/R) | uniform velocity (ln λ) grid; continuum 1 beyond the ends; linear limb darkening `epsilon`; a `vsini` below the grid step gives a one-tap kernel, i.e. no broadening |
 | `broaden_rotational_residual`, `broaden_gaussian_residual` | `unicor` | the same on residual flux (continuum 0) | km/s | zero-padded ends; a width ≤ 0 returns the input |
 | `rfft_positive`, `parseval_weights` | `unicor` | positive-frequency FFT (DC dropped) and the weights that make a Fourier χ² equal the real-space χ² | ζ in s/km; weights 1/flux² | white, homoscedastic per-pixel noise |
 | `normalize`, `zero_lag_correlation` | `unicor` | mean-subtract and L2-normalize; the unshifted inner product | dimensionless | — |
@@ -105,7 +105,7 @@ per window, then `joint_fit` (and `window_noise` for per-window noise).
 | `joint_fit`, `TodcorFit` | `todcor` | coarse map, fine map, CRLB and every value at the refined peak of pooled windows | km/s | as `combine_stats`; fine statistics cached by coarse node for re-weighting |
 | `window_noise` | `todcor` | each window's noise from its share of a unit-noise joint χ² | flux units | the four shared parameters charged to windows ∝ ν_i; windows with fewer than `min_dof` dof take the common estimate |
 | `todcor_map` | `todcor` | one window's maps: `profile_from_stats(window_stats(...))` | as `window_stats` | one window of one epoch |
-| `resampled_noise_psd` | `todcor` | relative noise power per mode from a resampler's impulse responses | dimensionless (white = 1) | linear resampling; responses at representative sub-pixel phases, weighted by their frequency |
+| `resampled_noise_psd` | `todcor` | relative noise power per mode from a resampler's impulse responses | dimensionless (white = 1) | any resampler linear in the flux (e.g. `resample_flux`'s cubic spline); responses at representative sub-pixel phases, weighted by their frequency |
 | `shift_template_flux`, `composite_flux` | `todcor` | a template Doppler-shifted onto a grid, and a noiseless composite of shifted templates | Å; km/s; amplitudes dimensionless | rest-frame templates with continuum 1; `'cz'` by default; `kind='cubic'` for coarsely sampled templates (PHOENIX) |
 | `model_flux` | `todcor` | the best-fit composite by the fit's own Fourier phase-shift model | km/s; amplitudes dimensionless | the circular shift the estimator assumes, not a resampling |
 
@@ -116,13 +116,13 @@ Mazeh 2006); the optimisation of ρ over the velocities is not implemented.
 
 | name | import from | what it does | units | assumptions |
 |---|---|---|---|---|
-| `rest_frame_wavelengths` | `sparta` | observed → rest wavelengths, λ / (1 + v/c) | Å; km/s | the exact division, not λ(1 − v/c) |
+| `rest_frame_wavelengths` | `sparta` | observed → rest wavelengths, λ / (1 + v/c) | Å; km/s | the exact division, not λ(1 − v/c); exact under the 'cz' convention, which TIRAVEL uses throughout (no relativistic option) |
 | `common_grid` | `sparta` | the reference epoch's rest-frame grid, clipped to the range every epoch covers | Å; km/s; `margin` pixels | no epoch is extrapolated; the reference epoch is not resampled |
 | `align_spectra` | `sparta` | shift each epoch to rest and resample it onto the common grid | Å; km/s | cubic by default (linear would depress the correlations) |
 | `normalize_rows` | `sparta` | mean-subtract each order per epoch, L2-normalize each epoch across orders | dimensionless | orders count by line content, not flux scale; a flat epoch stays zero |
 | `correlation_matrix` | `sparta` | the K × K epoch correlation matrix, one Gram product | dimensionless, in [−1, 1] | rows from `normalize_rows` |
 | `alignment` | `sparta` | ρ = (λ_max − 1)/(K − 1), the co-addition weights and diagnostics (`n_eff`, ...) | dimensionless | symmetric matrix (`eigh`); weights unit norm, bulk positive |
-| `coadd` | `sparta` | Σ_i w_i · row_i, the maximum-likelihood template | arbitrary scale | the epochs are noisy, shifted copies of one template |
+| `coadd` | `sparta` | Σ_i w_i · row_i, the maximum-likelihood template | arbitrary scale | the epochs are noisy, shifted copies of one template; maximum likelihood strictly for a rank-1 model with equal i.i.d. noise on the normalized rows, which unit-normalizing epochs of different S/N only approximates |
 | `build_tiravel`, `TiravelResult` | `sparta` | the whole fixed-velocity step, orders pooled into one correlation matrix | Å; km/s | K ≥ 2 epochs with the same orders and finite flux; only velocity differences matter |
 
 ## PDC and USuRPER — periodicity in distances (`sparta.pdc`)

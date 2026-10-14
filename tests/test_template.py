@@ -424,3 +424,23 @@ def test_barycentric_correction_stays_cz():
     spec.barycentric_correction()
     np.testing.assert_allclose(spec.wv[0], w * (1 + 25.0 / _C_KMS), rtol=1e-14)
     assert spec.bcv == 0.0 * u.km / u.s
+
+
+@pytest.mark.parametrize("wave, flux, match", [
+    (np.array([5000.0, 5000.01, 5000.01, 5000.03]), np.ones(4), "strictly increasing"),
+    (np.array([5000.03, 5000.02, 5000.0]), np.ones(3), "strictly increasing"),
+    (np.array([5000.0]), np.ones(1), "strictly increasing"),
+    (np.linspace(5000.0, 5010.0, 1001), np.r_[np.ones(500), np.nan, np.ones(500)], "NaN/inf"),
+])
+def test_broadening_a_non_log_order_rejects_bad_input_clearly(wave, flux, match):
+    with pytest.raises(ValueError, match=match):
+        Template.from_arrays(wave, flux).broaden_instrumental(resolution=50_000)
+
+
+def test_broadening_refuses_a_grid_blown_up_by_one_close_pixel_pair():
+    # One near-duplicate pixel would set the ln(lambda) step for the whole
+    # order: 1e-4 A inside a 0.01 A grid means ~100x the pixels.
+    wave = np.linspace(5000.0, 5010.0, 1001)
+    wave = np.insert(wave, 501, wave[500] + 1e-4)
+    with pytest.raises(ValueError, match="finest"):
+        Template.from_arrays(wave, np.ones_like(wave)).broaden_instrumental(resolution=50_000)

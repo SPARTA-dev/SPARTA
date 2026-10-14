@@ -319,10 +319,13 @@ Keys of `results_frequency` / `results_power`:
 - **Template broadening on a ln λ grid (changes results).**
   `Template.broaden_instrumental` / `broaden_rotational` used each order's
   median velocity step, so on a grid not uniform in ln λ the kernel had the
-  wrong width away from the median: PHOENIX HiRes is linear in λ with a step
-  of 0.006 Å below 5000 Å and 0.01 Å above (0.36 vs 0.60 km/s), and a
-  template spanning 5000 Å was broadened ~1.7x too wide on the coarse side
-  (or ~0.6x too narrow on the fine side). Such an order is now resampled
+  wrong width away from the median, by the ratio of the local to the median
+  step. PHOENIX HiRes is linear in λ with a step of 0.006 Å below 5000 Å and
+  0.01 Å above (0.36 vs 0.60 km/s), so the error reaches ~1.7x (or ~0.6x)
+  when the median falls on one side of 5000 Å (as in the new tests); over
+  the shipped recipes' ranges it was 0.8–1.35x, and for the NRES golden
+  template (a uniform 0.03 Å linear grid, 4500–7700 Å) it came from the 1/λ
+  drift, 1.36x at the blue end to 0.79x at the red. Such an order is now resampled
   onto ln λ at its finest velocity step (cubic), broadened there, and
   resampled back onto its own wavelengths; the template keeps its grid. A
   ln λ order is broadened exactly as before. Re-pinned: the NRES UNICOR
@@ -330,6 +333,12 @@ Keys of `results_frequency` / `results_power`:
   TOI-193 TIRAVEL golden by ≤ 0.06 m/s (ρ by 1.5e-9). The resampling round
   trip alone moves those RVs by ≤ 0.13 m/s. The 394 byte baselines do not
   broaden and are unchanged.
+  An order that would take the new path is checked first: wavelengths
+  strictly increasing, flux finite, and a finest step that does not blow the
+  ln λ grid up past 4x the order's pixels (a near-duplicate wavelength in a
+  stitched spectrum); each raises a clear `ValueError`.
+- `SPARTA` requires `sparta-unicor>=0.2` and `sparta-todcor>=0.2` (it uses
+  their per-order and per-window atoms); `>=0.1` let pip keep an older engine.
 - **Security hardening of the PHOENIX download** (the former FTP connection;
   HTTPS with astropy's default certificate checks since July). Downloads are
   copied into a temporary file in the cache directory, fsynced, verified to be

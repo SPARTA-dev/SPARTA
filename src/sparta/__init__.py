@@ -120,7 +120,8 @@ def __getattr__(name):
     nor specutils, is imported until a name that needs it is asked for.
     """
     path = _LAZY_EXPORTS.get(name)
-    if path is None and not name.startswith("_") and importlib.util.find_spec(f"{__name__}.{name}"):
+    if (path is None and not name.startswith("_") and "." not in name
+            and importlib.util.find_spec(f"{__name__}.{name}")):
         # A submodule (``sparta.pdc``, ``sparta.spectrum``, ...): reachable after a
         # bare ``import sparta``, as when that import loaded everything.
         path = f"{__name__}.{name}"

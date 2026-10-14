@@ -53,6 +53,11 @@ def _is_log_uniform(wave, rtol=1e-3):
     return dln.size > 0 and np.ptp(dln) <= rtol * np.median(dln)
 
 
+# PHOENIX HiRes orders need 1.2-1.3x their pixels on ln(lambda) at the finest
+# step; far more means one stray pixel pair set the step.
+_MAX_OVERSAMPLING = 4
+
+
 def _broaden_velocity_even(wave, flux, broaden):
     """Apply a velocity kernel to one order on a uniform ln(lambda) grid.
 
@@ -78,11 +83,33 @@ def _broaden_velocity_even(wave, flux, broaden):
     -------
     ndarray
         The broadened flux on ``wave``.
+
+    Raises
+    ------
+    ValueError
+        For an order not uniform in ln(lambda) whose wavelengths are not
+        strictly increasing (or fewer than 2), whose flux is not finite, or
+        whose finest step would make the ln(lambda) grid more than
+        ``_MAX_OVERSAMPLING`` times the order's length (e.g. a near-duplicate
+        pixel in a stitched spectrum).
     """
     wave = np.asarray(wave, float)
     if _is_log_uniform(wave):
         return broaden(flux, dsp.dv_from_wave(wave))
+    if wave.size < 2 or np.any(np.diff(wave) <= 0):
+        raise ValueError("a template order must have strictly increasing wavelengths "
+                         "(at least 2) to be broadened")
+    if not np.all(np.isfinite(flux)):
+        raise ValueError("template flux contains NaN/inf; interpolate or trim those "
+                         "pixels before broadening")
     dv = dsp.C_KMS * np.min(np.diff(wave) / wave[:-1])
+    n_grid = np.log(wave[-1] / wave[0]) * dsp.C_KMS / dv
+    if n_grid > _MAX_OVERSAMPLING * wave.size:
+        raise ValueError(
+            f"the finest step of this order ({dv:.3g} km/s) would put its {wave.size} "
+            f"pixels on a {n_grid:.3g}-node ln(lambda) grid; remove near-duplicate "
+            "wavelengths or resample the order onto ln(lambda) first "
+            "(Spectrum.interpolate(method='log'))")
     grid, _ = dsp.log_lambda_grid(wave[0], wave[-1], dv)
     broadened = broaden(dsp.resample(wave, flux, grid, kind='cubic'), dv)
     return dsp.resample(grid, broadened, wave, kind='cubic')

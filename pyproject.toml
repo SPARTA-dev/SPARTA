@@ -19,8 +19,8 @@ classifiers = [
 ]
 # specutils 2.x itself requires Python >= 3.10 and astropy >= 6.0.
 dependencies = [
-    "sparta-unicor>=0.1",   # packages/unicor in this repo
-    "sparta-todcor>=0.1",   # packages/todcor in this repo
+    "sparta-unicor>=0.2",   # packages/unicor in this repo
+    "sparta-todcor>=0.2",   # packages/todcor in this repo
     "numpy>=1.24",
     "scipy>=1.10",
     "astropy>=6.0",

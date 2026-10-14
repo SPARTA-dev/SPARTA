@@ -166,6 +166,7 @@ def test_plain_import_still_reaches_every_public_submodule():
 def test_unknown_attribute_raises():
     with pytest.raises(AttributeError, match="no attribute 'lag_axis'"):
         sparta.lag_axis
+    assert not hasattr(sparta, "no_such.module")      # not a ModuleNotFoundError
     with pytest.raises(ImportError):
         exec("from sparta import no_such_atom", {})
 
