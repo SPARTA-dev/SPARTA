@@ -56,6 +56,18 @@ top of them.
 | TODCOR engine (`sparta-todcor`) | `todcor` | [`packages/todcor`](packages/todcor) | numpy, scipy, `unicor` |
 | SPARTA (`SPARTA`) | `sparta` | [`src/sparta`](src/sparta) | both engines, astropy, specutils, matplotlib, tqdm |
 
+Inside `sparta` the layout is flat, one module per concern, and the classes are
+importable from the top level (`from sparta import Observations, Template`):
+
+| Module | Contents |
+| --- | --- |
+| `sparta.spectrum`, `sparta.template` | `Spectrum`, `Template` (PHOENIX cache in `template_files/`) |
+| `sparta.ccf1d`, `sparta.ccf2d` | `CCF1d` (UNICOR), `CCF2d` (TODCOR) |
+| `sparta.tiravel`, `sparta.tiravel_ops` | `TIRAVEL` and its array-level measure |
+| `sparta.observations`, `sparta.timeseries` | `Observations` (the series-level driver), `TimeSeries` (container) |
+| `sparta.periodogram`, `sparta.pdc` | `PeriodicityDetector` (GLS, PDC, USuRPER) and the PDC array math |
+| `sparta.instruments` | per-instrument loaders and the simulator |
+
 The engines carry a `sparta-` prefix on PyPI because `unicor` there is an
 unrelated project; likewise `pip install sparta` installs an unrelated RDF
 library. Install from this repository as below.

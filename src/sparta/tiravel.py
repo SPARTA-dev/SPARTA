@@ -8,7 +8,7 @@ and its leading eigenvector weights the co-added template, returned as a
 ``Template`` for UNICOR or TODCOR. This is the fixed-velocity half of the
 method: ``rho`` is evaluated at the supplied velocities, as the objective a
 velocity optimizer would maximise. The array-level measure is in
-``sparta.TIRAVEL.tiravel_ops``.
+``sparta.tiravel_ops``.
 
 Conventions: velocities in km/s (only their differences matter), wavelengths
 in Angstrom.
@@ -21,12 +21,12 @@ from copy import deepcopy
 import numpy as np
 import matplotlib.pyplot as plt
 
-from sparta.TIRAVEL.tiravel_ops import (
+from sparta.tiravel_ops import (
     align_spectra, alignment, coadd, common_grid, correlation_matrix,
     normalize_rows,
 )
-from sparta.UNICOR.Spectrum import Spectrum
-from sparta.UNICOR.Template import Template
+from sparta.spectrum import Spectrum
+from sparta.template import Template
 
 
 class TIRAVEL:

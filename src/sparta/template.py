@@ -15,7 +15,7 @@ Reference: PHOENIX-ACES models -- Husser et al. 2013, A&A 553, A6.
 
 from astropy.io import fits
 from astropy.utils.data import download_file
-from sparta.UNICOR.Spectrum import Spectrum
+from sparta.spectrum import Spectrum
 from unicor import dsp
 import numpy as np
 import os

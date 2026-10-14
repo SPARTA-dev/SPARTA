@@ -1,16 +1,16 @@
 """Golden-master tests for the scalar PDC periodogram.
 
 Pins the current numeric output of the packaged PDC path so later refactors
-(vectorizing USURPER_functions, dropping numba) can be proven behavior-
+(vectorizing the PDC kernels, now sparta.pdc; dropping numba) can be proven behavior-
 preserving. Golden values captured 2026-07-22 on the transitional stack
 (numpy 1.23.5).
 """
 import numpy as np
 import pytest
 
-from sparta.Auxil.TimeSeries import TimeSeries
-from sparta.Auxil.PeriodicityDetector import PeriodicityDetector
-from sparta.USURPER.USURPER_functions import unbiased_u_centering
+from sparta.timeseries import TimeSeries
+from sparta.periodogram import PeriodicityDetector
+from sparta.pdc import unbiased_u_centering
 
 # Deterministic dataset: 12 irregular epochs, pure sine at P = 3 d.
 TIMES = [0.0, 1.3, 2.1, 3.7, 5.2, 6.9, 8.4, 10.1, 12.6, 14.0, 17.3, 19.8]
@@ -138,10 +138,11 @@ def test_gls_accepts_integer_values():
     assert np.all(np.isfinite(power))
 
 
-def test_timeseries_rejects_spectrum_ops_on_float32_scalars():
+def test_observations_rejects_spectrum_ops_on_float32_scalars():
+    from sparta.observations import Observations
     ts = TimeSeries(times=[0.0, 1.0], vals=[np.float32(1.0), np.float32(2.0)])
     with pytest.raises(ValueError, match="spectrum time-series only"):
-        ts.calc_rv_against_template(ts.vals, template=None)
+        Observations(time_series=ts).calc_rv_against_template(template=None)
 
 
 def test_timeseries_size_must_match_times():
@@ -173,3 +174,54 @@ def test_error_aware_pdc_matches_golden():
     det.calc_PDC(calc_unbiased_flag=True, errors=True)
     np.testing.assert_allclose(np.asarray(det.results_power["PDC_unbiased"]),
                                GOLDEN_POWER_ERRORS, rtol=1e-8, atol=1e-10)
+
+
+# --- the detector holds state; sparta.pdc is pure (Phase-4 decoupling) -------
+
+def test_pdc_power_is_a_pure_function_of_arrays():
+    from sparta import pdc
+    freqs = np.arange(0.05, 1.0, 1 / 20)
+    a = pdc.unbiased_u_centering(pdc.scalar_distance_matrix(VALS), len(TIMES))
+    np.testing.assert_allclose(pdc.pdc_power(TIMES, freqs, a), GOLDEN_POWER,
+                               rtol=1e-8, atol=1e-10)
+
+
+def test_partial_power_needs_the_unbiased_statistic():
+    from sparta import pdc
+    d = pdc.scalar_distance_matrix(VALS)
+    a, c = pdc.partial_centering(d, d[::-1, ::-1])
+    with pytest.raises(ValueError, match="unbiased"):
+        pdc.pdc_power(TIMES, [0.3], a, unbiased=False, control=c)
+
+
+def test_error_aware_distance_needs_one_error_per_value():
+    from sparta import pdc
+    with pytest.raises(ValueError, match="one error per value"):
+        pdc.error_aware_distance_matrix(VALS, ERRORS[:-1])
+
+
+def test_pdc_on_stored_rvs_leaves_the_series_values_alone():
+    # A spectrum series' PDC runs on calculated_vrad_list; it used to swap
+    # time_series.vals for the RVs during the call.
+    from types import SimpleNamespace
+    specs = [SimpleNamespace(wv=[np.arange(10.0)], sp=[np.ones(10)]) for _ in TIMES]
+    ts = TimeSeries(times=list(TIMES), vals=specs, calculated_vrad_list=list(VALS))
+    det = PeriodicityDetector(time_series=ts, freq_range=(0.05, 1.0),
+                              periodogram_grid_resolution=20)
+    det.calc_PDC(calc_unbiased_flag=True)
+    assert ts.vals is specs and all(v is s for v, s in zip(ts.vals, specs))
+    np.testing.assert_allclose(det.results_power["PDC_unbiased"], GOLDEN_POWER,
+                               rtol=1e-8, atol=1e-10)
+
+
+def test_plot_with_values_leaves_period_truth_unset():
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    ts = TimeSeries(times=list(TIMES), vals=list(VALS))
+    det = PeriodicityDetector(time_series=ts, freq_range=(0.05, 1.0),
+                              periodogram_grid_resolution=20)
+    det.calc_GLS()
+    det.plot_periodograms(plot_vals=True)
+    plt.close("all")
+    assert det.period_truth is None

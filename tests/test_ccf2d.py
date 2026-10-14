@@ -1,4 +1,4 @@
-"""Tests for SPARTA's TODCOR object layer (:class:`sparta.TODCOR.CCF2d`).
+"""Tests for SPARTA's TODCOR object layer (:class:`sparta.ccf2d`).
 
 ``CCF2d`` driven with ``Spectrum``/``Template`` objects on a synthetic SB2: one
 spectral order per TODCOR window, pooled into one fit. The array-level estimator
@@ -14,9 +14,9 @@ import pytest
 from astropy import units as u
 
 from todcor import composite_flux, log_lambda_grid
-from sparta.TODCOR import CCF2d
-from sparta.UNICOR.Spectrum import Spectrum
-from sparta.UNICOR.Template import Template
+from sparta.ccf2d import CCF2d
+from sparta.spectrum import Spectrum
+from sparta.template import Template
 
 
 def _gauss(wave, center, depth, fwhm):
@@ -352,7 +352,7 @@ def test_ccf2d_noise_budget_on_a_grid_coarser_than_native(factor):
 def test_ccf2d_noise_psd_is_cached_per_sampling():
     # The probe depends only on the native and analysis steps; it must not be
     # rebuilt for every order of every epoch.
-    from sparta.TODCOR.CCF2d import _impulse_responses
+    from sparta.ccf2d import _impulse_responses
     _impulse_responses.cache_clear()
     wave, flux, tmpl1, tmpl2 = _narrow_case(37.3, -52.6)
     g1, g2 = _local_grids(37.3, -52.6)

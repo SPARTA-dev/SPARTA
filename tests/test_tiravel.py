@@ -1,4 +1,4 @@
-"""Tests for TIRAVEL (:mod:`sparta.TIRAVEL`).
+"""Tests for TIRAVEL (:mod:`sparta.tiravel`, :mod:`sparta.tiravel_ops`).
 
 Two layers:
 
@@ -18,11 +18,12 @@ import numpy as np
 import pytest
 
 import unicor as ops
-from sparta.TIRAVEL import (
-    TIRAVEL, align_spectra, alignment, coadd, common_grid, correlation_matrix,
-    normalize_rows, rest_frame_wavelengths,
+from sparta.tiravel import TIRAVEL
+from sparta.tiravel_ops import (
+    align_spectra, alignment, coadd, common_grid, correlation_matrix, normalize_rows,
+    rest_frame_wavelengths,
 )
-from sparta.UNICOR.Spectrum import Spectrum
+from sparta.spectrum import Spectrum
 
 C = ops.C_KMS
 
@@ -271,7 +272,7 @@ def test_build_template_zero_point_shifts_the_template():
     # degeneracy. The template built at v+offset, cross-correlated against the
     # one built at v, must peak at exactly -offset.
     from sparta import CCF1d
-    from sparta.UNICOR.Template import Template
+    from sparta.template import Template
 
     velocities = [-60.0, -20.0, 15.0, 55.0]
     specs = _spectra(velocities, noise=0.01)
@@ -292,9 +293,9 @@ def test_build_template_zero_point_shifts_the_template():
     assert abs(rv) == pytest.approx(offset, abs=2.0)
 
 
-def test_timeseries_and_observations_drivers():
-    from sparta.Auxil.TimeSeries import TimeSeries
-    from sparta.Observations import Observations
+def test_observations_driver():
+    from sparta.timeseries import TimeSeries
+    from sparta.observations import Observations
 
     velocities = [-60.0, -20.0, 15.0, 55.0]
     specs = _spectra(velocities)

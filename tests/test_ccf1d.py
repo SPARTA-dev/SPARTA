@@ -18,9 +18,9 @@ import pytest
 from astropy import units as u
 
 import unicor as so
-from sparta.UNICOR.Spectrum import Spectrum
-from sparta.UNICOR.Template import Template
-from sparta.UNICOR.CCF1d import CCF1d
+from sparta.spectrum import Spectrum
+from sparta.template import Template
+from sparta.ccf1d import CCF1d
 
 C = 299792.458
 WAVE = np.linspace(5480.0, 5520.0, 4000)

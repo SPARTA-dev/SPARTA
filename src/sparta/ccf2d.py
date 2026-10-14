@@ -30,7 +30,7 @@ from todcor.estimator import (
     chi2_from_stats, combine_stats, crlb_from_map, profile_from_stats,
     resampled_noise_psd, window_stats,
 )
-from sparta.UNICOR.Spectrum import resample_flux
+from sparta.spectrum import resample_flux
 
 
 class CCF2d:

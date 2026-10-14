@@ -5,7 +5,7 @@ from astropy.io import fits
 from astropy.time import Time
 
 from fits_builders import check_single_order, load, write
-from sparta.Observations import Observations
+from sparta.observations import Observations
 
 
 def _lamost(tmp_path, helio=True, vacuum=True, name="lamost.fits"):

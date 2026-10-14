@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import astropy.units as u
 
-from sparta.UNICOR.Spectrum import Spectrum
+from sparta.spectrum import Spectrum
 
 
 def _three_order_spec():
@@ -82,8 +82,8 @@ def _log_grid_spec():
 
 
 def test_remove_cosmics_keeps_the_log_grid_and_ccf_still_runs():
-    from sparta.UNICOR.Template import Template
-    from sparta.UNICOR.CCF1d import CCF1d
+    from sparta.template import Template
+    from sparta.ccf1d import CCF1d
     sp = _log_grid_spec()
     tmpl = Template(template=Spectrum(wv=[sp.wv[0].copy()], sp=[sp.sp[0].copy()], name="tm"))
     wave = sp.wv[0].copy()

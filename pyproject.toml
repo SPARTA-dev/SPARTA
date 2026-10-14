@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 # Note: "sparta" on PyPI is an unrelated RDF library -- install SPARTA from this
 # repository (see README), never with a bare `pip install sparta`.
 name = "SPARTA"
-version = "0.2.0"
+dynamic = ["version"]   # sparta.__version__
 description = "SPARTA - SPectroscopic vARiabiliTy Analysis"
 readme = "README.md"
 license = "MIT"
@@ -36,14 +36,17 @@ test = ["pytest"]
 Source = "https://github.com/SPARTA-dev/SPARTA"
 "USuRPER paper" = "https://ui.adsabs.harvard.edu/abs/2020A%26A...642A.146B/abstract"
 
+[tool.setuptools.dynamic]
+version = { attr = "sparta.__version__" }
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 # The bundled PHOENIX templates the examples and tests use, so a regular
 # (non-editable) install finds them instead of downloading into site-packages.
-"sparta.UNICOR" = ["template_files/WAVE_PHOENIX-ACES-AGSS-COND-2011.fits",
-                   "template_files/lte*.fits"]
+"sparta" = ["template_files/WAVE_PHOENIX-ACES-AGSS-COND-2011.fits",
+            "template_files/lte*.fits"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "packages/unicor/tests", "packages/todcor/tests"]

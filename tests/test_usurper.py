@@ -11,8 +11,8 @@ from types import SimpleNamespace
 import pytest
 
 import unicor as so
-from sparta.Auxil.TimeSeries import TimeSeries
-from sparta.Auxil.PeriodicityDetector import PeriodicityDetector
+from sparta.timeseries import TimeSeries
+from sparta.periodogram import PeriodicityDetector
 
 C = 299792.458
 WV = np.linspace(5495.0, 5505.0, 600)
@@ -150,3 +150,23 @@ def test_usurper_rejects_multi_order_spectra():
     vals[0] = SimpleNamespace(wv=[WV, WV + 20.0], sp=[vals[0].sp[0]] * 2)
     with pytest.raises(ValueError, match="single order"):
         _detector(vals).calc_USURPER()
+
+
+def test_shape_alone_matches_shape_after_shift():
+    # Each partial periodogram builds its own distance matrices: the result
+    # cannot depend on which one ran before.
+    vr = [K * np.sin(2 * np.pi * t / P) for t in TIMES]
+    alone = _detector([_spectrum(t) for t in TIMES], calculated_vrad_list=vr)
+    alone.calc_partial_periodogram(partial_type="shape")
+    after = _detector([_spectrum(t) for t in TIMES], calculated_vrad_list=vr)
+    after.calc_partial_periodogram(partial_type="shift")
+    after.calc_partial_periodogram(partial_type="shape")
+    np.testing.assert_array_equal(alone.results_power["shape_periodogram"],
+                                  after.results_power["shape_periodogram"])
+
+
+def test_partial_periodogram_rejects_an_unknown_type():
+    det = _detector([_spectrum(t) for t in TIMES],
+                    calculated_vrad_list=[0.0] * len(TIMES))
+    with pytest.raises(ValueError, match="partial_type"):
+        det.calc_partial_periodogram(partial_type="width")

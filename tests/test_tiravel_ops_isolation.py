@@ -1,4 +1,4 @@
-"""Dependency isolation: ``sparta.TIRAVEL.tiravel_ops`` needs numpy + unicor only.
+"""Dependency isolation: ``sparta.tiravel_ops`` needs numpy + unicor only.
 
 The TIRAVEL measure is array-level, like the standalone ``unicor`` and
 ``todcor`` packages (see ``packages/*/tests/test_*_isolation.py``), so it can
@@ -17,7 +17,7 @@ import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-_FILE = ROOT / "src" / "sparta" / "TIRAVEL" / "tiravel_ops.py"
+_FILE = ROOT / "src" / "sparta" / "tiravel_ops.py"
 _UNICOR = ROOT / "packages" / "unicor" / "src"
 ALLOWED = ("numpy", "unicor")
 FORBIDDEN = ("sparta", "astropy", "specutils", "pandas", "matplotlib", "todcor")

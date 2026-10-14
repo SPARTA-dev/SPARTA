@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 
 from sparta import instruments
-from sparta.Observations import Observations
+from sparta.observations import Observations
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 HARPS = sorted((ROOT / "examples" / "data" / "TOI193").glob("*.fits"))

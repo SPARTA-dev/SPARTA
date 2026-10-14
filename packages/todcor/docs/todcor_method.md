@@ -7,7 +7,7 @@ spectra, TODCOR (Zucker & Mazeh 1994) recast as a Gaussian profile likelihood.
 
 The implementation is split into `unicor.dsp` (grid / FFT / Parseval /
 broadening primitives, shared with UNICOR), `todcor.simulate` (forward model)
-and `todcor.estimator` (the derivation). SPARTA's `sparta.TODCOR.CCF2d` adds the
+and `todcor.estimator` (the derivation). SPARTA's `sparta.ccf2d.CCF2d` adds the
 `Spectrum`/`Template` orchestration on top — the double-lined counterpart of
 UNICOR's `CCF1d`. The `todcor` namespace re-exports the full public API, which
 is what the example notebooks use. Note that `rotational_kernel` is a
@@ -377,7 +377,7 @@ All of these except `CCF2d` are reachable from the `todcor` namespace; the
 | `todcor_map` | `todcor.estimator` | single-window convenience wrapper (§4) |
 | `crlb_from_map` | `todcor.estimator` | Cramér–Rao velocity errors from curvature (§8) |
 | `model_flux` | `todcor.simulate` | reconstruct the best-fit composite for residual plots |
-| `CCF2d` | `sparta.TODCOR` | `Spectrum` + two `Template`s → coarse + fine maps, RVs, errors, χ²_red, per-order noise (orders as windows) |
+| `CCF2d` | `sparta.ccf2d` | `Spectrum` + two `Template`s → coarse + fine maps, RVs, errors, χ²_red, per-order noise (orders as windows) |
 
 ## 11. Reference
 

@@ -36,12 +36,12 @@ if __name__ == "__main__":
     # whatever sparta happens to be installed.
     sys.path[:0] = [str(ROOT / p) for p in ("src", "packages/unicor/src", "packages/todcor/src")]
 
-from sparta.Auxil.TimeSeries import TimeSeries
-from sparta.Observations import Observations
+from sparta.timeseries import TimeSeries
+from sparta.observations import Observations
 from sparta.instruments import Simulation
 from sparta.instruments.simulated import component_templates
-from sparta.UNICOR.Spectrum import Spectrum
-from sparta.UNICOR.Template import Template
+from sparta.spectrum import Spectrum
+from sparta.template import Template
 
 TOI193 = ROOT / "examples" / "data" / "TOI193"
 GOLDEN_PATH = pathlib.Path(__file__).resolve().parent / "golden" / "pipeline.json"
@@ -96,9 +96,9 @@ def _record_sb1_and_spectral_periodograms():
            "peak": _rounded(obs.ccf_peaks)}
 
     # USuRPER and the partial periodograms take one order; the partials need
-    # one RV per epoch, here the measured ones.
+    # one RV per epoch -- the measured ones, which the RV run stored in
+    # time_series.calculated_vrad_list.
     obs.SelectOrders([0], remove=False)
-    obs.time_series.calculated_vrad_list = list(obs.vels)
     obs.initialize_periodicity_detector(freq_range=FREQ_RANGE,
                                         periodogram_grid_resolution=GRID_RESOLUTION)
     detector = obs.periodicity_detector
@@ -177,8 +177,10 @@ def _record_tiravel(directory):
     template_library = Template(template=Spectrum(wv=lib.model.wv, sp=lib.model.sp)
                                 .SpecPreProccess())
 
+    # The order-averaged per-order RVs (single-order data here), not the
+    # combined CCF's.
     rv_library = obs.calc_rv_against_template(template_library, dv=0.1, VelBound=[-117, 117],
-                                              combine_ccfs=False).vels
+                                              combine_ccfs=False).vels_per_order.mean(axis=1)
     names = [os.path.basename(p) for p in obs.file_list]
     # The reference epoch fixes the common grid; take the first by name.
     obs.build_tiravel_template(rv_library, reference=names.index(min(names)))

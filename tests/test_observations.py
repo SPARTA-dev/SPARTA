@@ -1,16 +1,18 @@
-"""Tests for Observations: clean_time_series, survey lookup and _ingest.
+"""Tests for Observations: clean_time_series, survey lookup, _ingest and the
+RV drivers.
 
-The Observations object is built directly from a synthetic TimeSeries (no FITS
-reading); per-epoch products such as RVs and CCFs are attached by hand so the
-epoch filter can be checked against every array the object holds.
+For the filter, the Observations object is built directly from a synthetic
+TimeSeries (no FITS reading); per-epoch products such as RVs and CCFs are
+attached by hand so the epoch filter can be checked against every array the
+object holds. The RV drivers run on small seeded simulations.
 """
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-from sparta.Auxil.TimeSeries import TimeSeries
-from sparta.Observations import Observations
+from sparta.timeseries import TimeSeries
+from sparta.observations import Observations
 
 TIMES = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]
 VRADS = [-10.0, 0.0, np.nan, 5.0, 12.0, -3.0]
@@ -175,3 +177,78 @@ def test_ingest_refuses_a_native_step_per_order_mismatch():
     obs = _observations()
     with pytest.raises(ValueError, match="2 values for 1 orders"):
         obs._ingest([_record(np.linspace(5000.0, 5010.0, 50), native_step_kms=[0.6, 0.6])])
+
+
+# --- the RV drivers: what an RV run leaves on Observations and its TimeSeries --
+
+SUN_LIKE = dict(teff=5800, logg=3.5, feh=0.5, vsini=3.0)       # bundled lte05800-3.50+0.5
+K_DWARF = dict(teff=4900, logg=4.5, vsini=2.0)                  # bundled lte04900-4.50-0.0
+
+
+@pytest.fixture(scope="module")
+def sb1():
+    from sparta.instruments import Simulation
+    from sparta.instruments.simulated import component_templates
+    sim = Simulation(like="HARPS", components=[SUN_LIKE], times=np.arange(5.0),
+                     rv_kms=[-8.0, -3.0, 0.0, 4.0, 9.0], snr=100.0, noise="constant", seed=3,
+                     windows_A=[(5000.0, 5030.0), (5500.0, 5530.0)])
+    return sim, component_templates(sim)[0]
+
+
+def _sb1_observations(sb1):
+    sim, template = sb1
+    return Observations(survey="SIMULATED", simulation=sim), template
+
+
+def test_combined_run_fills_the_time_series_rvs(sb1):
+    obs, template = _sb1_observations(sb1)
+    obs.calc_rv_against_template(template, dv=0.1, VelBound=40)
+    np.testing.assert_array_equal(obs.time_series.calculated_vrad_list, obs.vels)
+    np.testing.assert_array_equal(obs.time_series.errors, obs.evels)
+    np.testing.assert_allclose(obs.vels, obs.truth.rv_kms[:, 0], atol=0.1)
+    assert obs.vels_per_order.shape == obs.evels_per_order.shape == (5, 2)
+    assert obs.ccf_peaks_per_order.shape == (5, 2)
+    assert np.all(np.isnan(obs.evels_per_order))          # err_per_ord=False
+    assert obs.ccf_peaks.shape == (5,)
+
+
+def test_uncombined_run_keeps_per_order_rvs_only(sb1):
+    import warnings
+    obs, template = _sb1_observations(sb1)
+    obs.calc_rv_against_template(template, dv=0.1, VelBound=40)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")      # no ndarray-to-scalar DeprecationWarning
+        obs.calc_rv_against_template(template, dv=0.1, VelBound=40, err_per_ord=True,
+                                     combine_ccfs=False)
+    assert obs.vels is None and obs.evels is None and obs.ccf_peaks is None
+    # Cleared, not left holding the combined RVs of the run before.
+    assert len(obs.time_series.calculated_vrad_list) == 0
+    assert len(obs.time_series.errors) == 0
+    assert obs.vels_per_order.shape == obs.evels_per_order.shape == (5, 2)
+    assert np.all(np.isfinite(obs.evels_per_order))
+    np.testing.assert_allclose(obs.vels_per_order, obs.truth.rv_kms[:, :1].repeat(2, 1),
+                               atol=0.2)
+
+
+def test_clean_filters_the_per_order_arrays(sb1):
+    obs, template = _sb1_observations(sb1)
+    obs.calc_rv_against_template(template, dv=0.1, VelBound=40)
+    per_order = obs.vels_per_order.copy()
+    obs.clean_time_series(max_vel=1.0)
+    np.testing.assert_array_equal(obs.vels_per_order, per_order[:3])
+    assert obs.vels.shape == (3,) and len(obs.ccf_list) == 3
+
+
+def test_sb2_run_leaves_calculated_vrad_list_alone():
+    from sparta.instruments import Simulation
+    from sparta.instruments.simulated import component_templates
+    sim = Simulation(like="HARPS", windows_A=[(5000.0, 5100.0)], times=np.arange(4.0),
+                     rv_kms=np.column_stack([[-20.0, -5.0, 5.0, 20.0], [25.0, 8.0, -8.0, -25.0]]),
+                     snr=100.0, noise="constant", seed=4,
+                     components=[dict(SUN_LIKE, amplitude=0.7), dict(K_DWARF, amplitude=0.3)])
+    obs = Observations(survey="SIMULATED", simulation=sim)
+    marker = [1.0, 2.0, 3.0, 4.0]
+    obs.time_series.calculated_vrad_list = marker
+    obs.calc_rv_against_two_templates(*component_templates(sim), dv=0.3, VelBound=40)
+    assert obs.time_series.calculated_vrad_list is marker
+    assert obs.vels1.shape == obs.vels2.shape == (4,)

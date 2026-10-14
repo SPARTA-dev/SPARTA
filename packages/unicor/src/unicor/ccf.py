@@ -3,7 +3,7 @@
 The array-level UNICOR engine. Every function takes plain floats / numpy
 arrays -- velocities in km/s, the CCF dimensionless -- so it can be used
 without SPARTA's ``Spectrum`` / ``Template`` objects (which wrap it in
-:class:`sparta.UNICOR.CCF1d`).
+:class:`sparta.ccf1d.CCF1d`).
 
 Typical use, for one order already on a uniform log-lambda grid ``wave``::
 

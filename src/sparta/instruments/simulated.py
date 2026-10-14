@@ -36,7 +36,7 @@ Angstrom):
 6. Noise on the native pixels: 'photon' (sigma = sqrt(flux) / snr) or
    'constant' (sigma = 1 / snr), snr being per native pixel at the continuum.
 7. With ``as_product=True``, the noisy spectrum is resampled onto the archive
-   grid with `sparta.UNICOR.Spectrum.resample_flux` (the archive pipeline's
+   grid with `sparta.spectrum.resample_flux` (the archive pipeline's
    own rebinning kernel is unknown), and the records carry the native step.
 
 For a topocentric product (SPECSYS 'TOPOCENT', e.g. NRES) the records carry
@@ -55,8 +55,8 @@ from scipy.interpolate import interp1d
 from todcor.simulate import composite_flux
 from unicor import dsp
 
-from sparta.UNICOR.Spectrum import Spectrum, resample_flux
-from sparta.UNICOR.Template import Template
+from sparta.spectrum import Spectrum, resample_flux
+from sparta.template import Template
 from sparta.instruments.base import Instrument, LoadedSpectrum, Product, Recommended
 
 TIME_SYSTEM = "days (simulated)"

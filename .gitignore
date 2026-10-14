@@ -21,7 +21,7 @@ dist/
 .worktrees/
 *.ipynb_checkpoints
 *__pycache__
-src/sparta/UNICOR/template_files/
+src/sparta/template_files/
 *.zip
 
 # Claude Code assistant scaffolding — private working context, not for the

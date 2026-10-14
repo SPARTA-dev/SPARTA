@@ -1,9 +1,9 @@
 """Golden master for the bundled HARPS (TOI193) and NRES (TOI677) data.
 
 The reference values in ``golden/instruments.json`` were produced by the
-legacy ``sparta.Auxil.ReadSpec`` before it was split into per-instrument
-modules; every refactor of the loaders or of ``Observations`` must reproduce
-them bit for bit.
+legacy ``Auxil/ReadSpec.py`` reader (commit 0a5eb9c) before it was split into
+per-instrument modules; every refactor of the loaders or of ``Observations``
+must reproduce them bit for bit.
 
 Spectra are pinned by SHA-256 hashes, not arrays, to keep the golden file
 small. The hash is taken over the float64 *values* order by order (each order
@@ -28,7 +28,7 @@ import numpy as np
 import pytest
 
 from sparta import instruments
-from sparta.Observations import Observations
+from sparta.observations import Observations
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 DATA = ROOT / "examples" / "data"
@@ -117,7 +117,7 @@ def _record_observations(survey, directory):
 
 def _record_unicor(directory):
     """RV / eRV (km/s) per epoch, exactly as UNICOR_quickstart.ipynb computes them."""
-    from sparta.UNICOR.Template import Template
+    from sparta.template import Template
     obs = Observations(survey="NRES", target_visits_lib=str(directory))
     obs.SelectOrders([10 + i for i in np.arange(40)], remove=False)
     obs.PreProccessSpectra(Ntrim=100, CleanMargins=True, RemoveNaNs=True, delta=0.5,

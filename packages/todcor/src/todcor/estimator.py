@@ -4,7 +4,7 @@
 # The Fourier-domain TODCOR estimator: pure functions on plain numpy arrays,
 # no astropy Quantity, no I/O. The forward model lives in simulate.py and the
 # shared grid/FFT/broadening primitives in unicor.dsp; SPARTA's Spectrum/Template
-# orchestration (sparta.TODCOR.CCF2d) is a layer on top.
+# orchestration (sparta.ccf2d.CCF2d) is a layer on top.
 #
 # Conventions: velocities and the log-lambda shift s in km/s; zeta (the Fourier
 # conjugate) in s/km; spectra on a uniform log-lambda grid of step dv (km/s);
@@ -244,7 +244,7 @@ def window_stats(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None,
     # The phase factors are unit-modulus and the weighted spectra are finite, so
     # the sums below cannot legitimately overflow or divide by zero -- but
     # Apple's Accelerate BLAS raises spurious FP-exception flags during complex
-    # matmul under numpy>=2 (same issue as USURPER_functions._gram). Silence them.
+    # matmul under numpy>=2 (same issue as sparta.pdc._gram). Silence them.
     with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
         # Data-template cross terms:
         #   b_i(v_i) = Re sum_k w conj(G_i) D exp(+2j pi zeta s_i)
@@ -551,7 +551,7 @@ def crlb_from_map(logL, v1_grid, v2_grid, half=3):
     fall-off, which biases the curvature and -- with the argmax off-centre in
     the patch -- the refined peak (several CRLB sigma for 8 km/s lines on a
     +/-3 km/s patch).  Evaluate a coarse map, then re-evaluate the statistics
-    on a fine local grid around its argmax (as ``sparta.TODCOR.CCF2d`` does)
+    on a fine local grid around its argmax (as ``sparta.ccf2d.CCF2d`` does)
     and call this on the fine map.
 
     Parameters

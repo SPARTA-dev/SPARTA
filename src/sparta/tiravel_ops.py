@@ -296,6 +296,6 @@ def coadd(matrix, weights):
         against it is scale-invariant.
     """
     # Silence Accelerate's spurious matmul FP flags under numpy>=2 (see
-    # correlation_matrix / USURPER_functions._gram).
+    # correlation_matrix / sparta.pdc._gram).
     with np.errstate(divide='ignore', over='ignore', invalid='ignore'):
         return np.asarray(weights, float) @ np.asarray(matrix, float)

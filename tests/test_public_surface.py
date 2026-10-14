@@ -1,12 +1,13 @@
 """The public ``import sparta`` surface, pinned.
 
-A later refactor renames and regroups the package; this makes every change to
-what users import a deliberate edit of the lists below rather than a side
-effect. Checked in a fresh interpreter, so submodules that other tests import
-cannot leak into ``dir(sparta)``.
+Every change to what users import must be a deliberate edit of the lists
+below rather than a side effect. Checked in a fresh interpreter, so
+submodules that other tests import cannot leak into ``dir(sparta)``.
 
-Note the current shadowing: ``sparta.Observations`` and ``sparta.TIRAVEL`` are
-the classes, not the submodules of the same name.
+The layout is flat: one module per concern (``sparta.spectrum``,
+``sparta.ccf1d``, ...), its class re-exported at the top level. The class and
+its module differ in case only for ``Observations``/``observations`` and
+``TIRAVEL``/``tiravel``.
 """
 import json
 import os
@@ -18,39 +19,51 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 _PATH = os.pathsep.join(str(ROOT / p) for p in ("src", "packages/unicor/src",
                                                   "packages/todcor/src"))
 
+ALL = ["Spectrum", "Template", "Observations", "TimeSeries", "CCF1d", "CCF2d",
+       "TIRAVEL", "PeriodicityDetector", "instruments"]
+
 # name -> "class <module>.<qualname>" or "module <name>"
 TOP_LEVEL = {
-    "Auxil": "module sparta.Auxil",
-    "CCF1d": "class sparta.UNICOR.CCF1d.CCF1d",
-    "CCF2d": "class sparta.TODCOR.CCF2d.CCF2d",
-    "Observations": "class sparta.Observations.Observations",
-    "TIRAVEL": "class sparta.TIRAVEL.TIRAVEL.TIRAVEL",
-    "TODCOR": "module sparta.TODCOR",
-    "TimeSeries": "class sparta.Auxil.TimeSeries.TimeSeries",
-    "UNICOR": "module sparta.UNICOR",
-    "USURPER": "module sparta.USURPER",
+    "CCF1d": "class sparta.ccf1d.CCF1d",
+    "CCF2d": "class sparta.ccf2d.CCF2d",
+    "Observations": "class sparta.observations.Observations",
+    "PeriodicityDetector": "class sparta.periodogram.PeriodicityDetector",
+    "Spectrum": "class sparta.spectrum.Spectrum",
+    "TIRAVEL": "class sparta.tiravel.TIRAVEL",
+    "Template": "class sparta.template.Template",
+    "TimeSeries": "class sparta.timeseries.TimeSeries",
+    "ccf1d": "module sparta.ccf1d",
+    "ccf2d": "module sparta.ccf2d",
     "instruments": "module sparta.instruments",
+    "observations": "module sparta.observations",
+    "pdc": "module sparta.pdc",
+    "periodogram": "module sparta.periodogram",
+    "spectrum": "module sparta.spectrum",
+    "template": "module sparta.template",
+    "timeseries": "module sparta.timeseries",
+    "tiravel": "module sparta.tiravel",
+    "tiravel_ops": "module sparta.tiravel_ops",
 }
 
 # The deep import paths the examples and docs use: module -> names that must
 # resolve there (existence, not an exhaustive list).
 DEEP = {
-    "sparta.UNICOR": ["CCF1d", "Spectrum", "Template"],
-    "sparta.UNICOR.Spectrum": ["Spectrum", "resample_flux"],
-    "sparta.UNICOR.Template": ["Template"],
-    "sparta.UNICOR.CCF1d": ["CCF1d"],
-    "sparta.TODCOR": ["CCF2d"],
-    "sparta.TODCOR.CCF2d": ["CCF2d"],
-    "sparta.TIRAVEL.tiravel_ops": ["align_spectra", "alignment", "coadd", "common_grid",
-                                   "correlation_matrix", "normalize_rows",
-                                   "rest_frame_wavelengths"],
-    "sparta.Auxil.TimeSeries": ["TimeSeries"],
-    "sparta.Auxil.PeriodicityDetector": ["PeriodicityDetector", "is_numeric_scalar"],
-    "sparta.USURPER.USURPER_functions": ["calc_PDC", "calc_PDC_unbiased",
-                                         "calc_pdc_distance_matrix", "get_wv_grid",
-                                         "inner_prod", "norm_z",
-                                         "resample_spec_to_common_grid",
-                                         "unbiased_u_centering"],
+    "sparta.spectrum": ["Spectrum", "resample_flux"],
+    "sparta.template": ["Template"],
+    "sparta.ccf1d": ["CCF1d"],
+    "sparta.ccf2d": ["CCF2d"],
+    "sparta.tiravel": ["TIRAVEL"],
+    "sparta.tiravel_ops": ["align_spectra", "alignment", "coadd", "common_grid",
+                           "correlation_matrix", "normalize_rows",
+                           "rest_frame_wavelengths"],
+    "sparta.timeseries": ["TimeSeries", "is_numeric_scalar"],
+    "sparta.periodogram": ["PeriodicityDetector"],
+    "sparta.pdc": ["double_centering", "error_aware_distance_matrix", "get_wv_grid",
+                   "inner_prod", "norm_z", "partial_centering", "pdc_power",
+                   "phase_distance_matrix", "resample_spec_to_common_grid",
+                   "scalar_distance_matrix", "spectral_distance_matrix",
+                   "unbiased_u_centering"],
+    "sparta.observations": ["Observations"],
     "sparta.instruments": ["Component", "Instrument", "LoadedSpectrum", "MODULES", "Product",
                            "REGISTRY", "Recommended", "Simulation", "Truth", "get",
                            "render_markdown"],
@@ -72,7 +85,8 @@ def kind(obj):
 top = {n: kind(getattr(sparta, n)) for n in dir(sparta) if not n.startswith("_")}
 deep = {m: [n for n in json.loads(sys.argv[1])[m] if hasattr(importlib.import_module(m), n)]
         for m in json.loads(sys.argv[1])}
-print(json.dumps({"top": top, "deep": deep}))
+print(json.dumps({"top": top, "deep": deep, "all": sparta.__all__,
+                  "version": sparta.__version__}))
 """
 
 
@@ -88,3 +102,5 @@ def test_import_sparta_surface_is_pinned():
     probe = _probe()
     assert probe["top"] == TOP_LEVEL
     assert probe["deep"] == DEEP
+    assert probe["all"] == ALL
+    assert isinstance(probe["version"], str) and probe["version"]

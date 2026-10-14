@@ -3,7 +3,7 @@
 Four executed notebooks for TODCOR — the two-component (double-lined, SB2)
 velocity engine, the counterpart of UNICOR. Notebooks 1–3 build the method up on
 plain arrays using only the standalone [`todcor`](../../packages/todcor) package;
-notebook 4 runs it on SPARTA `Spectrum`/`Template` objects (`sparta.TODCOR.CCF2d`).
+notebook 4 runs it on SPARTA `Spectrum`/`Template` objects (`sparta.CCF2d`, module `sparta.ccf2d`).
 Everything is synthetic, so each notebook is self-contained (no external data),
 and every quantitative claim is a live numerical check.
 

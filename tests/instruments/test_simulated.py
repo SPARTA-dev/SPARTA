@@ -6,16 +6,15 @@ Doppler conventions, barycentric and topocentric products, native and archive
 grids); noisy ones must scatter as the reported uncertainties say. PHOENIX
 models come from the bundled cache only (allow_download=False is the default).
 """
-import sys
 import warnings
 
 import numpy as np
 import pytest
 
-from sparta.Observations import Observations
-from sparta.TODCOR.CCF2d import CCF2d
-from sparta.UNICOR.CCF1d import CCF1d
-from sparta.UNICOR.Template import Template
+from sparta.observations import Observations
+from sparta.ccf2d import CCF2d
+from sparta.ccf1d import CCF1d
+from sparta.template import Template
 from sparta import instruments
 from sparta.instruments import Component, Simulation
 from sparta.instruments.simulated import (component_spectra, component_templates, simulate,
@@ -197,7 +196,7 @@ def test_noise_level_is_per_native_pixel_at_the_continuum(noise):
 
 def test_allow_download_false_never_touches_the_network(monkeypatch):
     import astropy.utils.data
-    template_module = sys.modules["sparta.UNICOR.Template"]   # the package exports the class
+    import sparta.template as template_module
 
     def no_network(*args, **kwargs):
         raise AssertionError("network access attempted")

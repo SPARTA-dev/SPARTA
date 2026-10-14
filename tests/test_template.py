@@ -1,7 +1,7 @@
 """Tests for the hardened PHOENIX download path (no network required)."""
 import pytest
 
-from sparta.UNICOR.Template import Template
+from sparta.template import Template
 
 
 def test_download_disabled_raises_without_network():
@@ -14,7 +14,7 @@ def test_download_disabled_raises_without_network():
 
 def test_download_is_opt_in_by_default(monkeypatch):
     import sys
-    template_module = sys.modules["sparta.UNICOR.Template"]   # the package exports the class
+    template_module = sys.modules["sparta.template"]   # the package exports the class
 
     def no_network(*args, **kwargs):
         raise AssertionError("network access attempted")
@@ -59,7 +59,7 @@ def test_broadening_keeps_every_order():
     # Both broadening methods used to keep only order 0, leaving model.wv with
     # N orders and model.sp with one -- the next CCF then raised IndexError.
     import numpy as np
-    from sparta.UNICOR.Spectrum import Spectrum
+    from sparta.spectrum import Spectrum
     from unicor import log_lambda_grid
     waves = [log_lambda_grid(lo, lo + 50.0, 0.5)[0] for lo in (5000.0, 5100.0)]
     sps = [1.0 - 0.5 * np.exp(-0.5 * ((w - w.mean()) / 0.1) ** 2) for w in waves]
@@ -74,7 +74,7 @@ def test_broadening_keeps_every_order():
 
 def test_save_template_model_round_trips_every_order(tmp_path):
     import numpy as np
-    from sparta.UNICOR.Spectrum import Spectrum
+    from sparta.spectrum import Spectrum
     waves = [np.linspace(5000.0, 5010.0, 30), np.linspace(5100.0, 5120.0, 45)]
     sps = [np.linspace(0.5, 1.0, 30), np.linspace(1.0, 0.7, 45)]
     t = Template(template=Spectrum(wv=waves, sp=sps, name="two-order"))
@@ -90,7 +90,7 @@ def test_cut_multiorder_like_keeps_native_steps_aligned():
     # the order count; a recorded native step must follow.
     import numpy as np
     from unicor import dsp
-    from sparta.UNICOR.Spectrum import Spectrum
+    from sparta.spectrum import Spectrum
     wave, _ = dsp.log_lambda_grid(4990.0, 5110.0, 0.5)
     model = Spectrum(wv=[wave], sp=[np.ones_like(wave)])
     model.InterpolateSpectrum(delta=0.1, InterpMethod="log")
@@ -105,7 +105,7 @@ def test_cut_multiorder_like_keeps_native_steps_aligned():
 def test_integrate_spec_records_the_coarser_sampling():
     import numpy as np
     from unicor import dsp
-    from sparta.UNICOR.Spectrum import Spectrum
+    from sparta.spectrum import Spectrum
     wave, _ = dsp.log_lambda_grid(4990.0, 5010.0, 0.5)
     model = Spectrum(wv=[wave, wave], sp=[np.ones_like(wave), np.ones_like(wave)])
     model.Info["NativeStep"] = [0.5, 0.5]
@@ -138,7 +138,7 @@ def test_barycentric_correction_stays_cz():
     # convention (see Spectrum.BarycentricCorrection).
     import numpy as np
     from astropy import units as u
-    from sparta.UNICOR.Spectrum import Spectrum
+    from sparta.spectrum import Spectrum
     w = np.linspace(5000.0, 5100.0, 50)
     spec = Spectrum(wv=[w.copy()], sp=[np.ones_like(w)], bcv=25.0)
     spec.BarycentricCorrection()
