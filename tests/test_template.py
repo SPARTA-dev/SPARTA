@@ -1,7 +1,11 @@
 """Tests for Template: its constructors, the hardened PHOENIX download path
 (no network required), and the model operations."""
+import io
+import os
+
 import numpy as np
 import pytest
+from astropy.io import fits
 
 from sparta import template as template_module
 from sparta.spectrum import Spectrum
@@ -96,6 +100,138 @@ def test_phoenix_spectrum_never_downloads_by_default(monkeypatch):
         phoenix_spectrum(9999, 9.99, wave_range=(5000.0, 5100.0))
     with pytest.raises(ValueError, match="wave_range"):
         phoenix_spectrum(5800, 3.5, 0.5, wave_range=(5100.0, 5000.0))
+
+
+# --- the PHOENIX cache: atomic, verified writes; no network (download_file is mocked)
+
+_MODEL = template_module._phoenix_filename(9000, 4.0, 0.0, 0.0)
+
+
+def _fits_bytes():
+    buf = io.BytesIO()
+    fits.PrimaryHDU(np.arange(1.0, 9.0, dtype=np.float32)).writeto(buf)
+    return buf.getvalue()
+
+
+@pytest.fixture
+def cache(tmp_path, monkeypatch):
+    root = tmp_path / "cache"          # not created: the download must create it
+    monkeypatch.setattr(template_module, "TEMPLATE_FILES_PATH", str(root))
+    return root
+
+
+@pytest.fixture
+def fake_download(tmp_path, monkeypatch):
+    """Stand-in for astropy's download_file: writes ``content`` to a temp file
+    outside the cache (as astropy does) and records every call."""
+    fetch_dir = tmp_path / "fetch"
+    fetch_dir.mkdir()
+    state = {"calls": [], "content": _fits_bytes(), "fetched": []}
+
+    def download_file(url, **kwargs):
+        state["calls"].append((url, kwargs))
+        fetched = fetch_dir / f"download{len(state['calls'])}"
+        fetched.write_bytes(state["content"])
+        state["fetched"].append(fetched)
+        return str(fetched)
+
+    monkeypatch.setattr(template_module, "download_file", download_file)
+    return state
+
+
+def test_download_is_installed_whole_over_default_tls(cache, fake_download):
+    path = template_module._cached_phoenix_file(*_MODEL, allow_download=True)
+    assert path == os.path.join(os.path.realpath(cache), _MODEL[1])
+    assert open(path, "rb").read() == fake_download["content"]
+    assert os.listdir(cache) == [_MODEL[1]]                  # no temporary left over
+    assert not any(f.exists() for f in fake_download["fetched"])
+
+    (url, kwargs), = fake_download["calls"]
+    assert url == template_module._phoenix_url(*_MODEL)
+    assert url.startswith("https://phoenix.astro.physik.uni-goettingen.de/data/")
+    assert "ssl_context" not in kwargs and "allow_insecure" not in kwargs
+    assert kwargs["cache"] is False
+
+    assert template_module._cached_phoenix_file(*_MODEL, allow_download=True) == path
+    assert len(fake_download["calls"]) == 1                  # now served from the cache
+
+
+@pytest.mark.parametrize("previous", [None, b"SIMPLE  = old partial file"])
+def test_an_interrupted_copy_never_reaches_the_final_path(cache, fake_download, monkeypatch,
+                                                          previous):
+    final = cache / _MODEL[1]
+    if previous is not None:
+        cache.mkdir()
+        final.write_bytes(previous)
+
+    def copy_half_then_interrupt(src, dst):
+        dst.write(src.read(100))
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(template_module.shutil, "copyfileobj", copy_half_then_interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        template_module._cached_phoenix_file(*_MODEL, allow_download=True)
+
+    if previous is None:
+        assert not final.exists()
+        assert os.listdir(cache) == []
+    else:
+        assert final.read_bytes() == previous
+        assert os.listdir(cache) == [_MODEL[1]]
+    assert not any(f.exists() for f in fake_download["fetched"])
+
+
+def test_a_download_that_is_not_fits_is_not_installed(cache, fake_download):
+    fake_download["content"] = b"<html>502 Bad Gateway</html>"
+    with pytest.raises(OSError, match="does not open as FITS"):
+        template_module._cached_phoenix_file(*_MODEL, allow_download=True)
+    assert os.listdir(cache) == []
+    assert not any(f.exists() for f in fake_download["fetched"])
+
+
+@pytest.mark.parametrize("corrupt", [b"", b"not a FITS file", _fits_bytes()[:2880]],
+                         ids=["empty", "foreign", "truncated"])
+def test_a_corrupt_cached_file_is_reported_not_trusted(cache, fake_download, corrupt):
+    cache.mkdir()
+    final = cache / _MODEL[1]
+    final.write_bytes(corrupt)
+
+    with pytest.raises(OSError, match="corrupt or truncated") as info:
+        template_module._cached_phoenix_file(*_MODEL, allow_download=False)
+    assert _MODEL[1] in str(info.value)
+    assert final.read_bytes() == corrupt                     # reported, not deleted
+    assert fake_download["calls"] == []
+
+    template_module._cached_phoenix_file(*_MODEL, allow_download=True)
+    assert final.read_bytes() == fake_download["content"]
+    assert os.listdir(cache) == [_MODEL[1]]
+
+
+@pytest.mark.parametrize("teff, logg, feh, alpha", [
+    (np.nan, 4.5, 0.0, 0.0), (np.inf, 4.5, 0.0, 0.0), (-5500, 4.5, 0.0, 0.0), (0, 4.5, 0.0, 0.0),
+    (5500, np.nan, 0.0, 0.0), (5500, -1.0, 0.0, 0.0), (5500, 4.5, np.inf, 0.0),
+    (5500, 4.5, 0.0, -np.inf), (5500, 4.5, 0.0, np.nan), ("../../x", 4.5, 0.0, 0.0),
+])
+def test_bad_model_parameters_raise_before_any_io(monkeypatch, teff, logg, feh, alpha):
+    def no_io(*args, **kwargs):
+        raise AssertionError("cache or network touched")
+
+    monkeypatch.setattr(template_module, "_cached_phoenix_file", no_io)
+    monkeypatch.setattr(template_module, "download_file", no_io)
+    with pytest.raises(ValueError, match="PHOENIX teff"):
+        template_module._phoenix_filename(teff, logg, feh, alpha)
+    with pytest.raises(ValueError, match="PHOENIX teff"):
+        phoenix_spectrum(teff, logg, feh, alpha, wave_range=(5000.0, 5100.0),
+                         allow_download=True)
+
+
+@pytest.mark.parametrize("name", ["../escape.fits", "/etc/passwd", "sub/model.fits",
+                                  "..", ".", ""])
+def test_a_cache_path_cannot_leave_the_cache_dir(cache, fake_download, name):
+    with pytest.raises(ValueError, match="directly inside"):
+        template_module._cached_phoenix_file("/HiResFITS/", name, allow_download=True)
+    assert fake_download["calls"] == []
+    assert not cache.exists()
 
 
 def test_from_mask_marks_the_windows_with_negative_weights(tmp_path):

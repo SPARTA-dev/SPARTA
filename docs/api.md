@@ -547,8 +547,7 @@ A single-order PHOENIX-ACES-AGSS-COND-2011 HiRes model (Husser et al. 2013) over
 
 **Raises**
 
-- *FileNotFoundError*: For a file missing from the cache with downloads disabled.
-- *ValueError*: If `wave_range` is not inside the model grid.
+- *FileNotFoundError, OSError, ValueError*: See `phoenix_spectrum`.
 
 ##### `Template.from_mask` (classmethod)
 
@@ -571,6 +570,7 @@ A line-mask template (e.g. a HARPS DRS `.mas` file) on the PHOENIX wavelength gr
 **Raises**
 
 - *FileNotFoundError*: If the PHOENIX grid is not cached and downloads are disabled.
+- *OSError*: If the cached grid is corrupt and downloads are disabled.
 - *ValueError*: If `wave_range` is not inside the grid.
 
 ##### `Template.broaden_instrumental`
@@ -716,7 +716,7 @@ A PHOENIX-ACES-AGSS-COND-2011 HiRes model (Husser et al. 2013) over a wavelength
 - `alpha` (*float*): Alpha enhancement [alpha/Fe] (dex), a grid value.
 - `wave_range` (*(float, float)*): (lo, hi) wavelengths (Angstrom, in the frame chosen by `air`); the model keeps the grid points from the first above `lo` up to, not including, the first above `hi`.
 - `air` (*bool*): PHOENIX wavelengths are in vacuum. True converts them to air (Morton 2000, ApJS 130, 403) before `wave_range` is applied; use it for an observation in air (see the product's `wavelength_frame` in docs/instruments.md).
-- `allow_download` (*bool*): Fetch files missing from the cache from the Goettingen server over HTTPS. Default False: a missing file raises.
+- `allow_download` (*bool*): Fetch files missing from the cache, or replace cached ones that do not open as FITS with data (e.g. truncated), from the Goettingen server over HTTPS. Default False: a missing or corrupt file raises.
 
 **Returns**
 
@@ -726,7 +726,8 @@ A PHOENIX-ACES-AGSS-COND-2011 HiRes model (Husser et al. 2013) over a wavelength
 **Raises**
 
 - *FileNotFoundError*: For a file missing from the cache with downloads disabled.
-- *ValueError*: If `wave_range` is not inside the model grid.
+- *OSError*: For a corrupt cached file with downloads disabled (it is not deleted), or a download that is not a FITS file with data.
+- *ValueError*: If `wave_range` is not inside the model grid, or a model parameter is not finite (or teff \<= 0, logg \< 0).
 
 ### sparta.ccf1d
 
@@ -1156,7 +1157,7 @@ Apply `Spectrum.preprocess` to every epoch, in place.
 **Parameters**
 
 - `n_trim, clean_margins, remove_nans, delta, cosmic_sigma, filter_lowcut, filter_highcut, alpha`: Passed through; see `Spectrum.preprocess`. The per-instrument recommendations are in docs/instruments.md.
-- `progress` (*bool*): Show a tqdm progress bar over the epochs. Off by default; needs the optional `tqdm` package (`pip install "SPARTA[progress]"`).
+- `progress` (*bool*): Show a tqdm progress bar over the epochs. Off by default; needs the optional `tqdm` package (`pip install tqdm`).
 
 **Returns**
 
@@ -1209,7 +1210,7 @@ Single-lined (SB1) radial velocities of every epoch, by UNICOR.
 - `combine_ccfs` (*bool*): If True, combine every epoch's per-order CCFs by maximum likelihood (Zucker 2003) and read the RV and its uncertainty from the combined CCF. If False, make only the per-order measurements.
 - `velocity_convention` (*{'cz', 'relativistic'}*): Doppler convention of the RVs (see `CCF1d.cross_correlate`).
 - `output` (*{'ccf', 'loglike'}*): The primary result of each epoch's CCF1d: the CCF (default) or the Zucker (2003) log-likelihood (see `CCF1d.cross_correlate`). Both are stored; the RVs and uncertainties do not depend on it.
-- `progress` (*bool*): Show a tqdm progress bar over the epochs. Off by default; needs the optional `tqdm` package (`pip install "SPARTA[progress]"`).
+- `progress` (*bool*): Show a tqdm progress bar over the epochs. Off by default; needs the optional `tqdm` package (`pip install tqdm`).
 
 **Returns**
 
@@ -1251,7 +1252,7 @@ Double-lined (SB2) radial velocities of every epoch, by TODCOR.
 - `nonneg` (*bool*): Constrain both amplitudes to be non-negative.
 - `velocity_convention` (*{'cz', 'relativistic'}*): Doppler convention of the RVs (see `CCF2d.cross_correlate`).
 - `output` (*{'ccf', 'loglike'}*): The primary map of each epoch's CCF2d: the two-dimensional correlation R (default) or the profile log-likelihood (see `CCF2d.cross_correlate`). Both are stored; the RVs, errors and amplitudes do not depend on it.
-- `progress` (*bool*): Show a tqdm progress bar over the epochs. Off by default; needs the optional `tqdm` package (`pip install "SPARTA[progress]"`).
+- `progress` (*bool*): Show a tqdm progress bar over the epochs. Off by default; needs the optional `tqdm` package (`pip install tqdm`).
 - `**kwargs`: Passed to `CCF2d.cross_correlate` (e.g. `alpha`, `zeta_max`, `orders`); `keep_windows` defaults to False here, as keeping spectrum-sized arrays for every epoch fills memory.
 
 **Returns**

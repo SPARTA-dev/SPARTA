@@ -17,12 +17,15 @@ Reference: PHOENIX-ACES models -- Husser et al. 2013, A&A 553, A6.
 
 from astropy.io import fits
 from astropy.utils.data import download_file
+from astropy.utils.exceptions import AstropyUserWarning
 from sparta.preprocess import coarsest_native_step
 from sparta.spectrum import Spectrum
 from unicor import dsp
 import numpy as np
 import os
 import shutil
+import tempfile
+import warnings
 from astropy import units as u
 
 
@@ -148,10 +151,8 @@ class Template:
 
         Raises
         ------
-        FileNotFoundError
-            For a file missing from the cache with downloads disabled.
-        ValueError
-            If ``wave_range`` is not inside the model grid.
+        FileNotFoundError, OSError, ValueError
+            See ``phoenix_spectrum``.
         '''
         wave, flux = phoenix_spectrum(teff, logg, feh, alpha, wave_range=wave_range, air=air,
                                       allow_download=allow_download)
@@ -189,6 +190,8 @@ class Template:
         ------
         FileNotFoundError
             If the PHOENIX grid is not cached and downloads are disabled.
+        OSError
+            If the cached grid is corrupt and downloads are disabled.
         ValueError
             If ``wave_range`` is not inside the grid.
         '''
@@ -492,8 +495,9 @@ def phoenix_spectrum(teff, logg, feh=0.0, alpha=0.0, *, wave_range, air=False,
         observation in air (see the product's ``wavelength_frame`` in
         docs/instruments.md).
     allow_download : bool
-        Fetch files missing from the cache from the Goettingen server over
-        HTTPS. Default False: a missing file raises.
+        Fetch files missing from the cache, or replace cached ones that do not
+        open as FITS with data (e.g. truncated), from the Goettingen server
+        over HTTPS. Default False: a missing or corrupt file raises.
 
     Returns
     -------
@@ -507,13 +511,17 @@ def phoenix_spectrum(teff, logg, feh=0.0, alpha=0.0, *, wave_range, air=False,
     ------
     FileNotFoundError
         For a file missing from the cache with downloads disabled.
+    OSError
+        For a corrupt cached file with downloads disabled (it is not deleted),
+        or a download that is not a FITS file with data.
     ValueError
-        If ``wave_range`` is not inside the model grid.
+        If ``wave_range`` is not inside the model grid, or a model parameter
+        is not finite (or teff <= 0, logg < 0).
     '''
+    flux_sub_path, flux_file = _phoenix_filename(teff, logg, feh, alpha)
     wave_path = _cached_phoenix_file(_PHOENIX_WAVE_SUB_PATH, PHOENIX_WAVE_FILE,
                                      allow_download)
-    flux_path = _cached_phoenix_file(*_phoenix_filename(teff, logg, feh, alpha),
-                                     allow_download)
+    flux_path = _cached_phoenix_file(flux_sub_path, flux_file, allow_download)
 
     with fits.open(flux_path) as hdul_spec:
         s = np.squeeze(np.array(hdul_spec[0].data))
@@ -546,7 +554,20 @@ def _phoenix_filename(teff, logg, feh, alpha):
     -------
     (str, str)
         The server sub-path and the file name.
+
+    Raises
+    ------
+    ValueError
+        If a parameter is not a finite number, or teff <= 0 or logg < 0.
     '''
+    try:
+        teff, logg, feh, alpha = (float(v) for v in (teff, logg, feh, alpha))
+    except (TypeError, ValueError) as err:
+        raise ValueError("PHOENIX teff, logg, feh and alpha must be numbers; got "
+                         f"{(teff, logg, feh, alpha)!r}") from err
+    if not np.all(np.isfinite([teff, logg, feh, alpha])) or teff <= 0 or logg < 0:
+        raise ValueError("PHOENIX teff, logg, feh and alpha must be finite, with teff > 0 K "
+                         f"and logg >= 0; got {(teff, logg, feh, alpha)}")
     teff = int(teff)
     if feh > 0:
         p = "/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/Z+{:.1f}/".format(feh)
@@ -569,16 +590,78 @@ def _phoenix_url(sub_path, filename):
     return PHOENIX_URL + sub_path.strip('/') + '/' + filename
 
 
+def _cache_path(filename):
+    '''
+    Path of a PHOENIX file directly inside TEMPLATE_FILES_PATH.
+
+    Only the directory is resolved (``os.path.realpath``): a cached file may
+    be a symlink to a shared model store, and ``os.replace`` onto it replaces
+    the link, never its target.
+
+    Parameters
+    ----------
+    filename : str
+        A bare file name, as from ``_phoenix_filename``.
+
+    Returns
+    -------
+    str
+        The path in the resolved TEMPLATE_FILES_PATH.
+
+    Raises
+    ------
+    ValueError
+        If the path would not lie directly inside TEMPLATE_FILES_PATH.
+    '''
+    root = os.path.realpath(TEMPLATE_FILES_PATH)
+    path = os.path.join(root, filename)
+    if (os.path.realpath(os.path.dirname(path)) != root
+            or os.path.basename(path) in ('', os.curdir, os.pardir)):
+        raise ValueError(f"PHOENIX file name {filename!r} does not resolve to a file "
+                         f"directly inside {root}")
+    return path
+
+
+def _is_readable_fits(path):
+    '''
+    Whether ``path`` opens as FITS with a non-empty primary data array.
+
+    A cheap guard against a truncated or foreign file: the data are memory-
+    mapped, not read, so a file shorter than its header declares fails here.
+
+    Parameters
+    ----------
+    path : str
+
+    Returns
+    -------
+    bool
+    '''
+    try:
+        with warnings.catch_warnings():
+            # astropy warns "File may have been truncated"; the caller raises instead.
+            warnings.simplefilter('ignore', AstropyUserWarning)
+            with fits.open(path) as hdul:
+                return hdul[0].data is not None and hdul[0].data.size > 0
+    except (OSError, ValueError, TypeError):
+        return False
+
+
 def _cached_phoenix_file(sub_path, filename, allow_download):
     '''
     Local path of a PHOENIX file, downloading it only if allowed.
+
+    A cached file that does not open as FITS with data (e.g. truncated) is
+    treated as missing: re-downloaded and replaced if allowed, otherwise
+    reported -- never deleted.
 
     Parameters
     ----------
     sub_path, filename : str
         See ``_phoenix_filename``.
     allow_download : bool
-        When False, a file missing from TEMPLATE_FILES_PATH raises.
+        When False, a file missing from (or corrupt in) TEMPLATE_FILES_PATH
+        raises.
 
     Returns
     -------
@@ -589,11 +672,20 @@ def _cached_phoenix_file(sub_path, filename, allow_download):
     ------
     FileNotFoundError
         If the file is missing and downloads are disabled.
+    OSError
+        If the cached file is corrupt and downloads are disabled.
+    ValueError
+        If ``filename`` does not resolve to a file inside TEMPLATE_FILES_PATH.
     '''
-    path = os.path.join(TEMPLATE_FILES_PATH, filename)
+    path = _cache_path(filename)
     if os.path.exists(path):
-        return path
-    if not allow_download:
+        if _is_readable_fits(path):
+            return path
+        if not allow_download:
+            raise OSError(
+                f"PHOENIX file {path} is corrupt or truncated (it does not open as FITS "
+                "with data). Delete it, or pass allow_download=True to replace it.")
+    elif not allow_download:
         raise FileNotFoundError(
             f"PHOENIX file '{filename}' is not in {TEMPLATE_FILES_PATH} "
             "and downloads are disabled (allow_download=False); pass "
@@ -604,12 +696,15 @@ def _cached_phoenix_file(sub_path, filename, allow_download):
 def _download_phoenix_file(sub_path, filename, timeout=120):
     '''
     Download one PHOENIX file from the Goettingen server into
-    TEMPLATE_FILES_PATH, over HTTPS.
+    TEMPLATE_FILES_PATH, over HTTPS with astropy's default TLS verification.
 
-    Uses astropy.utils.data.download_file (TLS, timeout, atomic
-    temp-then-move), so there is no process-CWD mutation, no leaked file
-    handle, and no partial file left behind on failure. Any download error
-    propagates to the caller.
+    astropy.utils.data.download_file fetches into a system temporary file
+    (possibly on another filesystem). Its content is copied into a temporary
+    file in TEMPLATE_FILES_PATH, fsynced, checked to open as FITS with data,
+    and only then renamed onto the final name with ``os.replace`` (atomic on
+    one filesystem). An interrupted or failed run therefore leaves the final
+    path untouched: absent, or the previous file. Both temporary files are
+    removed in every case. Any download error propagates to the caller.
 
     Parameters
     ----------
@@ -624,18 +719,38 @@ def _download_phoenix_file(sub_path, filename, timeout=120):
     -------
     str
         The local path of the downloaded file.
-    '''
-    os.makedirs(TEMPLATE_FILES_PATH, exist_ok=True)
-    target = os.path.join(TEMPLATE_FILES_PATH, filename)
 
-    cached = download_file(_phoenix_url(sub_path, filename), cache=False, timeout=timeout,
-                           show_progress=False)
+    Raises
+    ------
+    OSError
+        If the downloaded content does not open as FITS with data.
+    ValueError
+        If ``filename`` does not resolve to a file inside TEMPLATE_FILES_PATH.
+    '''
+    target = _cache_path(filename)
+    cache_dir = os.path.dirname(target)
+    os.makedirs(cache_dir, exist_ok=True)
+
+    url = _phoenix_url(sub_path, filename)
+    fetched = download_file(url, cache=False, timeout=timeout, show_progress=False)
+    partial = None
     try:
-        shutil.move(cached, target)
-    except BaseException:
-        if os.path.exists(cached):
-            os.remove(cached)
-        raise
+        with open(fetched, 'rb') as src, tempfile.NamedTemporaryFile(
+                dir=cache_dir, prefix='.' + filename + '.', suffix='.part',
+                delete=False) as dst:
+            partial = dst.name
+            shutil.copyfileobj(src, dst)
+            dst.flush()
+            os.fsync(dst.fileno())
+        if not _is_readable_fits(partial):
+            raise OSError(f"the file downloaded from {url} does not open as FITS with data; "
+                          "nothing was written to the cache")
+        os.replace(partial, target)
+        partial = None
+    finally:
+        for leftover in (partial, fetched):
+            if leftover is not None and os.path.exists(leftover):
+                os.remove(leftover)
     return target
 
 

@@ -288,7 +288,7 @@ class Observations:
             recommendations are in docs/instruments.md.
         progress : bool
             Show a tqdm progress bar over the epochs. Off by default; needs the
-            optional ``tqdm`` package (``pip install "SPARTA[progress]"``).
+            optional ``tqdm`` package (``pip install tqdm``).
 
         Returns
         -------
@@ -388,7 +388,7 @@ class Observations:
             Both are stored; the RVs and uncertainties do not depend on it.
         progress : bool
             Show a tqdm progress bar over the epochs. Off by default; needs the
-            optional ``tqdm`` package (``pip install "SPARTA[progress]"``).
+            optional ``tqdm`` package (``pip install tqdm``).
 
         Returns
         -------
@@ -488,7 +488,7 @@ class Observations:
             amplitudes do not depend on it.
         progress : bool
             Show a tqdm progress bar over the epochs. Off by default; needs the
-            optional ``tqdm`` package (``pip install "SPARTA[progress]"``).
+            optional ``tqdm`` package (``pip install tqdm``).
         **kwargs
             Passed to ``CCF2d.cross_correlate`` (e.g. ``alpha``,
             ``zeta_max``, ``orders``); ``keep_windows`` defaults to False
@@ -783,5 +783,5 @@ def _progress(iterable, enabled):
         from tqdm import tqdm
     except ImportError as err:
         raise ImportError('progress=True needs the optional tqdm package: '
-                          'pip install "SPARTA[progress]"') from err
+                          'pip install tqdm') from err
     return tqdm(iterable)

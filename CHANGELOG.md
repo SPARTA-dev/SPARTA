@@ -225,7 +225,8 @@ Keys of `results_frequency` / `results_power`:
 - tqdm is no longer a required dependency and progress bars are off by
   default. `Observations.preprocess`, `calc_rv_against_template` and
   `calc_rv_against_two_templates` take `progress=False`; `progress=True`
-  needs the optional extra (`pip install "SPARTA[progress]"`).
+  needs tqdm (`pip install tqdm`; the extra is `pip install ".[progress]"` from a
+  checkout -- never `"SPARTA[progress]"`, which on PyPI is an unrelated package).
 - `Observations` reads files in sorted order, so the epoch order no longer
   depends on the filesystem.
 - **Two output modes, `output='ccf'` (default) or `output='loglike'`,** in
@@ -286,6 +287,21 @@ Keys of `results_frequency` / `results_power`:
   `CCF2d.cross_correlate` is a composition of them, bit-for-bit as before; the
   resampled-noise model is public as `sparta.preprocess.resampling_noise_psd` and
   `native_phases`. `CCF2d` prefixes `order {I}: ` to window-preparation errors.
+
+- **Security hardening of the PHOENIX download** (the former FTP connection;
+  HTTPS with astropy's default certificate checks since July). Downloads are
+  copied into a temporary file in the cache directory, fsynced, verified to be
+  FITS with data, and only then moved into place with `os.replace`. An
+  interrupted or failed download therefore never leaves a truncated model that
+  later runs would trust. A corrupt cached file is reported (never silently
+  deleted) when downloads are off, and replaced when they are on. Model
+  parameters must be finite numbers (Teff > 0, log g >= 0) and are checked
+  before any file access. The cache path must be a bare file name inside the
+  cache directory.
+- Install lines that would make pip fetch the unpublished engine names from
+  PyPI (a dependency-confusion risk) now install the local engines in the same
+  call, and the README warns never to run `pip install .` on its own while
+  the engines are unpublished.
 
 ### Documentation
 

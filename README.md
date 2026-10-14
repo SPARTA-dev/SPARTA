@@ -85,9 +85,10 @@ pip install "sparta-unicor @ $R#subdirectory=packages/unicor" \
 ```
 
 The engines are not on PyPI yet, so list them in the same `pip` call as anything
-that depends on them. Their PyPI names carry a `sparta-` prefix because `unicor`
-there is an unrelated project; likewise `pip install sparta` installs an
-unrelated RDF library.
+that depends on them: never `pip install .` on its own while the engines are
+unpublished — pip would look them up on PyPI. Their PyPI names carry a
+`sparta-` prefix because `unicor` there is an unrelated project; likewise
+`pip install sparta` installs an unrelated RDF library.
 
 ## Quickstart
 
@@ -210,7 +211,7 @@ object layer on top of them.
 | --- | --- | --- |
 | [UNICOR engine](https://github.com/SPARTA-dev/SPARTA/blob/master/packages/unicor/README.md) (`sparta-unicor`) | `unicor` | numpy, scipy |
 | [TODCOR engine](https://github.com/SPARTA-dev/SPARTA/blob/master/packages/todcor/README.md) (`sparta-todcor`) | `todcor` | numpy, `unicor` |
-| SPARTA (`SPARTA`) | `sparta` | both engines, astropy, specutils, matplotlib (optional: tqdm for progress bars, `SPARTA[progress]`) |
+| SPARTA (`SPARTA`) | `sparta` | both engines, astropy, specutils, matplotlib (optional: tqdm for progress bars, `pip install tqdm`) |
 
 The `sparta` classes are importable from the top level
 (`from sparta import Observations, Template`):

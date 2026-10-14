@@ -330,8 +330,10 @@ def test_progress_true_without_tqdm_explains_how_to_install(monkeypatch):
     from sparta.observations import _progress
     monkeypatch.setitem(sys.modules, "tqdm", None)   # makes `import tqdm` fail
     assert _progress([1, 2], False) == [1, 2]
-    with pytest.raises(ImportError, match=r"SPARTA\[progress\]"):
+    # Not "SPARTA[progress]": on PyPI "sparta" is an unrelated package.
+    with pytest.raises(ImportError, match=r"pip install tqdm$") as info:
         _progress([1, 2], True)
+    assert "SPARTA[" not in str(info.value)
 
 
 # --- output reaches the engines through the drivers ---------------------------

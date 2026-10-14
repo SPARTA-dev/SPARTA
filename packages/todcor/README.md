@@ -197,7 +197,8 @@ it lives in SPARTA because it probes SPARTA's spline resampler.
 ## Test
 
 ```bash
-pip install "./packages/todcor[test]"
+# both in one call, so pip uses the local unicor instead of looking it up on PyPI
+pip install "./packages/unicor" "./packages/todcor[test]"
 pytest packages/todcor
 ```
 
