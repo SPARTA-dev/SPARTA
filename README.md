@@ -200,6 +200,8 @@ The pages in
 cover the conventions in full, UNICOR and TODCOR (outputs, likelihoods,
 errors), the periodograms, the instruments, the API reference, the known
 limitations and a proposed roadmap.
+[`docs/open_api.md`](https://github.com/SPARTA-dev/SPARTA/blob/master/docs/open_api.md)
+lists the atoms (plain arrays in, arrays out) to build your own analysis from.
 
 ## Module map
 

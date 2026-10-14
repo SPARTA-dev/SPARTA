@@ -17,9 +17,7 @@ Reference: Zucker & Mazeh 2006, MNRAS 371, 1513.
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
 
-from sparta import plotting as sp_plot
 from sparta.tiravel_ops import build_tiravel
 from sparta.spectrum import Spectrum
 from sparta.template import Template
@@ -160,6 +158,10 @@ class TIRAVEL:
         -------
         matplotlib.figure.Figure
         '''
+        # The plotting stack loads on the first plot, not on import.
+        import matplotlib.pyplot as plt
+        from sparta import plotting as sp_plot
+
         x = np.arange(len(self.weights)) if times is None else np.asarray(times)
 
         fig, ax = plt.subplots(figsize=figsize, layout='constrained')
@@ -209,6 +211,9 @@ class TIRAVEL:
         ValueError
             If ``show_epochs`` but the aligned epochs were not kept.
         '''
+        import matplotlib.pyplot as plt
+        from sparta import plotting as sp_plot
+
         if show_epochs and self.aligned is None:
             raise ValueError('the aligned epochs were not retained; re-run '
                              'build_template with keep_aligned=True')

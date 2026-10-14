@@ -7,7 +7,10 @@ submodules that other tests import cannot leak into ``dir(sparta)``.
 The layout is flat: one module per concern (``sparta.spectrum``,
 ``sparta.ccf1d``, ...), its class re-exported at the top level. The class and
 its module differ in case only for ``Observations``/``observations`` and
-``TIRAVEL``/``tiravel``.
+``TIRAVEL``/``tiravel``. The atoms of ``sparta.preprocess``, ``sparta.pdc``,
+``sparta.tiravel_ops`` and ``phoenix_spectrum`` are re-exported too. Every
+top-level name is resolved lazily (PEP 562), so ``dir(sparta)`` is exactly
+``__all__``: submodules are reached by importing them.
 
 The classes' public methods and their parameter names are pinned too (0.3.0
 made them snake_case, see CHANGELOG.md), and ``__version__`` must be the
@@ -26,9 +29,18 @@ _PATH = os.pathsep.join(str(ROOT / p) for p in ("src", "packages/unicor/src",
                                                   "packages/todcor/src"))
 
 ALL = ["Spectrum", "Template", "Observations", "TimeSeries", "CCF1d", "CCF2d",
-       "TIRAVEL", "PeriodicityDetector", "instruments", "plotting"]
+       "TIRAVEL", "PeriodicityDetector", "instruments", "plotting",
+       "resample_flux", "trim_margins", "resample_to_linear_grid", "resample_to_log_grid",
+       "coarsest_native_step", "remove_cosmics", "bandpass", "resampling_noise_psd",
+       "native_phases", "phoenix_spectrum",
+       "rest_frame_wavelengths", "common_grid", "align_spectra", "normalize_rows",
+       "correlation_matrix", "alignment", "coadd", "TiravelResult", "build_tiravel",
+       "scalar_distance_matrix", "error_aware_distance_matrix", "spectral_distance_matrix",
+       "phase_distance_matrix", "double_centering", "unbiased_u_centering", "inner_prod",
+       "norm_z", "partial_centering", "pdc_power", "pdc_pvalue", "pdc_power_level",
+       "get_wv_grid", "resample_spec_to_common_grid"]
 
-# name -> "class <module>.<qualname>" or "module <name>"
+# name -> "class|function <module>.<qualname>" or "module <name>"
 TOP_LEVEL = {
     "CCF1d": "class sparta.ccf1d.CCF1d",
     "CCF2d": "class sparta.ccf2d.CCF2d",
@@ -38,19 +50,23 @@ TOP_LEVEL = {
     "TIRAVEL": "class sparta.tiravel.TIRAVEL",
     "Template": "class sparta.template.Template",
     "TimeSeries": "class sparta.timeseries.TimeSeries",
-    "ccf1d": "module sparta.ccf1d",
-    "ccf2d": "module sparta.ccf2d",
     "instruments": "module sparta.instruments",
-    "observations": "module sparta.observations",
-    "pdc": "module sparta.pdc",
-    "periodogram": "module sparta.periodogram",
     "plotting": "module sparta.plotting",
-    "preprocess": "module sparta.preprocess",
-    "spectrum": "module sparta.spectrum",
-    "template": "module sparta.template",
-    "timeseries": "module sparta.timeseries",
-    "tiravel": "module sparta.tiravel",
-    "tiravel_ops": "module sparta.tiravel_ops",
+    **{n: f"function sparta.preprocess.{n}"
+       for n in ("resample_flux", "trim_margins", "resample_to_linear_grid",
+                 "resample_to_log_grid", "coarsest_native_step", "remove_cosmics", "bandpass",
+                 "resampling_noise_psd", "native_phases")},
+    "phoenix_spectrum": "function sparta.template.phoenix_spectrum",
+    **{n: f"function sparta.tiravel_ops.{n}"
+       for n in ("rest_frame_wavelengths", "common_grid", "align_spectra", "normalize_rows",
+                 "correlation_matrix", "alignment", "coadd", "build_tiravel")},
+    "TiravelResult": "class sparta.tiravel_ops.TiravelResult",
+    **{n: f"function sparta.pdc.{n}"
+       for n in ("scalar_distance_matrix", "error_aware_distance_matrix",
+                 "spectral_distance_matrix", "phase_distance_matrix", "double_centering",
+                 "unbiased_u_centering", "inner_prod", "norm_z", "partial_centering",
+                 "pdc_power", "pdc_pvalue", "pdc_power_level", "get_wv_grid",
+                 "resample_spec_to_common_grid")},
 }
 
 # The deep import paths the examples and docs use: module -> names that must
@@ -158,6 +174,7 @@ METHODS = {
     "TimeSeries": {
         "plot_velocities": ["figsize"],
     },
+    "TiravelResult": {},
     "PeriodicityDetector": {
         "calc_gls": [],
         "calc_partial_periodogram": ["partial_type"],
@@ -177,6 +194,8 @@ def kind(obj):
         return "module " + obj.__name__
     if inspect.isclass(obj):
         return "class " + obj.__module__ + "." + obj.__qualname__
+    if inspect.isfunction(obj):
+        return "function " + obj.__module__ + "." + obj.__qualname__
     return type(obj).__name__
 
 def params(member):

@@ -16,7 +16,6 @@ Cross-correlation needs a log-lambda (velocity-even) grid, step
 
 import numpy as np
 from astropy import constants as consts, units as u
-from specutils import Spectrum as Spec1D, SpectrumList
 from unicor import dsp
 
 from sparta.preprocess import (
@@ -119,6 +118,8 @@ class Spectrum:
             is split into the order's own value (km/s), so
             ``from_spectrum1d`` can restore it.
         '''
+        from specutils import Spectrum as Spec1D, SpectrumList
+
         wunit = self.Info.get('WavelengthUnits', 1.0 * u.Angstrom)
         wunit = getattr(wunit, 'unit', wunit)
         native = self.native_steps() if 'NativeStep' in self.Info else None
@@ -165,6 +166,8 @@ class Spectrum:
         -------
         Spectrum
         '''
+        from specutils import Spectrum as Spec1D
+
         if isinstance(spectra, Spec1D):
             spectra = [spectra]
         wv = [np.asarray(o.spectral_axis.to(u.Angstrom).value, float) for o in spectra]

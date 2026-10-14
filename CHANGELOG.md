@@ -296,6 +296,20 @@ Keys of `results_frequency` / `results_power`:
   `pdc_power_level(pvalue, n)` give the Shen et al. (2019) single-frequency
   p-value of an unbiased PDC power and its inverse, vectorised.
   `PeriodicityDetector.calc_pdc_pval` calls them, bit-for-bit as before.
+- **A lazy front door and the open surface** (additive): every public atom of
+  `sparta.preprocess`, `sparta.pdc` and `sparta.tiravel_ops`, and
+  `phoenix_spectrum`, imports from `sparta` itself
+  (`from sparta import resample_to_log_grid, build_tiravel, pdc_power`), the
+  same objects as in their modules; the `unicor`/`todcor` atoms stay in those
+  packages. Every top-level name resolves on first access (PEP 562), so
+  `dir(sparta)` is `sparta.__all__`; submodules still resolve after a bare
+  `import sparta` (`sparta.pdc.pdc_power`), now on first access. matplotlib is imported by the plot methods, specutils by
+  `resample_flux` and the `Spectrum` <-> specutils conversions, not at import:
+  `import sparta` went from ~0.8 s (1.2 s cold) and ~1840 modules, matplotlib
+  and specutils among them, to ~0.1 ms; importing the atoms takes ~0.4 s and
+  the objects ~0.5 s, still without either. `docs/open_api.md` lists the
+  atoms of SPARTA, UNICOR and TODCOR with their import path, units and
+  assumptions, checked by `tests/test_open_api.py`.
 - `TIRAVEL.plot_template` draws the template divided by the sum of the weights
   (the weighted mean of the aligned epochs), on the epochs' scale. The stored
   co-add is ~sqrt(K) larger, which made the epochs look like a shrunken copy.

@@ -10,6 +10,9 @@
   the shift/shape partial periodograms; result keys and p-values.
 - [instruments.md](instruments.md) — every survey key: frames, time systems,
   native sampling, recommended settings (generated).
+- [open_api.md](open_api.md) — the open surface: every atom of `sparta`,
+  `unicor` and `todcor` an analysis can be built from, with its import path,
+  units and assumptions.
 - [api.md](api.md) — signatures and docstrings of the public API of `sparta`,
   `unicor` and `todcor` (generated).
 - [limitations.md](limitations.md) — known limitations, with their size and

@@ -1,5 +1,6 @@
 """docs/api.md is the rendered docstrings of the public surface, kept current."""
 import importlib.util
+import inspect
 import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -25,7 +26,8 @@ def test_api_reference_covers_the_top_level_surface():
 
     docs = (ROOT / "docs" / "api.md").read_text(encoding="utf-8")
     for name in sparta.__all__:
-        heading = f"`sparta.{name}`" if name[0].isupper() else f"### sparta.{name}"
+        is_module = inspect.ismodule(getattr(sparta, name))
+        heading = f"### sparta.{name}" if is_module else f"`sparta.{name}`"
         assert heading in docs, name
     for package in (unicor, todcor):
         for name in package.__all__:

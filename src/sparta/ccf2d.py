@@ -31,7 +31,6 @@ from copy import deepcopy
 import warnings
 
 import numpy as np
-import matplotlib.pyplot as plt
 from astropy import units as u
 
 from unicor import dsp
@@ -40,7 +39,6 @@ from todcor.simulate import model_flux
 from todcor.estimator import (
     combine_stats, joint_fit, prepare_window, window_noise, window_stats,
 )
-from sparta import plotting as sp_plot
 from sparta.preprocess import native_phases, resampling_noise_psd
 
 
@@ -515,6 +513,10 @@ class CCF2d:
         -------
         matplotlib.figure.Figure
         '''
+        # The plotting stack loads on the first plot, not on import.
+        import matplotlib.pyplot as plt
+        from sparta import plotting as sp_plot
+
         res = self.Corr2d
         v1, v2 = res['v1_grid'], res['v2_grid']
         loglike = res['output'] == 'loglike'

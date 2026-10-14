@@ -16,11 +16,9 @@ A&A 659, A189; PDC p-values -- Shen et al. 2019 (arXiv:1912.12150).
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
 from astropy.timeseries import LombScargle
 from unicor import dsp
 from sparta import pdc
-from sparta import plotting as sp_plot
 from sparta.timeseries import is_numeric_scalar
 
 
@@ -350,6 +348,10 @@ class PeriodicityDetector:
         -------
         matplotlib.figure.Figure
         '''
+        # The plotting stack loads on the first plot, not on import.
+        import matplotlib.pyplot as plt
+        from sparta import plotting as sp_plot
+
         count = len(self.results_frequency) + plot_vals
         linestyles = ['--', ':', '-.', (0, (5, 1, 1, 1, 1, 1))]
         if annotate_pval is not None:

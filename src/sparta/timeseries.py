@@ -10,9 +10,6 @@ time series, which ``Observations`` drives through the RV engines: UNICOR
 Conventions: velocities in km/s, times in days.
 """
 import numpy as np
-import matplotlib.pyplot as plt
-
-from sparta import plotting as sp_plot
 
 
 def is_numeric_scalar(v):
@@ -109,6 +106,10 @@ class TimeSeries:
         ValueError
             For a spectrum time series.
         '''
+        # The plotting stack loads on the first plot, not on import.
+        import matplotlib.pyplot as plt
+        from sparta import plotting as sp_plot
+
         if not is_numeric_scalar(self.vals[0]):
             raise ValueError('plot_velocities is available for scalar values time-series only')
 

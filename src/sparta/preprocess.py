@@ -23,8 +23,6 @@ from scipy import signal
 from scipy.ndimage import median_filter
 from astropy.stats import sigma_clip, mad_std
 from astropy import constants as consts, units as u
-from specutils import Spectrum as Spec1D
-from specutils.manipulation import SplineInterpolatedResampler
 from todcor.estimator import resampled_noise_psd
 from unicor import dsp
 
@@ -58,6 +56,10 @@ def resample_flux(wave, flux, new_wave, unit=u.Angstrom):
     ndarray
         The flux at ``new_wave``; NaN outside the span of ``wave``.
     '''
+    # specutils pulls in matplotlib (via ndcube); import it on first use only.
+    from specutils import Spectrum as Spec1D
+    from specutils.manipulation import SplineInterpolatedResampler
+
     src = Spec1D(flux=np.asarray(flux, float) * u.dimensionless_unscaled,
                  spectral_axis=np.asarray(wave, float) * unit)
     return SplineInterpolatedResampler()(src, np.asarray(new_wave, float) * unit).flux.value

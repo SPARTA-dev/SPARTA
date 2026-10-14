@@ -282,10 +282,10 @@ Keep or discard orders, in place.
 
 Per-order preprocessing atoms: the steps of `Spectrum` on plain arrays.
 
-#### `sparta.preprocess.resample_flux`
+#### `sparta.resample_flux`
 
 ```python
-sparta.preprocess.resample_flux(wave, flux, new_wave, unit=Unit("Angstrom"))
+sparta.resample_flux(wave, flux, new_wave, unit=Unit("Angstrom"))
 ```
 
 Resample one order's flux with the cubic spline of `Spectrum.interpolate`.
@@ -301,10 +301,10 @@ Resample one order's flux with the cubic spline of `Spectrum.interpolate`.
 
 - *ndarray*: The flux at `new_wave`; NaN outside the span of `wave`.
 
-#### `sparta.preprocess.trim_margins`
+#### `sparta.trim_margins`
 
 ```python
-sparta.preprocess.trim_margins(
+sparta.trim_margins(
     wave,
     flux,
     n_left=0,
@@ -336,10 +336,10 @@ Trim the ends of one order: NaN pixels, padded margins, then fixed counts.
 
 - *ValueError*: If `clean_margins` finds no pixel above the margin level.
 
-#### `sparta.preprocess.resample_to_linear_grid`
+#### `sparta.resample_to_linear_grid`
 
 ```python
-sparta.preprocess.resample_to_linear_grid(wave, flux, delta)
+sparta.resample_to_linear_grid(wave, flux, delta)
 ```
 
 Resample one order onto an evenly spaced wavelength grid.
@@ -358,10 +358,10 @@ Resample one order onto an evenly spaced wavelength grid.
 
 - *ValueError*: For an order of fewer than 2 pixels.
 
-#### `sparta.preprocess.resample_to_log_grid`
+#### `sparta.resample_to_log_grid`
 
 ```python
-sparta.preprocess.resample_to_log_grid(wave, flux, dv_kms)
+sparta.resample_to_log_grid(wave, flux, dv_kms)
 ```
 
 Resample one order onto a log-lambda (velocity-even) grid.
@@ -380,10 +380,10 @@ Resample one order onto a log-lambda (velocity-even) grid.
 
 - *ValueError*: For an order of fewer than 2 pixels.
 
-#### `sparta.preprocess.coarsest_native_step`
+#### `sparta.coarsest_native_step`
 
 ```python
-sparta.preprocess.coarsest_native_step(previous_kms, wave)
+sparta.coarsest_native_step(previous_kms, wave)
 ```
 
 The native velocity step of an order after it is put on a new grid.
@@ -397,10 +397,10 @@ The native velocity step of an order after it is put on a new grid.
 
 - *float*: The native step (km/s).
 
-#### `sparta.preprocess.remove_cosmics`
+#### `sparta.remove_cosmics`
 
 ```python
-sparta.preprocess.remove_cosmics(wave, flux, sigma_upper=3)
+sparta.remove_cosmics(wave, flux, sigma_upper=3)
 ```
 
 Replace the upward outliers (cosmic-ray hits) of one order.
@@ -415,10 +415,10 @@ Replace the upward outliers (cosmic-ray hits) of one order.
 
 - *ndarray*: The cleaned flux, on `wave`.
 
-#### `sparta.preprocess.bandpass`
+#### `sparta.bandpass`
 
 ```python
-sparta.preprocess.bandpass(wave, flux, lowcut, highcut, order=1)
+sparta.bandpass(wave, flux, lowcut, highcut, order=1)
 ```
 
 Band-pass filter one evenly sampled order with a Butterworth filter.
@@ -435,10 +435,10 @@ Band-pass filter one evenly sampled order with a Butterworth filter.
 
 - *ndarray*: The filtered, standardized flux (dimensionless).
 
-#### `sparta.preprocess.resampling_noise_psd`
+#### `sparta.resampling_noise_psd`
 
 ```python
-sparta.preprocess.resampling_noise_psd(n, dv_native, dv, phases=None, n_phase=32)
+sparta.resampling_noise_psd(n, dv_native, dv, phases=None, n_phase=32)
 ```
 
 Noise spectrum of one order's white native noise after `resample_flux`.
@@ -455,10 +455,10 @@ Noise spectrum of one order's white native noise after `resample_flux`.
 
 - *ndarray*: Relative noise power per positive Fourier mode (white noise of the native variance on the analysis grid = 1), length `n // 2`.
 
-#### `sparta.preprocess.native_phases`
+#### `sparta.native_phases`
 
 ```python
-sparta.preprocess.native_phases(native_wave, wave, dv)
+sparta.native_phases(native_wave, wave, dv)
 ```
 
 Sub-pixel phase of each native pixel on a log analysis grid.
@@ -691,10 +691,10 @@ Cut the model into the orders of an observed spectrum, in place.
 
 - *Template*: self.
 
-#### `sparta.template.phoenix_spectrum`
+#### `sparta.phoenix_spectrum`
 
 ```python
-sparta.template.phoenix_spectrum(
+sparta.phoenix_spectrum(
     teff,
     logg,
     feh=0.0,
@@ -1564,10 +1564,10 @@ Plot the calculated periodograms, one panel each.
 
 Phase-distance-correlation (PDC) math: distance matrices, centering, the scan.
 
-#### `sparta.pdc.scalar_distance_matrix`
+#### `sparta.scalar_distance_matrix`
 
 ```python
-sparta.pdc.scalar_distance_matrix(y)
+sparta.scalar_distance_matrix(y)
 ```
 
 Pairwise absolute differences of scalar values.
@@ -1580,10 +1580,10 @@ Pairwise absolute differences of scalar values.
 
 - *ndarray*: (n, n) array of |y_i - y_j|, in the unit of `y`.
 
-#### `sparta.pdc.error_aware_distance_matrix`
+#### `sparta.error_aware_distance_matrix`
 
 ```python
-sparta.pdc.error_aware_distance_matrix(y, errors)
+sparta.error_aware_distance_matrix(y, errors)
 ```
 
 Pairwise distances of scalar values with Gaussian uncertainties.
@@ -1601,10 +1601,10 @@ Pairwise distances of scalar values with Gaussian uncertainties.
 
 - *ValueError*: If `errors` does not have one entry per value.
 
-#### `sparta.pdc.spectral_distance_matrix`
+#### `sparta.spectral_distance_matrix`
 
 ```python
-sparta.pdc.spectral_distance_matrix(waves, fluxes)
+sparta.spectral_distance_matrix(waves, fluxes)
 ```
 
 Chord distances between spectra on the unit sphere (USuRPER).
@@ -1618,10 +1618,10 @@ Chord distances between spectra on the unit sphere (USuRPER).
 
 - *ndarray*: (n, n) array of distances in [0, 2], zero diagonal.
 
-#### `sparta.pdc.phase_distance_matrix`
+#### `sparta.phase_distance_matrix`
 
 ```python
-sparta.pdc.phase_distance_matrix(times, f)
+sparta.phase_distance_matrix(times, f)
 ```
 
 The PDC phase-distance kernel at one trial frequency.
@@ -1635,10 +1635,10 @@ The PDC phase-distance kernel at one trial frequency.
 
 - *ndarray*: (n, n) array d (1/f - d), with d = (t_i - t_j) mod 1/f (days^2).
 
-#### `sparta.pdc.double_centering`
+#### `sparta.double_centering`
 
 ```python
-sparta.pdc.double_centering(a)
+sparta.double_centering(a)
 ```
 
 Double-centered distance matrix (the biased distance correlation).
@@ -1651,10 +1651,10 @@ Double-centered distance matrix (the biased distance correlation).
 
 - *ndarray*: `a` minus its row and column means, plus the grand mean.
 
-#### `sparta.pdc.unbiased_u_centering`
+#### `sparta.unbiased_u_centering`
 
 ```python
-sparta.pdc.unbiased_u_centering(a, n)
+sparta.unbiased_u_centering(a, n)
 ```
 
 U-centered distance matrix (the unbiased distance correlation).
@@ -1672,10 +1672,10 @@ U-centered distance matrix (the unbiased distance correlation).
 
 - *ValueError*: For n \<= 3, where the /(n-2) factor here and the 1/(n(n-3)) of the U-centered inner product are singular or negative.
 
-#### `sparta.pdc.inner_prod`
+#### `sparta.inner_prod`
 
 ```python
-sparta.pdc.inner_prod(a, b)
+sparta.inner_prod(a, b)
 ```
 
 Unbiased U-centered inner product of two distance matrices.
@@ -1688,10 +1688,10 @@ Unbiased U-centered inner product of two distance matrices.
 
 - *float*: sum(a \* b) / (n (n - 3)).
 
-#### `sparta.pdc.norm_z`
+#### `sparta.norm_z`
 
 ```python
-sparta.pdc.norm_z(a, b)
+sparta.norm_z(a, b)
 ```
 
 The component of `a` orthogonal to `b` under the U-centered inner product (used to build the partial / semi-partial distance correlation).
@@ -1704,10 +1704,10 @@ The component of `a` orthogonal to `b` under the U-centered inner product (used 
 
 - *ndarray*: a - (\<a, b> / \<b, b>) b.
 
-#### `sparta.pdc.partial_centering`
+#### `sparta.partial_centering`
 
 ```python
-sparta.pdc.partial_centering(a, c)
+sparta.partial_centering(a, c)
 ```
 
 U-center a distance matrix and a control one, and remove the control's component from the first (partial distance correlation).
@@ -1721,10 +1721,10 @@ U-center a distance matrix and a control one, and remove the control's component
 
 - `A, C` (*ndarray*): U-centered `a` made orthogonal to C, and U-centered `c`: the arguments of `pdc_power(times, freqs, A, control=C)`.
 
-#### `sparta.pdc.pdc_power`
+#### `sparta.pdc_power`
 
 ```python
-sparta.pdc.pdc_power(times, freqs, a_centered, unbiased=True, control=None)
+sparta.pdc_power(times, freqs, a_centered, unbiased=True, control=None)
 ```
 
 PDC periodogram: correlation of a centered distance matrix with the phase distances, at every trial frequency.
@@ -1745,10 +1745,10 @@ PDC periodogram: correlation of a centered distance matrix with the phase distan
 
 - *ValueError*: For a control with the biased statistic, or n \<= 3 with the unbiased one.
 
-#### `sparta.pdc.pdc_pvalue`
+#### `sparta.pdc_pvalue`
 
 ```python
-sparta.pdc.pdc_pvalue(power, n)
+sparta.pdc_pvalue(power, n)
 ```
 
 Single-frequency p-value of an unbiased PDC power.
@@ -1766,10 +1766,10 @@ Single-frequency p-value of an unbiased PDC power.
 
 - *ValueError*: If `n` is not positive.
 
-#### `sparta.pdc.pdc_power_level`
+#### `sparta.pdc_power_level`
 
 ```python
-sparta.pdc.pdc_power_level(pvalue, n)
+sparta.pdc_power_level(pvalue, n)
 ```
 
 The unbiased PDC power whose single-frequency p-value is `pvalue`.
@@ -1787,10 +1787,10 @@ The unbiased PDC power whose single-frequency p-value is `pvalue`.
 
 - *ValueError*: If `n` is not positive.
 
-#### `sparta.pdc.get_wv_grid`
+#### `sparta.get_wv_grid`
 
 ```python
-sparta.pdc.get_wv_grid(waves, factor)
+sparta.get_wv_grid(waves, factor)
 ```
 
 The uniform wavelength grid common to all spectra: their overlap, sampled at the finest median pixel step.
@@ -1808,10 +1808,10 @@ The uniform wavelength grid common to all spectra: their overlap, sampled at the
 
 - *ValueError*: If the spectra do not overlap (fewer than two common grid points).
 
-#### `sparta.pdc.resample_spec_to_common_grid`
+#### `sparta.resample_spec_to_common_grid`
 
 ```python
-sparta.pdc.resample_spec_to_common_grid(waves, fluxes, factor)
+sparta.resample_spec_to_common_grid(waves, fluxes, factor)
 ```
 
 Resample spectra onto their common grid and normalize each one.
@@ -1830,10 +1830,10 @@ Resample spectra onto their common grid and normalize each one.
 
 The TIRAVEL alignment measure, optimal weights, and co-added template.
 
-#### `sparta.tiravel_ops.rest_frame_wavelengths`
+#### `sparta.rest_frame_wavelengths`
 
 ```python
-sparta.tiravel_ops.rest_frame_wavelengths(wave, velocity)
+sparta.rest_frame_wavelengths(wave, velocity)
 ```
 
 Map observed wavelengths to the source's rest frame.
@@ -1847,10 +1847,10 @@ Map observed wavelengths to the source's rest frame.
 
 - *ndarray*: Rest-frame wavelengths (Angstrom).
 
-#### `sparta.tiravel_ops.common_grid`
+#### `sparta.common_grid`
 
 ```python
-sparta.tiravel_ops.common_grid(waves, velocities, reference=0, margin=0)
+sparta.common_grid(waves, velocities, reference=0, margin=0)
 ```
 
 The rest-frame wavelength grid shared by every epoch.
@@ -1870,10 +1870,10 @@ The rest-frame wavelength grid shared by every epoch.
 
 - *ValueError*: If `margin` is negative or the de-shifted epochs have no wavelength range in common.
 
-#### `sparta.tiravel_ops.align_spectra`
+#### `sparta.align_spectra`
 
 ```python
-sparta.tiravel_ops.align_spectra(waves, fluxes, velocities, grid, kind='cubic')
+sparta.align_spectra(waves, fluxes, velocities, grid, kind='cubic')
 ```
 
 Shift each epoch to rest and resample it onto `grid`.
@@ -1889,10 +1889,10 @@ Shift each epoch to rest and resample it onto `grid`.
 
 - *ndarray, shape (K, len(grid))*: The aligned spectra, one epoch per row.
 
-#### `sparta.tiravel_ops.normalize_rows`
+#### `sparta.normalize_rows`
 
 ```python
-sparta.tiravel_ops.normalize_rows(blocks)
+sparta.normalize_rows(blocks)
 ```
 
 Mean-subtract each block and L2-normalize the epochs across all blocks.
@@ -1905,10 +1905,10 @@ Mean-subtract each block and L2-normalize the epochs across all blocks.
 
 - *ndarray, shape (K, sum(M_b))*: The normalized, concatenated rows. A zero row (a flat spectrum) is left at zero rather than divided by zero.
 
-#### `sparta.tiravel_ops.correlation_matrix`
+#### `sparta.correlation_matrix`
 
 ```python
-sparta.tiravel_ops.correlation_matrix(normalized)
+sparta.correlation_matrix(normalized)
 ```
 
 Pairwise correlation matrix of normalized epoch rows.
@@ -1921,10 +1921,10 @@ Pairwise correlation matrix of normalized epoch rows.
 
 - *ndarray, shape (K, K)*: Correlation matrix, unit diagonal, entries in [-1, 1].
 
-#### `sparta.tiravel_ops.alignment`
+#### `sparta.alignment`
 
 ```python
-sparta.tiravel_ops.alignment(R)
+sparta.alignment(R)
 ```
 
 The TIRAVEL alignment measure and the optimal co-addition weights.
@@ -1937,10 +1937,10 @@ The TIRAVEL alignment measure and the optimal co-addition weights.
 
 - *dict*: `rho` : the alignment measure. `lambda_max` : the largest eigenvalue. `weights` : (K,) the corresponding eigenvector, unit norm, sign-fixed so the bulk of the weight is positive. These are the weights the spectra should be summed with -- *not* their squares. `eigenvalues` : (K,) all eigenvalues, descending (they sum to K). `explained` : `lambda_max / K`, the fraction of the total variance carried by the leading component. `n_eff` : the participation ratio `1 / sum(weights**4)` -- roughly how many epochs actually contribute to the template.
 
-#### `sparta.tiravel_ops.coadd`
+#### `sparta.coadd`
 
 ```python
-sparta.tiravel_ops.coadd(matrix, weights)
+sparta.coadd(matrix, weights)
 ```
 
 Weighted co-addition of aligned spectra -> the optimal template.
@@ -1954,7 +1954,7 @@ Weighted co-addition of aligned spectra -> the optimal template.
 
 - *ndarray, shape (M,)*: The co-added template. Its absolute scale is arbitrary -- correlation against it is scale-invariant.
 
-#### `sparta.tiravel_ops.TiravelResult`
+#### `sparta.TiravelResult`
 
 ```python
 TiravelResult(
@@ -1982,10 +1982,10 @@ The TIRAVEL template and alignment of a set of epochs (`build_tiravel`).
 - `template_flux` (*list of ndarray*): The co-added template on each grid (`coadd`; dimensionless, mean-free, arbitrary overall scale).
 - `aligned` (*list of ndarray*): Each order's aligned epochs, shape (K, len(grid)): mean-subtracted per order, every epoch of unit L2 norm across all orders jointly (`normalize_rows`).
 
-#### `sparta.tiravel_ops.build_tiravel`
+#### `sparta.build_tiravel`
 
 ```python
-sparta.tiravel_ops.build_tiravel(
+sparta.build_tiravel(
     waves,
     fluxes,
     velocities,

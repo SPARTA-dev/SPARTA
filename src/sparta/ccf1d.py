@@ -26,12 +26,10 @@ uncertainty).
 
 import numpy as np
 from astropy import units as u
-import matplotlib.pyplot as plt
 from copy import deepcopy
 import warnings
 from unicor import ccf as unicor_ccf
 from unicor.ccf import ccf_order, effective_bins, lag_axis, measure_rv
-from sparta import plotting as sp_plot
 
 class CCF1d:
     '''
@@ -481,6 +479,10 @@ class CCF1d:
         -------
         matplotlib.figure.Figure
         '''
+        # The plotting stack loads on the first plot, not on import.
+        import matplotlib.pyplot as plt
+        from sparta import plotting as sp_plot
+
         if orders is None:
             orders = np.arange(self.n_ord)
         vel = u.Quantity(self.Corr['vel'], u.km / u.s).value
