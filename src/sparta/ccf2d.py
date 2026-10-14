@@ -252,8 +252,9 @@ class CCF2d:
                 'a1_best', 'a2_best' and 'R_best' (at the refined RVs), 'sigma' (the native
                 per-pixel noise behind the fit and its errors: the input as
                 given, or under sigma=None an array of the per-window
-                estimates, aligned with ``windows``), 'sigma_from_fit', the
-                misfit at the refined RVs at that noise, 'chi2_best' and
+                estimates, aligned with ``windows``), 'sigma_from_fit' (bool:
+                True when the noise was estimated, i.e. sigma=None), the
+                misfit at the refined RVs at that noise, 'chi2_best', and
                 'chi2_red' (chi2_best per noise degree of freedom, see below;
                 ~1 by construction under sigma=None), and
                 'velocity_convention' (that of every velocity above). The maps

@@ -15,8 +15,8 @@ The repository holds three installable packages:
 
 Each engine has its own `README.md`, `pyproject.toml` and `tests/`. SPARTA's
 tests are in `tests/` (with `tests/instruments/` for the loaders and
-`tests/golden/` for the pinned reference values); `docs/instruments.md` is
-generated; the tutorials are in `examples/`.
+`tests/golden/` for the pinned reference values); `docs/instruments.md` and
+`docs/api.md` are generated; the tutorials are in `examples/`.
 
 ## Development install
 
@@ -110,6 +110,16 @@ incorrect and is under review.
    ```bash
    PYTHONPATH=src:packages/unicor/src:packages/todcor/src python -m sparta.instruments > docs/instruments.md
    ```
+
+## The API reference
+
+`docs/api.md` is rendered from the docstrings of the public API of `sparta`,
+`unicor` and `todcor`. After changing a public signature or docstring,
+regenerate it (a test fails if it is stale):
+
+```bash
+python docs/_generate_api.py --write
+```
 
 ## Code style
 

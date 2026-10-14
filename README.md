@@ -192,6 +192,14 @@ notebooks derive the TODCOR method step by step on plain arrays.
 - **Bisector span.** The BIS (`CCF1d.calc_bis`, `Observations.calc_bis`) is
   known to be incorrect and is under review; do not use it yet.
 
+## Documentation
+
+The pages in
+[`docs/`](https://github.com/SPARTA-dev/SPARTA/blob/master/docs/index.md)
+cover the conventions in full, UNICOR and TODCOR (outputs, likelihoods,
+errors), the periodograms, the instruments, the API reference, the known
+limitations and a proposed roadmap.
+
 ## Module map
 
 SPARTA is a monorepo of three installable packages. The two correlation engines
