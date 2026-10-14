@@ -13,7 +13,9 @@ trial frequency (Zucker 2018). The values' distance matrix is one of
 It is centered once (``double_centering`` for the biased statistic,
 ``unbiased_u_centering`` for the unbiased one, ``partial_centering`` for the
 partial periodograms of Binnenfeld et al. 2022) and ``pdc_power`` scans it
-against the phase distances over a frequency grid.
+against the phase distances over a frequency grid. ``pdc_pvalue`` turns an
+unbiased power into its single-frequency p-value (Shen et al. 2019) and
+``pdc_power_level`` a p-value into the power it needs.
 
 Conventions: times in days, frequencies in 1/day, wavelengths in Angstrom.
 The unbiased U-centering uses 1/(n(n-3)) and /(n-2), /(n-1) factors --
@@ -22,6 +24,7 @@ singular or negative for n <= 3, which raise.
 
 import numpy as np
 from scipy import special
+from scipy.stats import chi2
 from unicor import dsp
 
 
@@ -325,6 +328,72 @@ def pdc_power(times, freqs, a_centered, unbiased=True, control=None):
 def _centered_correlation(A, B):
     '''Cosine of two centered matrices: sum(A B) / sqrt(sum(A^2) sum(B^2)).'''
     return np.sum(A * B) / np.sqrt(np.sum(A ** 2) * np.sum(B ** 2))
+
+
+# =============================================================================
+# p-values
+# =============================================================================
+def pdc_pvalue(power, n):
+    '''
+    Single-frequency p-value of an unbiased PDC power.
+
+    The chi-square approximation of the distance-correlation test (Shen et
+    al. 2019, arXiv:1912.12150): p = chi2_1.sf(n * power + 1). It holds for
+    the unbiased (U-centered) statistics at one trial frequency; it is not a
+    false-alarm probability over a frequency grid.
+
+    Parameters
+    ----------
+    power : array_like
+        Unbiased PDC / USuRPER / partial power (dimensionless).
+    n : int
+        Number of epochs (> 0).
+
+    Returns
+    -------
+    ndarray
+        The p-values, shaped like ``power``.
+
+    Raises
+    ------
+    ValueError
+        If ``n`` is not positive.
+    '''
+    _require_epochs(n)
+    return chi2.sf(np.asarray(power, float) * n + 1, 1)
+
+
+def pdc_power_level(pvalue, n):
+    '''
+    The unbiased PDC power whose single-frequency p-value is ``pvalue``.
+
+    The inverse of :func:`pdc_pvalue`: (chi2_1.isf(p) - 1) / n.
+
+    Parameters
+    ----------
+    pvalue : array_like
+        p-values in (0, 1].
+    n : int
+        Number of epochs (> 0).
+
+    Returns
+    -------
+    ndarray
+        The power levels (dimensionless), shaped like ``pvalue``.
+
+    Raises
+    ------
+    ValueError
+        If ``n`` is not positive.
+    '''
+    _require_epochs(n)
+    return (chi2.isf(np.asarray(pvalue, float), 1) - 1) / n
+
+
+def _require_epochs(n):
+    '''Raise ValueError unless the number of epochs ``n`` is positive.'''
+    if not n > 0:
+        raise ValueError(f"the PDC p-value needs a positive number of epochs, got n = {n}")
 
 
 # =============================================================================

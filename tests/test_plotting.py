@@ -291,3 +291,28 @@ def test_tiravel_template_is_red_over_black_stepped_epochs():
     assert len(epochs) == len(velocities) and all(_rgba(ln)[:3] == BLACK[:3] for ln in epochs)
     assert _rgba(template) == RED
     tir.plot_weights()
+
+
+def test_tiravel_template_is_drawn_on_the_scale_of_the_epochs():
+    # The stored template is a co-add of K unit-norm rows with unit-norm
+    # weights, ~sqrt(K) times an epoch; drawn as is, the epochs would look
+    # like a shrunken copy of it. Nine noisy epochs: sqrt(K) = 3.
+    rng = np.random.default_rng(3)
+    wave, _ = unicor.log_lambda_grid(5000.0, 5050.0, 1.0)
+    centres = np.linspace(5005, 5045, 9)
+    velocities = np.linspace(-40.0, 40.0, 9)
+
+    def star(w):
+        return 1 - 0.5 * np.exp(-0.5 * ((w[:, None] - centres) / 0.08) ** 2).sum(axis=1)
+
+    spectra = [Spectrum(wv=[wave.copy()],
+                        sp=[star(wave / unicor.doppler_factor(v)) + rng.normal(0, 0.01, wave.size)],
+                        name="sim") for v in velocities]
+    tir = TIRAVEL().build_template(spectra, velocities)
+    (ax,) = tir.plot_template().axes
+    epochs = [ln.get_ydata() for ln in ax.get_lines() if ln.get_drawstyle() == "steps-mid"]
+    (template,) = [ln.get_ydata() for ln in ax.get_lines() if ln.get_drawstyle() == "default"]
+    epoch_amplitude = np.median([np.ptp(y) for y in epochs])
+    assert np.ptp(template) == pytest.approx(epoch_amplitude, rel=0.1)
+    assert np.max(np.abs(template - np.mean(epochs, axis=0))) < 0.1 * epoch_amplitude
+    assert "mean-subtracted" in ax.get_ylabel()

@@ -43,10 +43,23 @@ Pure functions on plain numpy arrays: no SPARTA objects, no astropy Quantity,
 no I/O. Velocities in km/s, wavelengths in Angstrom; spectra enter as rows of
 a (K, M) matrix -- K epochs, M pixels of one common rest-frame grid.
 
+The whole build
+---------------
+:func:`build_tiravel` chains the steps for multi-order epochs given as
+per-epoch, per-order arrays -- the body of SPARTA's
+``TIRAVEL.build_template``::
+
+    res = build_tiravel(waves, fluxes, velocities)   # waves[k][I], fluxes[k][I]
+    res.rho, res.weights, res.grids, res.template_flux
+
+It returns a :class:`TiravelResult`.
+
 Reference
 ---------
 Zucker, S. & Mazeh, T. 2006, MNRAS 371, 1513 (astro-ph/0607293).
 """
+
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -299,3 +312,152 @@ def coadd(matrix, weights):
     # correlation_matrix / sparta.pdc._gram).
     with np.errstate(divide='ignore', over='ignore', invalid='ignore'):
         return np.asarray(weights, float) @ np.asarray(matrix, float)
+
+
+# =============================================================================
+# The whole build
+# =============================================================================
+@dataclass(frozen=True, eq=False)
+class TiravelResult:
+    """
+    The TIRAVEL template and alignment of a set of epochs (:func:`build_tiravel`).
+
+    Parameters
+    ----------
+    rho : float
+        The alignment measure ``(lambda_max - 1)/(K - 1)`` (dimensionless, in
+        [0, 1]; :func:`alignment`).
+    weights : ndarray, shape (K,)
+        Co-addition weights (unit norm, bulk positive).
+    correlation : ndarray, shape (K, K)
+        The epochs' correlation matrix (:func:`correlation_matrix`), all
+        orders pooled.
+    diagnostics : dict
+        'lambda_max', 'eigenvalues', 'explained' and 'n_eff', as returned by
+        :func:`alignment`.
+    velocities : ndarray, shape (K,)
+        The trial velocities used (km/s), as floats.
+    grids : list of ndarray
+        The common rest-frame grid of each order used (Angstrom), in the
+        order of ``orders``.
+    template_flux : list of ndarray
+        The co-added template on each grid (:func:`coadd`; dimensionless,
+        mean-free, arbitrary overall scale).
+    aligned : list of ndarray
+        Each order's aligned epochs, shape (K, len(grid)): mean-subtracted
+        per order, every epoch of unit L2 norm across all orders jointly
+        (:func:`normalize_rows`).
+    """
+    rho: float
+    weights: np.ndarray
+    correlation: np.ndarray
+    diagnostics: dict
+    velocities: np.ndarray
+    grids: list
+    template_flux: list
+    aligned: list
+
+
+def build_tiravel(waves, fluxes, velocities, orders=None, reference=0, margin=10,
+                  kind='cubic'):
+    """Build the TIRAVEL template of a set of epochs at given velocities.
+
+    Every epoch is Doppler-shifted to its rest frame and resampled onto one
+    common grid per order (:func:`common_grid`, :func:`align_spectra`). The
+    epochs are mean-subtracted per order and L2-normalized across all orders
+    (:func:`normalize_rows`), their K x K correlation matrix is one Gram
+    product (:func:`correlation_matrix`), and its leading eigenpair gives
+    both ``rho`` and the weights (:func:`alignment`) with which each order's
+    epochs are co-added (:func:`coadd`). Orders are pooled into one
+    correlation matrix, so a single weight vector describes the whole
+    spectrum.
+
+    Parameters
+    ----------
+    waves : sequence of sequence of ndarray
+        ``waves[k][I]``: the observed wavelengths (Angstrom) of epoch k,
+        order I. K >= 2 epochs, all with the same number of orders.
+    fluxes : sequence of sequence of ndarray
+        ``fluxes[k][I]``: the matching flux (finite); not modified.
+    velocities : array_like
+        K trial radial velocities (km/s). Only their differences matter: a
+        constant added to all leaves ``rho`` unchanged and shifts the
+        template by the same amount.
+    orders : sequence of int, optional
+        Order indices to use, in this order. Default all.
+    reference : int
+        Index of the epoch whose rest-frame sampling defines each common grid.
+    margin : int
+        Pixels trimmed from each end of the common range (>= 0).
+    kind : {'cubic', 'linear'}
+        Resampling of the shifted epochs (see :func:`align_spectra`).
+
+    Returns
+    -------
+    TiravelResult
+        ``rho``, the weights, the correlation matrix and its diagnostics, the
+        velocities, and per order the grid, the template flux and the aligned
+        epochs.
+
+    Raises
+    ------
+    ValueError
+        For mismatched or too few epochs, non-finite velocities or flux,
+        epochs with different numbers of orders, or epochs that do not
+        overlap once de-shifted (:func:`common_grid`).
+    """
+    if len(waves) != len(velocities):
+        raise ValueError(
+            f'got {len(waves)} spectra but {len(velocities)} velocities')
+    if len(waves) < 2:
+        raise ValueError('TIRAVEL needs at least 2 epochs')
+    if len(fluxes) != len(waves):
+        raise ValueError(f'one flux list per epoch needed: got {len(fluxes)} for '
+                         f'{len(waves)} epochs')
+
+    velocities = np.asarray(velocities, float)
+    if not np.all(np.isfinite(velocities)):
+        raise ValueError('the supplied velocities contain NaN/inf; drop '
+                         'those epochs before building a template')
+
+    n_ord = len(waves[0])
+    if any(len(w) != n_ord for w in waves):
+        raise ValueError('all epochs must have the same number of orders')
+    for k, (w, f) in enumerate(zip(waves, fluxes)):
+        if len(f) != len(w):
+            raise ValueError(f'epoch {k}: one flux array per order needed, got '
+                             f'{len(f)} for {len(w)} orders')
+    if orders is None:
+        orders = range(n_ord)
+
+    # Align every epoch, order by order, onto that order's common grid.
+    grids, aligned = [], []
+    for I in orders:
+        order_waves = [np.asarray(w[I], float) for w in waves]
+        order_fluxes = [np.asarray(f[I], float) for f in fluxes]
+        # A single NaN would otherwise zero that epoch's norm (linear) or
+        # stop the spline with an opaque message (cubic).
+        for k, f in enumerate(order_fluxes):
+            if not np.all(np.isfinite(f)):
+                raise ValueError(f'epoch {k}, order {I}: flux contains NaN/inf; '
+                                 'mask or interpolate those pixels first')
+        grid = common_grid(order_waves, velocities, reference=reference, margin=margin)
+        grids.append(grid)
+        aligned.append(align_spectra(order_waves, order_fluxes, velocities, grid,
+                                     kind=kind))
+
+    # One normalization, one correlation matrix, one weight vector for the
+    # whole spectrum: the orders are different views of the same alignment.
+    normalized = normalize_rows(aligned)
+    correlation = correlation_matrix(normalized)
+    stats = alignment(correlation)
+    weights = stats.pop('weights')
+    rho = stats.pop('rho')
+
+    # Split the normalized rows back per order and co-add each.
+    sizes = np.cumsum([0] + [len(g) for g in grids])
+    blocks = [normalized[:, a:b] for a, b in zip(sizes[:-1], sizes[1:])]
+    return TiravelResult(rho=rho, weights=weights, correlation=correlation,
+                         diagnostics=stats, velocities=velocities, grids=grids,
+                         template_flux=[coadd(block, weights) for block in blocks],
+                         aligned=blocks)

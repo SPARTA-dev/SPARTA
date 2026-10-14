@@ -287,6 +287,20 @@ Keys of `results_frequency` / `results_power`:
   `CCF2d.cross_correlate` is a composition of them, bit-for-bit as before; the
   resampled-noise model is public as `sparta.preprocess.resampling_noise_psd` and
   `native_phases`. `CCF2d` prefixes `order {I}: ` to window-preparation errors.
+- **TIRAVEL and PDC p-value atoms** (additive): `sparta.tiravel_ops.build_tiravel(waves,
+  fluxes, velocities, orders=None, reference=0, margin=10, kind='cubic')` returns
+  `TiravelResult` (`rho`, `weights`, `correlation`, `diagnostics`, `velocities`,
+  `grids`, `template_flux`, `aligned`): the whole template build on per-epoch,
+  per-order arrays (km/s, Angstrom). `TIRAVEL.build_template` wraps it in a
+  `Template`, bit-for-bit as before. `sparta.pdc.pdc_pvalue(power, n)` and
+  `pdc_power_level(pvalue, n)` give the Shen et al. (2019) single-frequency
+  p-value of an unbiased PDC power and its inverse, vectorised.
+  `PeriodicityDetector.calc_pdc_pval` calls them, bit-for-bit as before.
+- `TIRAVEL.plot_template` draws the template divided by the sum of the weights
+  (the weighted mean of the aligned epochs), on the epochs' scale. The stored
+  co-add is ~sqrt(K) larger, which made the epochs look like a shrunken copy.
+  The y-axis reads "Flux (mean-subtracted, unit-norm epochs)". The stored
+  template is unchanged.
 
 - **Security hardening of the PHOENIX download** (the former FTP connection;
   HTTPS with astropy's default certificate checks since July). Downloads are

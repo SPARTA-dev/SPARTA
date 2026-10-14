@@ -16,16 +16,11 @@ in Angstrom.
 Reference: Zucker & Mazeh 2006, MNRAS 371, 1513.
 """
 
-from copy import deepcopy
-
 import numpy as np
 import matplotlib.pyplot as plt
 
 from sparta import plotting as sp_plot
-from sparta.tiravel_ops import (
-    align_spectra, alignment, coadd, common_grid, correlation_matrix,
-    normalize_rows,
-)
+from sparta.tiravel_ops import build_tiravel
 from sparta.spectrum import Spectrum
 from sparta.template import Template
 
@@ -59,7 +54,8 @@ class TIRAVEL:
         product, and its leading eigenpair gives both the alignment measure
         ``rho = (lambda_max - 1)/(K - 1)`` and the weights with which the epochs
         should be summed. Orders are pooled into one correlation matrix, so a
-        single weight vector describes the whole spectrum.
+        single weight vector describes the whole spectrum. The arrays are
+        built by ``sparta.tiravel_ops.build_tiravel``; this wraps them.
 
         Parameters
         ----------
@@ -121,68 +117,23 @@ class TIRAVEL:
             epochs with different numbers of orders, or epochs that do not
             overlap once de-shifted.
         '''
-        if len(spectra) != len(velocities):
-            raise ValueError(
-                f'got {len(spectra)} spectra but {len(velocities)} velocities')
-        if len(spectra) < 2:
-            raise ValueError('TIRAVEL needs at least 2 epochs')
-
-        specs = [deepcopy(s) for s in spectra]
-        velocities = np.asarray(velocities, float)
-        if not np.all(np.isfinite(velocities)):
-            raise ValueError('the supplied velocities contain NaN/inf; drop '
-                             'those epochs before building a template')
-
-        n_ord = len(specs[0].wv)
-        if any(len(s.wv) != n_ord for s in specs):
-            raise ValueError('all epochs must have the same number of orders')
-        if orders is None:
-            orders = range(n_ord)
         if margin is None:
             margin = self.default_margin
-
-        # Align every epoch, order by order, onto that order's common grid.
-        grids, aligned = [], []
-        for I in orders:
-            waves = [np.asarray(s.wv[I], float) for s in specs]
-            fluxes = [np.asarray(s.sp[I], float) for s in specs]
-            # A single NaN would otherwise zero that epoch's norm (linear) or
-            # stop the spline with an opaque message (cubic).
-            for k, f in enumerate(fluxes):
-                if not np.all(np.isfinite(f)):
-                    raise ValueError(f'epoch {k}, order {I}: flux contains NaN/inf; '
-                                     'mask or interpolate those pixels first')
-            grid = common_grid(waves, velocities, reference=reference,
-                               margin=margin)
-            grids.append(grid)
-            aligned.append(align_spectra(waves, fluxes, velocities, grid,
-                                         kind=kind))
-
-        # One normalization, one correlation matrix, one weight vector for the
-        # whole spectrum: the orders are different views of the same alignment.
-        normalized = normalize_rows(aligned)
-        correlation = correlation_matrix(normalized)
-        stats = alignment(correlation)
-        weights = stats.pop('weights')
-        rho = stats.pop('rho')
-
-        # Split the normalized rows back per order and co-add each.
-        sizes = np.cumsum([0] + [len(g) for g in grids])
-        blocks = [normalized[:, a:b] for a, b in zip(sizes[:-1], sizes[1:])]
-        template_sp = [coadd(block, weights) for block in blocks]
+        res = build_tiravel([s.wv for s in spectra], [s.sp for s in spectra], velocities,
+                            orders=orders, reference=reference, margin=margin, kind=kind)
 
         self.template = Template(Spectrum(
-            wv=[np.asarray(g, float) for g in grids],
-            sp=template_sp,
-            name=getattr(specs[0], 'name', 'TIRAVEL')))
-        self.rho = rho
-        self.weights = weights
-        self.correlation = correlation
-        self.diagnostics = stats
-        self.velocities = velocities
-        self.grids = grids
-        self.aligned = blocks if keep_aligned else None
-        self.n_ord = len(grids)
+            wv=[np.asarray(g, float) for g in res.grids],
+            sp=res.template_flux,
+            name=getattr(spectra[0], 'name', 'TIRAVEL')))
+        self.rho = res.rho
+        self.weights = res.weights
+        self.correlation = res.correlation
+        self.diagnostics = res.diagnostics
+        self.velocities = res.velocities
+        self.grids = res.grids
+        self.aligned = res.aligned if keep_aligned else None
+        self.n_ord = len(res.grids)
 
         return self
 
@@ -231,7 +182,12 @@ class TIRAVEL:
         Plot the co-added template over the aligned epochs that made it.
 
         The epochs are data (black, mid-centred steps, faint); the template is
-        the model (red line), as in ``sparta.plotting``.
+        the model (red line), as in ``sparta.plotting``. Both are drawn on the
+        scale of the aligned epochs -- mean-subtracted, each of unit L2 norm
+        across the orders used -- so the template appears divided by the sum
+        of the weights, i.e. as the weighted mean of the epochs. (The stored
+        co-add, of unit-norm epochs with unit-norm weights, is ~sqrt(K) times
+        larger; its scale is arbitrary.)
 
         Parameters
         ----------
@@ -263,8 +219,9 @@ class TIRAVEL:
             for k, row in enumerate(self.aligned[order]):
                 sp_plot.plot_data(ax, grid, row, lw=0.5, alpha=alpha,
                                   label='aligned epochs' if k == 0 else None)
-        sp_plot.plot_model(ax, grid, self.template.model.sp[order], label='TIRAVEL template')
+        sp_plot.plot_model(ax, grid, self.template.model.sp[order] / np.sum(self.weights),
+                           label='TIRAVEL template (weighted mean)')
         ax.set_xlabel(r'Rest-frame wavelength ($\AA$)')
-        ax.set_ylabel('Normalized flux')
+        ax.set_ylabel('Flux (mean-subtracted, unit-norm epochs)')
         ax.legend(loc='lower right')
         return fig

@@ -7,8 +7,9 @@ move into one of them unchanged. Two independent checks:
 (a) Load the module file in a FRESH subprocess that has only ``unicor`` on its
     path -- not through ``sparta/__init__``, which imports the whole stack --
     and assert that no forbidden top-level module ends up in ``sys.modules``.
-(b) AST-scan the file: every import must be numpy or unicor, so a lazy import
-    inside a function cannot slip past (a).
+(b) AST-scan the file: every import must be numpy, unicor or the stdlib
+    ``dataclasses`` (for ``TiravelResult``, as in ``unicor.ccf``), so a lazy
+    import inside a function cannot slip past (a).
 """
 import ast
 import os
@@ -19,7 +20,7 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 _FILE = ROOT / "src" / "sparta" / "tiravel_ops.py"
 _UNICOR = ROOT / "packages" / "unicor" / "src"
-ALLOWED = ("numpy", "unicor")
+ALLOWED = ("numpy", "unicor", "dataclasses")
 FORBIDDEN = ("sparta", "astropy", "specutils", "pandas", "matplotlib", "todcor")
 
 

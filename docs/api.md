@@ -17,7 +17,7 @@ Signatures and the numpydoc summary, Parameters, Returns and Raises of every pub
   - [`sparta.timeseries`](#spartatimeseries) — `TimeSeries`
   - [`sparta.periodogram`](#spartaperiodogram) — `PeriodicityDetector`
   - [`sparta.pdc`](#spartapdc)
-  - [`sparta.tiravel_ops`](#spartatiravel_ops)
+  - [`sparta.tiravel_ops`](#spartatiravel_ops) — `TiravelResult`
   - [`sparta.instruments`](#spartainstruments) — `Instrument`, `LoadedSpectrum`, `Product`, `Recommended`, `Component`, `Simulation`, `Truth`
   - [`sparta.plotting`](#spartaplotting)
 - **unicor**
@@ -1745,6 +1745,48 @@ PDC periodogram: correlation of a centered distance matrix with the phase distan
 
 - *ValueError*: For a control with the biased statistic, or n \<= 3 with the unbiased one.
 
+#### `sparta.pdc.pdc_pvalue`
+
+```python
+sparta.pdc.pdc_pvalue(power, n)
+```
+
+Single-frequency p-value of an unbiased PDC power.
+
+**Parameters**
+
+- `power` (*array_like*): Unbiased PDC / USuRPER / partial power (dimensionless).
+- `n` (*int*): Number of epochs (> 0).
+
+**Returns**
+
+- *ndarray*: The p-values, shaped like `power`.
+
+**Raises**
+
+- *ValueError*: If `n` is not positive.
+
+#### `sparta.pdc.pdc_power_level`
+
+```python
+sparta.pdc.pdc_power_level(pvalue, n)
+```
+
+The unbiased PDC power whose single-frequency p-value is `pvalue`.
+
+**Parameters**
+
+- `pvalue` (*array_like*): p-values in (0, 1].
+- `n` (*int*): Number of epochs (> 0).
+
+**Returns**
+
+- *ndarray*: The power levels (dimensionless), shaped like `pvalue`.
+
+**Raises**
+
+- *ValueError*: If `n` is not positive.
+
 #### `sparta.pdc.get_wv_grid`
 
 ```python
@@ -1911,6 +1953,68 @@ Weighted co-addition of aligned spectra -> the optimal template.
 **Returns**
 
 - *ndarray, shape (M,)*: The co-added template. Its absolute scale is arbitrary -- correlation against it is scale-invariant.
+
+#### `sparta.tiravel_ops.TiravelResult`
+
+```python
+TiravelResult(
+    rho,
+    weights,
+    correlation,
+    diagnostics,
+    velocities,
+    grids,
+    template_flux,
+    aligned,
+)
+```
+
+The TIRAVEL template and alignment of a set of epochs (`build_tiravel`).
+
+**Parameters**
+
+- `rho` (*float*): The alignment measure `(lambda_max - 1)/(K - 1)` (dimensionless, in [0, 1]; `alignment`).
+- `weights` (*ndarray, shape (K,)*): Co-addition weights (unit norm, bulk positive).
+- `correlation` (*ndarray, shape (K, K)*): The epochs' correlation matrix (`correlation_matrix`), all orders pooled.
+- `diagnostics` (*dict*): 'lambda_max', 'eigenvalues', 'explained' and 'n_eff', as returned by `alignment`.
+- `velocities` (*ndarray, shape (K,)*): The trial velocities used (km/s), as floats.
+- `grids` (*list of ndarray*): The common rest-frame grid of each order used (Angstrom), in the order of `orders`.
+- `template_flux` (*list of ndarray*): The co-added template on each grid (`coadd`; dimensionless, mean-free, arbitrary overall scale).
+- `aligned` (*list of ndarray*): Each order's aligned epochs, shape (K, len(grid)): mean-subtracted per order, every epoch of unit L2 norm across all orders jointly (`normalize_rows`).
+
+#### `sparta.tiravel_ops.build_tiravel`
+
+```python
+sparta.tiravel_ops.build_tiravel(
+    waves,
+    fluxes,
+    velocities,
+    orders=None,
+    reference=0,
+    margin=10,
+    kind='cubic',
+)
+```
+
+Build the TIRAVEL template of a set of epochs at given velocities.
+
+**Parameters**
+
+- `waves` (*sequence of sequence of ndarray*): `waves[k][I]`: the observed wavelengths (Angstrom) of epoch k, order I. K >= 2 epochs, all with the same number of orders.
+- `fluxes` (*sequence of sequence of ndarray*): `fluxes[k][I]`: the matching flux (finite); not modified.
+- `velocities` (*array_like*): K trial radial velocities (km/s). Only their differences matter: a constant added to all leaves `rho` unchanged and shifts the template by the same amount.
+- `orders` (*sequence of int, optional*): Order indices to use, in this order. Default all.
+- `reference` (*int*): Index of the epoch whose rest-frame sampling defines each common grid.
+- `margin` (*int*): Pixels trimmed from each end of the common range (>= 0).
+- `kind` (*{'cubic', 'linear'}*): Resampling of the shifted epochs (see `align_spectra`).
+
+**Returns**
+
+- *TiravelResult*: `rho`, the weights, the correlation matrix and its diagnostics, the velocities, and per order the grid, the template flux and the aligned epochs.
+
+**Raises**
+
+- *ValueError*: For mismatched or too few epochs, non-finite velocities or flux, epochs with different numbers of orders, or epochs that do not overlap once de-shifted (`common_grid`).
 
 ### sparta.instruments
 

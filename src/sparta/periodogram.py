@@ -18,7 +18,6 @@ A&A 659, A189; PDC p-values -- Shen et al. 2019 (arXiv:1912.12150).
 import numpy as np
 import matplotlib.pyplot as plt
 from astropy.timeseries import LombScargle
-from scipy.stats.distributions import chi2
 from unicor import dsp
 from sparta import pdc
 from sparta import plotting as sp_plot
@@ -301,8 +300,9 @@ class PeriodicityDetector:
 
         Uses the chi-square approximation of the distance-correlation test
         (Shen et al. 2019, arXiv:1912.12150):
-        p = chi2_1.sf(n * power + 1), n the number of epochs. It holds for
-        the unbiased statistics at a single trial frequency; it is not a
+        p = chi2_1.sf(n * power + 1), n the number of epochs
+        (``sparta.pdc.pdc_pvalue`` / ``pdc_power_level``). It holds for the
+        unbiased statistics at a single trial frequency; it is not a
         false-alarm probability over the whole grid.
 
         Parameters
@@ -317,17 +317,10 @@ class PeriodicityDetector:
         ndarray
             The p-values, or the power levels.
         '''
-
-        N = len(self.time_series.times)
-        if not inverse_sf:
-            output = np.array(
-                [chi2.sf(val * N + 1, 1) for val in values]
-            )
-        else:
-            output = np.array(
-                [(chi2.isf(val, 1)-1)/N for val in values]
-            )
-        return output
+        n = len(self.time_series.times)
+        if inverse_sf:
+            return pdc.pdc_power_level(list(values), n)
+        return pdc.pdc_pvalue(list(values), n)
 
     # =============================================================================
     # =============================================================================
