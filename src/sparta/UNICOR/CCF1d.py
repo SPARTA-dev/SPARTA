@@ -24,7 +24,7 @@
 # (velocity-even) grid.
 #
 # Dependencies: numpy, astropy, matplotlib, copy, unicor.
-# Last update: 2026-10-14 (array engine moved to the unicor package).
+# Last update: 2026-10-14 (extended-template CCF: no pull of the RV toward zero).
 
 
 import numpy as np
@@ -66,10 +66,26 @@ class CCF1d:
                          calculated (from maximum likelihood) to each
                          order.
 
+        The template is resampled onto each order's log-lambda grid continued
+        by K = round(VelBound / dv) steps on each side, and every lag is the
+        Pearson correlation of the same observed pixels with the template
+        shifted by that lag (``unicor.ccf_vs_velocity``). Correlating against
+        a template on the observed span only would overlap fewer pixels at
+        larger lags and pull the RV toward zero.
+
+        Template coverage: only observed pixels for which the template is
+        known at every lag are correlated. A template spanning just the
+        observed range (e.g. another epoch, a co-added spectrum) therefore
+        drops VelBound worth of pixels at each end of the order; a template
+        that covers no pixel across the whole scan makes that order NaN, with
+        a warning. The template is never extrapolated, since constant padding
+        would bring back the pull toward zero.
+
         The ML uncertainties (Zucker 2003, MNRAS 342, 1291) need the number of
         independent spectral bins. Resampling onto a finer grid adds samples
         but no information, so order i counts
-        ``len(order) * min(1, dv / native_step_i)`` bins, with the native step
+        ``n_pix_i * min(1, dv / native_step_i)`` bins -- ``n_pix_i`` the
+        pixels actually correlated (see template coverage) -- with the native step
         from ``spec_in.native_steps()`` (km/s; the coarsest sampling the
         spectrum has had).
 
@@ -124,15 +140,25 @@ class CCF1d:
         dv_kms = dv.to(u.km / u.s).value
         vmax_kms = u.Quantity(vmax, dv.unit).to(u.km / u.s).value
 
+        n_lags = int(round(vmax_kms / dv_kms))
+        if n_lags < 1:
+            raise ValueError(f"VelBound ({vmax_kms:g} km/s) must be at least one "
+                             f"velocity step ({dv_kms:g} km/s)")
+        V = np.arange(-n_lags, n_lags + 1) * dv_kms << (u.km / u.s)
+
         Nord = len(spec.wv)
         RV = np.full((Nord, 1), np.nan)
         eRV = np.full((Nord, 1), np.nan)
         SpecCorr = np.full((Nord, 1), np.nan)
-        n_eff = np.array([len(w) for w in spec.wv], float) * np.minimum(1.0, dv_kms / native_steps)
-        V, corr = None, None
+        corr = np.full((Nord, len(V)), np.nan)
+        native_ratio = np.minimum(1.0, dv_kms / native_steps)
+        # Overwritten below by the pixels each order actually correlates; an
+        # order that fails keeps its full count, as its NaN CCF makes the
+        # combined CCF NaN anyway.
+        n_eff = np.array([len(w) for w in spec.wv], float) * native_ratio
 
         for I, w in enumerate(spec.wv):
-            s = spec.sp[I]
+            s = np.asarray(spec.sp[I], float)
 
             # The lag axis is k * dv only if this order really is velocity-even
             # with the declared step (e.g. dropping pixels breaks it silently).
@@ -142,30 +168,27 @@ class CCF1d:
                     f"order {I}: the wavelength grid step is {step:.6g} km/s but "
                     f"Info['GridDelta'] declares {dv_kms:.6g} km/s")
 
-            # Resample the template onto the SAME grid as the observation, so
-            # the cross-correlation is equal-length and symmetric. The legacy
-            # code truncated the template to a shifted sub-grid, which made
-            # only negative velocities recoverable (see KNOWN_TRAPS.md). A
-            # single-order template (e.g. a full-range library spectrum) is
+            # A single-order template (e.g. a full-range library spectrum) is
             # reused for every order, as in CCF2d.
             It = I if len(template.model.wv) > 1 else 0
-            spT = dsp.resample(np.asarray(template.model.wv[It]),
-                               np.asarray(template.model.sp[It]), w)
+            t_wave = np.asarray(template.model.wv[It], float)
+            t_flux = np.asarray(template.model.sp[It], float)
 
-            # A template that is flat over this order (e.g. it does not cover
-            # it) has nothing to correlate: that order becomes NaN, as before,
-            # instead of aborting the whole epoch.
+            # The template goes on this order's grid continued by n_lags steps
+            # each side, so every lag correlates the same observed pixels
+            # (no taper pulling the peak toward v = 0). An order the template
+            # cannot serve is NaN, with a warning, instead of failing the epoch.
+            w_ext = unicor_ccf.extend_log_grid(w, n_lags)
+            spT = dsp.resample(t_wave, t_flux, w_ext)
             try:
-                v_kms, C = unicor_ccf.ccf_vs_velocity(spT, s, dv_kms, vmax_kms)
+                lo, hi = _template_covered_pixels(w_ext, t_wave, n_lags)
+                v_kms, C = unicor_ccf.ccf_vs_velocity(spT[lo: hi + 2 * n_lags],
+                                                      s[lo:hi], dv_kms)
             except ValueError as err:
                 warnings.warn(f"order {I}: {err}; its CCF is set to NaN", stacklevel=2)
-                K = min(int(round(vmax_kms / dv_kms)), len(w) - 1)
-                v_kms = np.arange(-K, K + 1) * dv_kms
-                C = np.full(len(v_kms), np.nan)
-
-            if V is None:
-                V = v_kms << (u.km / u.s)
-                corr = np.full((Nord, len(v_kms)), np.nan)
+                continue
+            n_eff[I] = (hi - lo) * native_ratio[I]
+            corr[I, :] = C
 
             # Find the radial velocity by fitting a parabola to the CCF peak.
             # An order whose peak cannot be located (e.g. at the edge of the
@@ -177,7 +200,6 @@ class CCF1d:
             except (ValueError, np.linalg.LinAlgError):
                 vPeak, vPeakErr, ccfPeak = np.nan, np.nan, np.nan
 
-            corr[I, :] = C
             RV[I] = vPeak
             eRV[I] = vPeakErr
             SpecCorr[I] = ccfPeak
@@ -370,3 +392,31 @@ class CCF1d:
         plt.grid()
 
         return fig
+
+
+def _template_covered_pixels(w_ext, t_wave, n_lags):
+    """Observed pixels whose template is known at every lag of the scan.
+
+    :param w_ext: the order's log-lambda grid extended by ``n_lags`` steps on
+                  each side (Angstrom), see ``unicor.extend_log_grid``.
+    :param t_wave: the template's wavelengths (Angstrom, increasing).
+    :param n_lags: number of lags K on each side of zero.
+    :return: (lo, hi) -- observed pixels ``lo:hi`` need exactly the template
+             nodes ``w_ext[lo: hi + 2K]``, all inside the template's span.
+    :raises ValueError: if no observed pixel is covered at every lag.
+    """
+    # A millionth of a step absorbs the round-off of exp() when the template
+    # sits on the observed grid itself.
+    tol = 1e-6 * np.log(w_ext[1] / w_ext[0])
+    ln_ext = np.log(w_ext)
+    inside = np.flatnonzero((ln_ext >= np.log(t_wave[0]) - tol) &
+                            (ln_ext <= np.log(t_wave[-1]) + tol))
+    n_obs = len(w_ext) - 2 * n_lags
+    # The covered nodes are contiguous; pixel i needs nodes i .. i + 2K.
+    lo, hi = (inside[0], inside[-1] - 2 * n_lags + 1) if inside.size else (0, 0)
+    if hi <= lo:
+        raise ValueError(
+            f"the template ({t_wave[0]:.2f}-{t_wave[-1]:.2f} A) does not cover any "
+            f"pixel of the order ({w_ext[n_lags]:.2f}-{w_ext[n_lags + n_obs - 1]:.2f} A) "
+            f"across the +-{n_lags}-lag scan; use a wider template or a smaller VelBound")
+    return lo, hi

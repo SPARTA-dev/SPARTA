@@ -5,7 +5,10 @@ velocities** — the array-level core of [SPARTA](https://github.com/SPARTA-dev/
 UNICOR. It needs only numpy and scipy.
 
 - Correlates an observation against a template on a uniform log-λ
-  (velocity-even) grid, scanning a symmetric velocity range.
+  (velocity-even) grid, scanning a symmetric velocity range. The template is
+  sampled on the observed grid extended by the scan half-width, so every lag is
+  a Pearson correlation over all the observed pixels — no taper that pulls the
+  RV toward zero.
 - Combines spectral orders by maximum likelihood (Zucker 2003, MNRAS 342, 1291).
 - Reads the RV off a sub-pixel parabola fit, with the ML uncertainty from the
   CCF curvature, and computes the bisector span.
@@ -34,12 +37,20 @@ pip install "sparta-unicor @ git+https://github.com/SPARTA-dev/SPARTA#subdirecto
 import numpy as np
 import unicor
 
-# Two orders, already on a common log-lambda grid with step dv = 0.5 km/s.
-wave, _ = unicor.log_lambda_grid(5000.0, 5100.0, dv=0.5)
-template = 1 - 0.5 * np.exp(-0.5 * ((wave - 5050.0) / 0.1) ** 2)
-observed = unicor.resample(unicor.doppler_shift_wave(wave, 12.3), template, wave)
+# One order on a log-lambda grid with step dv = 0.5 km/s, red-shifted by 12.3 km/s.
+dv, vmax = 0.5, 50.0
+wave, _ = unicor.log_lambda_grid(5000.0, 5100.0, dv)
+t_wave, _ = unicor.log_lambda_grid(4990.0, 5110.0, 0.1)        # wider template
+t_flux = 1 - 0.5 * np.exp(-0.5 * ((t_wave - 5050.0) / 0.1) ** 2)
+observed = unicor.resample(t_wave, t_flux, wave / (1 + 12.3 / unicor.C_KMS))
 
-v, c = unicor.ccf_vs_velocity(template, observed, dv=0.5, vmax=50)
+# The template goes on the observed grid continued by K = vmax/dv steps on
+# each side: lag k then correlates all observed pixels with the template
+# shifted by k. It must cover that extended grid (resample clamps outside it).
+K = round(vmax / dv)
+template = unicor.resample(t_wave, t_flux, unicor.extend_log_grid(wave, K))
+
+v, c = unicor.ccf_vs_velocity(template, observed, dv)  # v = arange(-K, K+1) * dv
 rv, peak = unicor.subpixel_peak(v, c)                 # ~12.3 km/s
 # n_eff: independent spectral bins -- native (detector) pixels, not the
 # pixels of a finer resampled grid. Here the grid is the native sampling.

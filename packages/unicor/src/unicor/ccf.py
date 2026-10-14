@@ -5,13 +5,18 @@ arrays -- velocities in km/s, the CCF dimensionless -- so it can be used
 without SPARTA's ``Spectrum`` / ``Template`` objects (which wrap it in
 :class:`sparta.UNICOR.CCF1d`).
 
-Typical use, for one order already on a common log-lambda grid::
+Typical use, for one order already on a uniform log-lambda grid ``wave``::
 
-    v, c = ccf_vs_velocity(template_flux, observed_flux, dv, vmax)
+    K = round(vmax / dv)                                  # lags on each side
+    template_flux = resample(t_wave, t_flux, extend_log_grid(wave, K))
+    v, c = ccf_vs_velocity(template_flux, observed_flux, dv)
     rv, peak = subpixel_peak(v, c)
     erv = rv_uncertainty(v, c, rv, n_eff)
 
-and, for several orders sharing the velocity lags ``v``::
+The template must cover ``wave`` extended by K steps on each side, so that every
+lag correlates all the observed pixels (see :func:`ccf_vs_velocity`).
+
+For several orders sharing the velocity lags ``v``::
 
     combined = combine_ccfs(ccf_matrix, n_eff=n_eff_per_order)  # Zucker (2003)
     rv, peak = subpixel_peak(v, combined)
@@ -25,54 +30,131 @@ import numpy as np
 from scipy import interpolate
 from scipy.signal import correlate as _correlate
 
+from .dsp import log_grid_step
 
-def ccf_vs_velocity(template, signal, dv, vmax):
-    """Normalized cross-correlation of ``template`` and ``signal`` vs velocity.
 
-    Both arrays must be sampled on the SAME uniform log-lambda grid with
-    velocity step ``dv`` (km/s), so a shift of k pixels is k*dv km/s. Both are
-    mean-subtracted, so this is the Pearson correlation of the line residuals
-    (no continuum-DC taper). The scan is symmetric over ``[-vmax, vmax]``, so
-    the whole axis is uniformly valid.
+def extend_log_grid(wave, n_lags):
+    """A uniform log-lambda grid continued by ``n_lags`` steps on each side.
+
+    The template for :func:`ccf_vs_velocity` must be sampled on this grid: its
+    central ``len(wave)`` nodes are ``wave`` itself, so lag k is exactly k grid
+    steps, with no sub-pixel phase offset between template and observation.
 
     Parameters
     ----------
-    template, signal : ndarray
-        Flux on a shared uniform log-lambda grid.
-    dv : float
-        Velocity step of that grid (km/s).
-    vmax : float
-        Half-width of the velocity scan (km/s); clipped to the array length.
+    wave : ndarray
+        Observed wavelength grid (Angstrom), uniform in ln(lambda).
+    n_lags : int
+        Number of velocity lags K (>= 1) to scan on each side of zero; the
+        scan half-width is ``K * dv`` km/s.
 
     Returns
     -------
-    v : ndarray
+    ndarray
+        ``wave[0] * exp(dln * arange(-K, N + K))`` (Angstrom), length
+        ``N + 2K``, with ``dln`` the mean ln(lambda) step of ``wave``.
+
+    Raises
+    ------
+    ValueError
+        If ``n_lags`` is not a positive integer, or ``wave`` is not a strictly
+        increasing grid uniform in ln(lambda).
+    """
+    if int(n_lags) != n_lags or n_lags < 1:
+        raise ValueError(f"n_lags must be a positive integer, got {n_lags}")
+    wave = np.asarray(wave, float)
+    log_grid_step(wave)
+    n, k = wave.size, int(n_lags)
+    dln = np.log(wave[-1] / wave[0]) / (n - 1)
+    return wave[0] * np.exp(dln * np.arange(-k, n + k))
+
+
+def ccf_vs_velocity(template, signal, dv):
+    """Pearson cross-correlation of ``signal`` against a template, vs velocity.
+
+    ``signal`` holds N pixels of a uniform log-lambda grid with velocity step
+    ``dv``; ``template`` holds N + 2K pixels of the same grid continued by K
+    steps on each side (:func:`extend_log_grid`). At lag k the N observed
+    pixels are correlated with the N-pixel template segment shifted by k, each
+    mean-subtracted and normalised by its own norm -- so every lag is a full
+    Pearson correlation over the same N pixels.
+
+    A template on the observed span alone (correlated in 'full' mode with one
+    global norm) overlaps only N - |k| pixels at lag k: the CCF is tapered by
+    about ``1 - |k|/N`` and its peak is pulled toward v = 0, by tens to
+    hundreds of m/s per order for rotating stars, the same sign in every
+    order. The extended template removes that pull, and makes the number of
+    bins behind every lag the constant N that :func:`rv_uncertainty` assumes.
+
+    Parameters
+    ----------
+    template : ndarray, shape (N + 2K,)
+        Template flux on the observed grid extended by K >= 1 steps per side.
+    signal : ndarray, shape (N,)
+        Observed flux on the uniform log-lambda grid.
+    dv : float
+        Velocity step of that grid (km/s).
+
+    Returns
+    -------
+    v : ndarray, shape (2K + 1,)
         Symmetric velocity lags (km/s): ``arange(-K, K+1) * dv``.
-    ccf : ndarray
-        Normalized correlation in [-1, 1]. Peaks at the velocity by which
+    ccf : ndarray, shape (2K + 1,)
+        Pearson correlation in [-1, 1]. Peaks at the velocity by which
         ``signal`` is red-shifted relative to ``template``.
+
+    Raises
+    ------
+    ValueError
+        If ``dv`` is not positive; if ``len(template) - len(signal)`` is not a
+        positive even number 2K; if either array is not finite; or if
+        ``signal`` or the template segment of any lag is constant (the
+        correlation is then 0/0 -- typically a template without lines there).
     """
     if not dv > 0:
         raise ValueError(f"dv must be positive, got {dv}")
     t = np.asarray(template, float)
     s = np.asarray(signal, float)
-    if t.shape != s.shape:
-        raise ValueError("template and signal must share the same grid/length")
-    t = t - t.mean()
-    s = s - s.mean()
+    if t.ndim != 1 or s.ndim != 1:
+        raise ValueError("template and signal must be one-dimensional")
+    n = s.size
+    excess = t.size - n
+    if excess < 2 or excess % 2:
+        raise ValueError(
+            f"template must extend the signal grid by K >= 1 pixels on each side "
+            f"(length N + 2K); got {t.size} template vs {n} signal pixels. "
+            "Resample the template onto extend_log_grid(wave, K).")
+    k = excess // 2
     if not (np.all(np.isfinite(t)) and np.all(np.isfinite(s))):
         raise ValueError("template and signal must be finite (mask NaN pixels first)")
-    norm = np.sqrt((t ** 2).sum() * (s ** 2).sum())
-    if norm == 0:
-        # A flat array has no lines to correlate -- typically a template that
-        # does not cover the observed range and was clamped to a constant.
-        raise ValueError("template or signal is constant; check wavelength coverage")
-    full = _correlate(s, t, mode="full", method="fft")
-    mid = len(t) - 1
-    K = min(int(round(vmax / dv)), mid)
-    ccf = full[mid - K: mid + K + 1] / norm
-    v = np.arange(-K, K + 1) * dv
-    return v, ccf
+
+    s = s - s.mean()
+    s_norm2 = (s ** 2).sum()
+    if s_norm2 == 0:
+        raise ValueError("signal is constant: there are no lines to correlate")
+
+    # Subtracting the global mean leaves each segment's Pearson coefficient
+    # unchanged and keeps the running sums small, so the segment variance
+    # below does not cancel catastrophically for un-normalised flux.
+    t = t - t.mean()
+    # out[m] = sum_i t[i + m] s[i], m = 0..2K; s has zero mean, so the
+    # segment mean drops out of the numerator.
+    numer = _correlate(t, s, mode="valid", method="fft")
+    s1 = np.concatenate(([0.0], np.cumsum(t)))
+    s2 = np.concatenate(([0.0], np.cumsum(t ** 2)))
+    sum_t = s1[n:] - s1[:-n]
+    sum_t2 = s2[n:] - s2[:-n]
+    seg_var = sum_t2 - sum_t ** 2 / n
+    # A flat segment leaves only the cumsum round-off (~1e-16 of sum_t2).
+    flat = seg_var <= 1e-10 * sum_t2
+    if np.any(flat):
+        raise ValueError(
+            f"the template is constant over the observed span at {flat.sum()} of "
+            f"{flat.size} lags; the correlation is undefined there (narrow the "
+            "velocity scan or use a template with lines across the order)")
+    ccf = numer / np.sqrt(seg_var * s_norm2)
+    # Segment m is the template shifted by K - m pixels: reverse to ascending lag.
+    return np.arange(-k, k + 1) * dv, ccf[::-1]
 
 
 def combine_ccfs(ccfs, n_eff=None):
