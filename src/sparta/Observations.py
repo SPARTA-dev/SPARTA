@@ -226,7 +226,7 @@ class Observations:
 # =============================================================================
 # =============================================================================
     def calc_rv_against_two_templates(self, template1, template2, dv=0.1,
-                                      VelBound=150, dvel=None, sigma=1.0,
+                                      VelBound=150, dvel=None, sigma=None,
                                       nonneg=True, **kwargs):
         '''
         Double-lined (SB2) radial velocities for the whole time series, using

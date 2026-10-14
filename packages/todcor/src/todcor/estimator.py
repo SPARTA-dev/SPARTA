@@ -93,15 +93,35 @@ epoch* -- pooled windows must share one true ``(v1, v2)``; do NOT combine
 across epochs (orbital motion changes the velocities).  In SPARTA the natural
 windows are the spectral **orders** of one observation.
 
+Oversampled grids and the noise budget
+--------------------------------------
+Resampling a spectrum onto a grid ``M = dv_native / dv`` times finer adds
+samples but no information: ~M neighbouring analysis pixels share each native
+pixel's noise.  White Parseval weights would count the Fisher information M
+times and shrink the CRLB by ``sqrt(M)``.  ``oversampling=M`` divides the
+weights by M (equivalently ``sigma -> sigma * sqrt(M)``), which restores the
+information of the native pixels for any line resolved by the native sampling.
+
+Each window also reports ``nu``, the expected chi^2 of its pure-noise residual
+(``sum_k w_k E|N_k|^2``), i.e. its effective number of noise degrees of
+freedom.  For white noise on the analysis grid ``nu`` is the number of retained
+Fourier modes; on an oversampled grid it is ``~ kappa * n / M``, where
+``kappa < 1`` is the interpolator's noise-variance factor (2/3 for linear,
+~0.87 for a cubic spline) -- the resampled noise is smoother, not just
+correlated.  Pass the resampled-noise spectrum (:func:`resampled_noise_psd`,
+times ``mean(taper**2)`` for an apodised window) as ``noise_psd`` and
+``chi2_red = chi2 / (sum nu - 4)`` is ~1 for honest noise; then
+``sigma *= sqrt(chi2_red)`` is a calibrated noise estimate.
+
 Assumptions (exact only under these)
 ------------------------------------
-* **White, homoscedastic per-pixel noise** ``sigma`` on the analysis grid.  The
-  Tukey taper (:func:`unicor.dsp.tukey_window`) makes the noise
-  heteroscedastic and interpolation in
-  :func:`unicor.dsp.resample` *correlates* (colours) it; only the
-  overall *scale* is compensated (reduced-chi^2 rescaling,
-  ``sigma *= sqrt(chi2_red)``), not the correlation -- so CRLB errors are
-  mildly optimistic.
+* **White native noise** ``sigma`` per *native* pixel, resampled by an
+  interpolator (any scheme linear in the flux) whose impulse responses are
+  known (``noise_psd``).  The Tukey
+  taper (:func:`unicor.dsp.tukey_window`) makes the noise heteroscedastic
+  (``sigma_n = w_n sigma``); only its mean effect enters ``nu``.  The weights
+  stay white, so an interpolator that attenuates in-band noise (linear
+  interpolation's passband droop) leaves the CRLB mildly conservative.
 * **Flat R^2 prior** on the amplitudes for the marginal map (above).
 * **Shared velocity grid** for :func:`combine_stats` (below).
 """
@@ -113,7 +133,8 @@ from unicor.dsp import parseval_weights, rfft_positive, shift_kms
 
 # =============================================================================
 # =============================================================================
-def window_stats(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None):
+def window_stats(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None,
+                 oversampling=1.0, noise_psd=None):
     """Weighted least-squares sufficient statistics for one spectral window.
 
     The 2x2 amplitude problem at every ``(v1, v2)`` node is fully described by
@@ -137,11 +158,22 @@ def window_stats(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None)
     v1_grid, v2_grid : ndarray
         Trial radial velocities of each component (km/s).
     sigma : float
-        Per-pixel noise of ``data_g`` (same flux units), assumed white and
-        homoscedastic.
+        Per-pixel noise of the data (same flux units) on its *native*
+        sampling, assumed white and homoscedastic there.
     zeta_max : float or None
         Optional low-pass: drop Fourier modes above ``zeta_max`` (s/km), e.g.
         to exclude scales finer than the instrumental resolution.
+    oversampling : float
+        Analysis pixels per independent (native) pixel, ``dv_native / dv``,
+        clipped at 1 by the caller (dimensionless, >= 1). The weights are
+        divided by it, so each native pixel's information is counted once.
+        Default 1: the analysis grid is the native sampling (no change).
+    noise_psd : ndarray or None
+        Expected noise power of ``data_g`` per Fourier mode, relative to white
+        noise of variance ``sigma**2`` on the analysis grid, aligned with
+        :func:`unicor.dsp.rfft_positive` (length ``n // 2``; see
+        :func:`resampled_noise_psd`). Used only for the noise budget ``nu``.
+        Default None: white noise on the analysis grid (all ones).
 
     Returns
     -------
@@ -149,17 +181,27 @@ def window_stats(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None)
         ``S11``, ``S22``, ``SD`` : scalar template/data weighted powers.
         ``b1`` (n1,), ``b2`` (n2,) : data-template cross-terms vs ``v1``/``v2``.
         ``A12`` (n1, n2) : template-template cross-term vs ``(v1, v2)``.
+        ``nu`` : expected chi^2 of the window's pure-noise residual -- its
+        effective noise degrees of freedom (dimensionless).
     """
     data_g = np.asarray(data_g, float)
     n = len(data_g)
     if len(g1) != n or len(g2) != n:
         raise ValueError("data_g, g1 and g2 must share one grid "
                          f"(got {n}, {len(g1)}, {len(g2)})")
+    if not oversampling >= 1.0:
+        raise ValueError(f"oversampling must be >= 1, got {oversampling}")
+    if noise_psd is None:
+        noise_psd = np.ones(n // 2)
+    noise_psd = np.asarray(noise_psd, float)
+    if noise_psd.shape != (n // 2,):
+        raise ValueError(f"noise_psd must have length n // 2 = {n // 2} "
+                         f"(one value per positive Fourier mode), got {noise_psd.shape}")
 
     D, zeta = rfft_positive(data_g, dv)
     G1 = np.fft.rfft(np.asarray(g1, float))[1:]
     G2 = np.fft.rfft(np.asarray(g2, float))[1:]
-    w = parseval_weights(n, sigma=sigma)
+    w = parseval_weights(n, sigma=sigma) / oversampling
 
     # For even N the Nyquist coefficient of a real signal must be real; the
     # phase-shift model (via irfft in `model_flux`) enforces that, but the
@@ -168,10 +210,16 @@ def window_stats(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None)
     # Parseval identity for the retained modes (its power is negligible).
     if n % 2 == 0:
         D, G1, G2, zeta, w = D[:-1], G1[:-1], G2[:-1], zeta[:-1], w[:-1]
+        noise_psd = noise_psd[:-1]
 
     if zeta_max is not None:
         keep = zeta <= zeta_max
         D, G1, G2, zeta, w = D[keep], G1[keep], G2[keep], zeta[keep], w[keep]
+        noise_psd = noise_psd[keep]
+
+    # E|N_k|^2 = n sigma^2 psd_k for the retained modes; the dropped ones (DC,
+    # Nyquist, above zeta_max) never enter chi^2 and so carry no dof.
+    nu = float(np.sum(w * n * sigma ** 2 * noise_psd))
 
     s1 = shift_kms(np.asarray(v1_grid, float))  # (n1,)
     s2 = shift_kms(np.asarray(v2_grid, float))  # (n2,)
@@ -200,7 +248,60 @@ def window_stats(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None)
         tmp = wG1G2[None, :] * phase1  # (n1, K): carries exp(+2j pi zeta s1)
         A12 = (tmp @ em2.T).real  # (n1, n2)
 
-    return {"S11": S11, "S22": S22, "SD": SD, "b1": b1, "b2": b2, "A12": A12}
+    return {"S11": S11, "S22": S22, "SD": SD, "b1": b1, "b2": b2, "A12": A12,
+            "nu": nu}
+
+
+# =============================================================================
+# =============================================================================
+def resampled_noise_psd(responses, n, ratio):
+    """Noise spectrum of white native noise after resampling onto a finer grid.
+
+    Resampling is linear in the flux, so white noise ``sigma`` on the native
+    pixels becomes ``sum_j eps_j h_j`` on the analysis grid, where ``h_j`` is
+    the response to a unit impulse in native pixel ``j``.  Its expected power
+    per Fourier mode is ``sigma^2 * (n / ratio) * |H_k|^2`` (``n / ratio``
+    native pixels in the window), which this returns relative to white noise
+    ``sigma^2`` on the analysis grid -- the ``noise_psd`` of
+    :func:`window_stats`.  Its mean over modes is the interpolator's
+    noise-variance factor ``kappa``.  Averaging a few impulses at different
+    sub-pixel phases smooths the (cyclostationary) phase dependence.
+
+    Parameters
+    ----------
+    responses : sequence of ndarray
+        Analysis-grid responses to unit impulses in single native pixels, each
+        cut to its support (analysis pixels; dimensionless).
+    n : int
+        Length of the analysis window (pixels).
+    ratio : float
+        Native velocity step over analysis step, ``dv_native / dv``
+        (dimensionless).
+
+    Returns
+    -------
+    ndarray (n // 2,)
+        Relative noise power per positive Fourier mode, aligned with
+        :func:`unicor.dsp.rfft_positive` (white noise = 1).
+    """
+    responses = [np.asarray(h, float) for h in responses]
+    if not responses:
+        raise ValueError("resampled_noise_psd needs at least one impulse response")
+    longest = max(len(h) for h in responses)
+    if longest > n:
+        raise ValueError(f"an impulse response ({longest} pixels) is longer than "
+                         f"the window ({n} pixels)")
+    if not ratio > 0:
+        raise ValueError(f"ratio must be positive, got {ratio}")
+    # |rfft(h, n)|^2 is the transform of h's autocorrelation wrapped modulo n,
+    # so average the (short) autocorrelations and transform once instead of
+    # paying one length-n FFT per impulse.
+    padded = [np.pad(h, (0, longest - len(h))) for h in responses]
+    acf = np.mean([np.correlate(h, h, mode="full") for h in padded], axis=0)
+    circ = np.zeros(n)
+    np.add.at(circ, np.arange(-(longest - 1), longest) % n, acf)
+    power = np.fft.rfft(circ).real[1:]
+    return power / ratio
 
 
 # =============================================================================
@@ -238,7 +339,7 @@ def combine_stats(stats_list):
                 "all windows must be evaluated on the same velocity grid "
                 f"(window 0 has A12 {shape}, window {I} has {st['A12'].shape})")
 
-    keys = ("S11", "S22", "SD", "b1", "b2", "A12")
+    keys = ("S11", "S22", "SD", "b1", "b2", "A12", "nu")
     return {k: sum(st[k] for st in stats_list) for k in keys}
 
 
@@ -267,9 +368,11 @@ def profile_from_stats(stats, v1_grid, v2_grid, nonneg=False):
     dict
         ``logL_profile``, ``logL_marginal``, ``a1``, ``a2``, ``chi2`` : (n1, n2)
         maps; ``v1_grid``, ``v2_grid``; and ``best``, the ``logL_profile``
-        argmax as ``{'v1', 'v2', 'a1', 'a2', 'chi2'}`` (km/s / dimensionless).
-        The reported peak is always the *profile* argmax -- the marginal peak
-        can differ by the ``det``-gradient.
+        argmax as ``{'v1', 'v2', 'a1', 'a2', 'chi2', 'chi2_red'}`` (km/s /
+        dimensionless), where ``chi2_red = chi2 / (nu - 4)`` (four fitted
+        parameters; ``nan`` if ``nu <= 4``).  The reported peak is always the
+        *profile* argmax -- the marginal peak can differ by the
+        ``det``-gradient.
     """
     S11, S22, SD = stats["S11"], stats["S22"], stats["SD"]
     b1g = stats["b1"][:, None]  # (n1, 1)
@@ -313,6 +416,8 @@ def profile_from_stats(stats, v1_grid, v2_grid, nonneg=False):
         "a1": float(a1[i, j]),
         "a2": float(a2[i, j]),
         "chi2": float(chi2[i, j]),
+        "chi2_red": float(chi2[i, j] / (stats["nu"] - 4.0))
+        if stats["nu"] > 4.0 else np.nan,
     }
     return {
         "logL_profile": logL_profile,
@@ -345,6 +450,15 @@ def crlb_from_map(logL, v1_grid, v2_grid, half=3):
     The absolute scale is only as good as the noise ``sigma`` fed to the fit; if
     the reduced chi^2 differs from 1, multiply the returned sigmas by
     ``sqrt(chi2_red)``.
+
+    The patch must be small compared with the width of the peak.  ``logL``
+    follows the *squared* correlation, so its peak is ~``sigma_ccf / sqrt(2)``
+    wide; a patch spanning a sizeable fraction of that picks up the quartic
+    fall-off, which biases the curvature and -- with the argmax off-centre in
+    the patch -- the refined peak (several CRLB sigma for 8 km/s lines on a
+    +/-3 km/s patch).  Evaluate a coarse map, then re-evaluate the statistics
+    on a fine local grid around its argmax (as ``sparta.TODCOR.CCF2d`` does)
+    and call this on the fine map.
 
     Parameters
     ----------
@@ -416,7 +530,7 @@ def crlb_from_map(logL, v1_grid, v2_grid, half=3):
 # =============================================================================
 # =============================================================================
 def todcor_map(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None,
-               nonneg=False):
+               nonneg=False, oversampling=1.0, noise_psd=None):
     """Single-window TODCOR log-likelihood map (convenience wrapper).
 
     Equivalent to ``profile_from_stats(window_stats(...), v1_grid, v2_grid)``.
@@ -425,6 +539,7 @@ def todcor_map(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None,
     :func:`combine_stats` before profiling (never across epochs).
     """
     stats = window_stats(
-        data_g, g1, g2, dv, v1_grid, v2_grid, sigma=sigma, zeta_max=zeta_max
+        data_g, g1, g2, dv, v1_grid, v2_grid, sigma=sigma, zeta_max=zeta_max,
+        oversampling=oversampling, noise_psd=noise_psd,
     )
     return profile_from_stats(stats, v1_grid, v2_grid, nonneg=nonneg)

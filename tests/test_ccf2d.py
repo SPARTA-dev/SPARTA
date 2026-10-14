@@ -91,7 +91,7 @@ def test_ccf2d_keep_windows_false_drops_arrays_but_keeps_powers():
     ccf = CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, VelBound=120, dvel=4.0,
                                      keep_windows=False)
     assert all('wv' not in w and w['S11'] > 0 for w in ccf.windows)
-    assert set(ccf.stats) == {'S11', 'S22', 'SD', 'b1', 'b2', 'A12'}
+    assert set(ccf.stats) == {'S11', 'S22', 'SD', 'b1', 'b2', 'A12', 'nu'}
     with pytest.raises(ValueError, match='keep_windows=True'):
         ccf.BestFitSpectrum(order=0)
 
@@ -142,6 +142,7 @@ def test_ccf2d_peak_on_the_grid_edge_warns_and_reports_no_error():
                                          v2_grid=np.arange(-150.0, 151.0, 2.0))
     assert ccf.Corr2d['RV1'] == 40.0           # grid-limited, not extrapolated
     assert np.isnan(ccf.Corr2d['eRV1'])
+    assert ccf.Corr2d['fine'] is None          # no refinement off a grid edge
 
 
 def test_ccf2d_accepts_velocity_grids_with_units():
@@ -149,3 +150,166 @@ def test_ccf2d_accepts_velocity_grids_with_units():
     grid_ms = np.arange(-150.0, 151.0, 2.0) * 1e3 * u.m / u.s
     ccf = CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, v1_grid=grid_ms, v2_grid=grid_ms)
     assert ccf.Corr2d['RV1'] == pytest.approx(60.0, abs=1.0)
+
+
+# =============================================================================
+# A realistic narrow-line SB2 observed on a ~1 km/s native grid
+# =============================================================================
+_LO, _HI = 4450.0, 4520.0
+_C_KMS = 299792.458
+
+
+def _line_list(seed, n=25):
+    rng = np.random.default_rng(seed)
+    return rng.uniform(_LO + 3.0, _HI - 3.0, n), rng.uniform(0.1, 0.6, n)
+
+
+_LINES1, _LINES2 = _line_list(1), _line_list(2)
+
+
+def _narrow_flux(wave, lines, v=0.0, fwhm=8.0):
+    """Analytic absorption-line spectrum (line FWHM in km/s), shifted by ``v``."""
+    centers, depths = lines
+    rest = np.asarray(wave, float)[None, :] / (1.0 + v / _C_KMS)
+    sig = centers[:, None] * fwhm / 2.3548200450309493 / _C_KMS
+    return 1.0 - np.sum(depths[:, None]
+                        * np.exp(-0.5 * ((rest - centers[:, None]) / sig) ** 2), axis=0)
+
+
+def _narrow_case(v1, v2, a1=0.7, a2=0.4, lines=(_LINES1, _LINES2)):
+    """Noiseless composite on a 1 km/s native grid (NOT flagged as the analysis
+    grid, so CCF2d resamples it to its default 0.1 km/s), plus finely sampled
+    rest-frame templates. The composite is analytic: no forward-model
+    interpolation error enters the accuracy tests."""
+    wave, _ = log_lambda_grid(_LO, _HI, 1.0)
+    flux = (1.0 + a1 * (_narrow_flux(wave, lines[0], v1) - 1.0)
+            + a2 * (_narrow_flux(wave, lines[1], v2) - 1.0))
+    wt, _ = log_lambda_grid(_LO - 5.0, _HI + 5.0, 0.05)
+    return (wave, flux,
+            Template(wavelengths=wt, spectrum=_narrow_flux(wt, lines[0])),
+            Template(wavelengths=wt, spectrum=_narrow_flux(wt, lines[1])))
+
+
+def _local_grids(v1, v2, half=15):
+    return (np.arange(round(v1) - half, round(v1) + half + 1.0),
+            np.arange(round(v2) - half, round(v2) + half + 1.0))
+
+
+def test_ccf2d_crlb_matches_monte_carlo_on_a_resampled_native_grid():
+    # Noise lives on the native 1 km/s pixels; CCF2d interpolates onto 0.1 km/s,
+    # so ~10 analysis pixels share each noise value. Counting each of them as
+    # independent made the CRLB ~2-3x too small; the CRLB must now predict the
+    # Monte-Carlo scatter and chi2_red must be ~1 for the true sigma.
+    v1, v2, sigma = 37.3, -52.6, 0.01
+    wave, flux0, tmpl1, tmpl2 = _narrow_case(v1, v2)
+    g1, g2 = _local_grids(v1, v2)
+    rng = np.random.default_rng(0)
+    rv1, rv2, e1, e2, chi2_red = [], [], [], [], []
+    for _ in range(60):
+        spec = Spectrum(wv=[wave], sp=[flux0 + rng.normal(0.0, sigma, wave.size)])
+        r = CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, v1_grid=g1, v2_grid=g2,
+                                       sigma=sigma, keep_windows=False).Corr2d
+        rv1.append(r['RV1'])
+        rv2.append(r['RV2'])
+        e1.append(r['eRV1'])
+        e2.append(r['eRV2'])
+        chi2_red.append(r['chi2_red'])
+    assert 0.7 < np.std(rv1) / np.mean(e1) < 1.4
+    assert 0.7 < np.std(rv2) / np.mean(e2) < 1.4
+    assert np.mean(chi2_red) == pytest.approx(1.0, abs=0.05)
+
+
+def test_ccf2d_records_effective_pixel_counts():
+    wave, flux, tmpl1, tmpl2 = _narrow_case(37.3, -52.6)
+    ccf = CCF2d().CrossCorrelateSpec(Spectrum(wv=[wave], sp=[flux]), tmpl1, tmpl2,
+                                     v1_grid=_local_grids(37.3, -52.6)[0],
+                                     v2_grid=_local_grids(37.3, -52.6)[1])
+    win = ccf.windows[0]
+    assert win['oversampling'] == pytest.approx(10.0, rel=1e-3)
+    assert win['n_eff'] == pytest.approx(len(win['wv']) / 10.0, rel=1e-3)
+    # The noise dof: n_eff times the spline's noise-variance factor (~0.87)
+    # times the taper's mean square (~0.94).
+    assert 0.75 * win['n_eff'] < win['nu'] < 0.9 * win['n_eff']
+
+
+def test_ccf2d_sigma_none_estimates_the_noise_from_the_fit():
+    # The default sigma=None fits a common noise level (sqrt(chi2_red) at unit
+    # sigma) and scales the errors with it: they must match the errors
+    # computed with the true sigma.
+    v1, v2, sigma = 37.3, -52.6, 0.01
+    wave, flux0, tmpl1, tmpl2 = _narrow_case(v1, v2)
+    g1, g2 = _local_grids(v1, v2)
+    rng = np.random.default_rng(1)
+    for _ in range(4):
+        spec = Spectrum(wv=[wave], sp=[flux0 + rng.normal(0.0, sigma, wave.size)])
+        est = CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, v1_grid=g1, v2_grid=g2).Corr2d
+        ref = CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, v1_grid=g1, v2_grid=g2,
+                                         sigma=sigma).Corr2d
+        assert est['sigma_from_fit'] and not ref['sigma_from_fit']
+        assert est['sigma'] == pytest.approx(sigma, rel=0.1)
+        assert est['RV1'] == pytest.approx(ref['RV1'], abs=1e-9)
+        assert est['eRV1'] / ref['eRV1'] == pytest.approx(1.0, abs=0.15)
+        assert est['eRV2'] / ref['eRV2'] == pytest.approx(1.0, abs=0.15)
+
+
+def test_ccf2d_explicit_sigma_is_taken_at_face_value():
+    # An explicit sigma is not rescaled, but chi2_red still reports the misfit.
+    v1, v2 = 37.3, -52.6
+    wave, flux0, tmpl1, tmpl2 = _narrow_case(v1, v2)
+    g1, g2 = _local_grids(v1, v2)
+    noisy = flux0 + np.random.default_rng(2).normal(0.0, 0.01, wave.size)
+    r1 = CCF2d().CrossCorrelateSpec(Spectrum(wv=[wave], sp=[noisy]), tmpl1, tmpl2,
+                                    v1_grid=g1, v2_grid=g2, sigma=0.01).Corr2d
+    r2 = CCF2d().CrossCorrelateSpec(Spectrum(wv=[wave], sp=[noisy]), tmpl1, tmpl2,
+                                    v1_grid=g1, v2_grid=g2, sigma=0.02).Corr2d
+    assert r2['eRV1'] / r1['eRV1'] == pytest.approx(2.0, rel=1e-6)
+    assert r2['chi2_red'] == pytest.approx(r1['chi2_red'] / 4.0, rel=1e-9)
+    assert r1['chi2_red'] == pytest.approx(1.0, abs=0.1)
+
+
+@pytest.mark.parametrize('v1, v2', [(37.3, -52.6), (12.45, -8.8), (37.0, -52.0)])
+def test_ccf2d_refined_rvs_unbiased_for_narrow_lines(v1, v2):
+    # Noiseless, 8 km/s lines, default 1 km/s map: a quadratic over +/-3 coarse
+    # nodes was biased by 0.03-0.1 km/s (several eRV); the fine second pass
+    # must land on the truth, with the amplitudes taken at the same point.
+    wave, flux, tmpl1, tmpl2 = _narrow_case(v1, v2)
+    ccf = CCF2d().CrossCorrelateSpec(Spectrum(wv=[wave], sp=[flux]), tmpl1, tmpl2,
+                                     VelBound=150, sigma=0.01)
+    r = ccf.Corr2d
+    assert abs(r['RV1'] - v1) < 0.01
+    assert abs(r['RV2'] - v2) < 0.01
+    assert r['a1_best'] == pytest.approx(0.7, abs=2e-3)
+    assert r['a2_best'] == pytest.approx(0.4, abs=2e-3)
+    # The coarse map is kept for plotting; the fine map sits under its own key.
+    assert r['logL_profile'].shape == (301, 301)
+    assert r['fine']['logL_profile'].shape == (41, 41)
+    assert np.ptp(r['fine']['v1_grid']) == pytest.approx(4.0)
+    assert r['peak'] == (round(v1), round(v2))
+
+
+@pytest.mark.parametrize('v1, v2', [(40.0, -30.0), (25.0, -12.0)])
+def test_ccf2d_twin_templates_with_truth_on_a_node(v1, v2):
+    # Both components share one template; the truth sits exactly on a coarse
+    # node, so the node itself is the right answer and refinement must not
+    # move it. (Disjoint grids select one labelling of the twin pair.)
+    wave, flux, tmpl1, tmpl2 = _narrow_case(v1, v2, a1=0.6, a2=0.4,
+                                            lines=(_LINES1, _LINES1))
+    r = CCF2d().CrossCorrelateSpec(Spectrum(wv=[wave], sp=[flux]), tmpl1, tmpl2,
+                                   v1_grid=np.arange(0.0, 81.0),
+                                   v2_grid=np.arange(-70.0, 11.0), sigma=0.01).Corr2d
+    assert abs(r['RV1'] - v1) < 0.01
+    assert abs(r['RV2'] - v2) < 0.01
+
+
+def test_ccf2d_refinement_does_not_need_kept_windows():
+    v1, v2 = 37.3, -52.6
+    wave, flux, tmpl1, tmpl2 = _narrow_case(v1, v2)
+    g1, g2 = _local_grids(v1, v2)
+    kept = CCF2d().CrossCorrelateSpec(Spectrum(wv=[wave], sp=[flux]), tmpl1, tmpl2,
+                                      v1_grid=g1, v2_grid=g2, sigma=0.01)
+    dropped = CCF2d().CrossCorrelateSpec(Spectrum(wv=[wave], sp=[flux]), tmpl1, tmpl2,
+                                         v1_grid=g1, v2_grid=g2, sigma=0.01,
+                                         keep_windows=False)
+    assert 'data_g' not in dropped.windows[0]
+    for k in ('RV1', 'RV2', 'eRV1', 'eRV2', 'a1_best', 'chi2_red'):
+        assert dropped.Corr2d[k] == kept.Corr2d[k]

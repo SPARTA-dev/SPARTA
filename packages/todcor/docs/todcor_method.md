@@ -47,7 +47,9 @@ Per-mode weights (`parseval_weights`) make the Fourier χ² equal the real-space
 
     Σ_k w_k |r_k|²  =  Σ_n r_n² / σ²        (Parseval, real residual r)
 
-with the dropped DC corresponding to the removed mean.
+with the dropped DC corresponding to the removed mean. On a grid oversampled
+relative to the native pixels the weights are further divided by the
+oversampling factor (§8).
 
 ## 3. The six sufficient statistics
 
@@ -146,7 +148,7 @@ pooled windows. For chemically-distinct lines (e.g. an absorption primary and an
 emission secondary) the light/line-strength ratio is line-dependent, so one
 global amplitude pair is a modelling approximation, not an exact description.
 
-## 8. Uncertainties (CRLB) and error rescaling
+## 8. Uncertainties (CRLB), peak refinement and the noise budget
 
 `crlb_from_map` fits a local 2-D quadratic to `logL_profile` at its peak. For a
 Gaussian likelihood `−Hessian(logL)` is the Fisher information and its inverse is
@@ -158,23 +160,85 @@ near-degenerate peaks (`A12² → S11·S22`, `det → 0`) and returns `nan` off 
 positive-definite Hessian. `peak_refined` is the sub-grid stationary point of the
 same quadratic (clipped to one grid step).
 
-**Scale.** The absolute σ is only as good as the noise fed in; if the reduced
-χ² ≠ 1, multiply the returned sigmas by `√χ²ᵥ`. A per-window empirical rescale
-(`σ_w ×= √(χ²_w/ν_w)`, iterated) drives χ²ᵥ → ~1 and is the practical recipe when
-the per-pixel noise is not known independently.
+**Patch size vs peak width — the two-pass refinement.** `logL` follows the
+*squared* correlation, so its peak is only ~`σ_ccf/√2` wide (~2.4 km/s for
+8 km/s FWHM lines). A quadratic over ±3 nodes of a 1 km/s map picks up the
+quartic fall-off: on noiseless 8 km/s lines the refined RVs were off by
+0.03–0.1 km/s against an eRV of ~0.005–0.009 km/s (several σ), and by up to
+0.06 km/s with twin templates and the truth exactly on a node. The quadratic's
+validity is set by the line/template width, not by the S/N, so the fix is a
+finer patch, not a ΔlogL cut. `CCF2d` therefore runs two passes:
+
+1. the coarse map (default `dvel` = 1 km/s) only *locates* the peak;
+2. the six statistics are re-evaluated **exactly** (`window_stats` on the
+   prepared windows) on a fine local grid — ±2 coarse steps around the coarse
+   argmax, step `dvel/10` (41 × 41 nodes) — and `crlb_from_map` (±3 fine nodes,
+   i.e. ±0.3 `dvel`) is applied to the fine map.
+
+The coarse step must already resolve the peak (`dvel ≲ σ_ccf`) for the coarse
+argmax to be trustworthy; a tenth of it keeps the quadratic patch within
+~0.3 `σ_ccf`, where the quartic term shifts the curvature by a few per cent and
+the peak location negligibly (noiseless refined RVs then agree with the truth
+to ≲ 0.001 km/s). The amplitudes and χ² are then evaluated exactly at the
+refined `(v1, v2)`, so the reported RVs and amplitudes belong to one point. If
+the coarse argmax is on the grid edge no refinement is done (warning, `nan`
+errors); if the fine argmax lands on the fine-map edge (a ridge or a tie), a
+warning is issued and the coarse-map estimate is reported. Cost: ~0.4 s on a
+2-order, 2×2·10⁵-pixel spectrum with a 301 × 301 coarse map (~14 % of the call).
+
+**Oversampled grids.** Resampling a spectrum onto a grid `M = dv_native/dv`
+times finer (e.g. ~1 km/s pixels onto the 0.1 km/s CCF grid) adds samples but
+no information: ~M analysis pixels share each native pixel's noise. White
+Parseval weights then count the Fisher information M times and shrink the CRLB
+by `√M` — Monte Carlo scatter / CRLB was ~2.5 (≈ √10 before the curvature bias
+above partly compensated). `window_stats(..., oversampling=M)` divides the
+weights by M (equivalently `σ → σ√M`), which restores the native-pixel
+information for any line resolved by the native sampling; `CCF2d` takes
+`M_i = max(1, dv_native,i/dv)` per order from `Spectrum.native_steps()`
+(recorded at the first resampling). Monte Carlo scatter / CRLB is then 0.92 / 0.97
+for the two components.
+
+**Noise budget and scale.** Each window also returns `nu`, the expected χ² of
+its pure-noise residual, `Σ_k w_k E|N_k|²` over the *retained* modes (DC,
+Nyquist and anything above `zeta_max` excluded). For white noise on the
+analysis grid that is the number of retained modes. Resampled noise is not just
+correlated but *smoother*: its variance per analysis pixel is `κσ²` with
+`κ = 2/3` for linear interpolation and ≈ 0.87 for the cubic spline of
+`Spectrum.InterpolateSpectrum`, and the Tukey taper multiplies it by
+`mean(w²)` (≈ 0.94 at α = 0.1). Dividing χ² by the bare independent-pixel
+count `n_eff = n/M` would therefore leave χ²_red ≈ 0.8 (≈ 0.63 for linear
+interpolation) for honest noise. Instead `noise_psd` — from
+`resampled_noise_psd`, i.e. the averaged power spectrum of the resampler's
+impulse responses, times `mean(w²)` — gives the noise power the fit actually
+sees, and
+
+    χ²_red = χ²_best / (Σ_windows ν − 4)          (four fitted parameters)
+
+is ≈ 1 for honest noise (1.004 in the Monte Carlo above). Since χ² and the map
+curvature scale as `1/σ²`, a single common σ does not move the argmax and
+rescales the errors by `√χ²_red`. `CCF2d`'s default `sigma=None` uses exactly
+that: fit at unit σ, report `sigma = √χ²_red` (the native per-pixel noise) and
+errors scaled by it. An explicit `sigma` (scalar or per order) is taken at face
+value — no rescale — but χ²_red is still reported as a consistency check.
 
 ## 9. Assumptions and caveats
 
 Exact **only** under these; the first is the one to watch:
 
-- **White, homoscedastic per-pixel noise `σ`** on the analysis grid. Two
-  preprocessing steps break this: the Tukey taper (`tukey_window`) makes the
-  noise heteroscedastic (`σ_n = w_n σ`), and `resample` linear interpolation
-  *correlates* (colours) neighbouring-pixel noise. Only the overall **scale** is
-  compensated (reduced-χ² rescaling); the **correlation** is not — so CRLB errors
-  are mildly (typically optimistically) biased. Choose analysis windows where
-  both templates are at their continuum near the edges, so the taper acts only on
-  already-flat regions.
+- **White native noise `σ` per native pixel, resampled once by a linear
+  interpolator.** `oversampling` and `noise_psd` model that resampling (in
+  `CCF2d`: one `InterpolateSpectrum` call from a uniform native grid, probed
+  with unit impulses). Repeated resampling (e.g. `SpecPreProccess`'s linear
+  resampling followed by `CCF2d`'s log resampling), filtering, or
+  wavelength-dependent native steps across an order are not modelled; χ²_red
+  then drifts from 1 and `sigma=None` absorbs only its mean scale. The taper
+  makes the noise heteroscedastic (`σ_n = w_n σ`); only its mean square enters
+  `ν`. The weights stay white, so an interpolator that attenuates in-band noise
+  (linear interpolation's passband droop) leaves the CRLB mildly conservative.
+- **χ²_red counts four parameters.** When `nonneg=True` clamps an amplitude to
+  zero only three are free; the difference is negligible against `Σν`.
+- **Local quadratic CRLB** (§8): valid for an isolated, well-resolved peak
+  sampled by the fine map.
 - **Flat ℝ² amplitude prior** for the marginal map (§5).
 - **Shared velocity grid** for `combine_stats` (§7).
 - **Shared single `(a1, a2)`** across pooled lines is an approximation (§7).
@@ -192,13 +256,14 @@ All of these except `CCF2d` are reachable from the `todcor` namespace; the
 | `broaden_gaussian_residual`, `rotational_kernel`, `broaden_rotational_residual` | `unicor.dsp` | template broadening |
 | `shift_kms` | `unicor.dsp` | the log-λ shift `s = c·ln(1 + v/c)` |
 | `shift_template_flux`, `composite_flux` | `todcor.simulate` | forward model / simulate composites |
-| `window_stats` | `todcor.estimator` | the six sufficient statistics for one window (§3) |
+| `window_stats` | `todcor.estimator` | the six sufficient statistics (+ noise dof `nu`) for one window (§3, §8) |
+| `resampled_noise_psd` | `todcor.estimator` | noise spectrum of resampled white native noise → `noise_psd` (§8) |
 | `combine_stats` | `todcor.estimator` | sum statistics across windows → joint fit (§7) |
 | `profile_from_stats` | `todcor.estimator` | profile/marginalise amplitudes → logL maps (§4–5) |
 | `todcor_map` | `todcor.estimator` | single-window convenience wrapper (§4) |
 | `crlb_from_map` | `todcor.estimator` | Cramér–Rao velocity errors from curvature (§8) |
 | `model_flux` | `todcor.simulate` | reconstruct the best-fit composite for residual plots |
-| `CCF2d` | `sparta.TODCOR` | `Spectrum` + two `Template`s → map, RVs, errors (orders as windows) |
+| `CCF2d` | `sparta.TODCOR` | `Spectrum` + two `Template`s → coarse + fine maps, RVs, errors, χ²_red (orders as windows) |
 
 ## 11. Reference
 

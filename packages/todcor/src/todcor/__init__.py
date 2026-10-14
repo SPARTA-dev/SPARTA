@@ -31,7 +31,8 @@ from unicor.dsp import (
 )
 
 from .estimator import (
-    combine_stats, crlb_from_map, profile_from_stats, todcor_map, window_stats,
+    combine_stats, crlb_from_map, profile_from_stats, resampled_noise_psd,
+    todcor_map, window_stats,
 )
 from .simulate import composite_flux, model_flux, shift_template_flux
 
@@ -39,7 +40,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     'window_stats', 'combine_stats', 'profile_from_stats', 'crlb_from_map',
-    'todcor_map',
+    'todcor_map', 'resampled_noise_psd',
     'shift_template_flux', 'composite_flux', 'model_flux',
     'C_KMS', 'log_lambda_grid', 'resample', 'tukey_window', 'shift_kms',
     'rfft_positive', 'parseval_weights', 'rotational_kernel',

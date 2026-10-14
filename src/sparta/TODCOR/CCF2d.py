@@ -13,11 +13,12 @@
 # ---------------------------------------------
 # 1) CrossCorrelateSpec - two-dimensional correlation of a spectrum against two
 #                         templates; each spectral order is one "window" and the
-#                         windows are pooled into a single joint fit.
-# 2) extract_RVs        - velocities, amplitudes and CRLB uncertainties from the
-#                         likelihood surface.
-# 3) plotTODCOR         - plot the (v1, v2) likelihood map.
-# 4) BestFitSpectrum    - the best-fit composite of a given order, for residuals.
+#                         windows are pooled into a single joint fit. A coarse
+#                         (v1, v2) map locates the peak, a fine local map refines
+#                         it, and the velocities, amplitudes and CRLB
+#                         uncertainties are read from the fine map.
+# 2) plotTODCOR         - plot the (v1, v2) likelihood map.
+# 3) BestFitSpectrum    - the best-fit composite of a given order, for residuals.
 #
 # The estimator itself (sufficient statistics, profiled amplitudes, CRLB) lives
 # in todcor.estimator; the forward model in todcor.simulate; the
@@ -41,8 +42,10 @@ from astropy import constants as consts, units as u
 from unicor import dsp
 from todcor.simulate import model_flux
 from todcor.estimator import (
-    combine_stats, crlb_from_map, profile_from_stats, window_stats,
+    combine_stats, crlb_from_map, profile_from_stats, resampled_noise_psd,
+    window_stats,
 )
+from sparta.UNICOR.Spectrum import Spectrum
 
 
 class CCF2d:
@@ -52,23 +55,38 @@ class CCF2d:
         '''
         No input required. Sets the speed of light ``self.c`` (km/s), the
         default log-lambda grid step ``self.default_dv`` (0.1 km/s, matching
-        CCF1d) and the default step of the trial-velocity map
-        ``self.default_dvel`` (1 km/s).
+        CCF1d), the default step of the trial-velocity map
+        ``self.default_dvel`` (1 km/s), and the peak-refinement geometry.
 
         The map step is deliberately coarser than the spectral grid step: the
         cost of the fit scales as ``n1 * n2 * K`` (velocity nodes squared times
-        Fourier modes), and the sub-grid peak refinement in
-        :meth:`extract_RVs` recovers the precision a finer map would buy.
+        Fourier modes). The coarse map only has to *locate* the peak; a second,
+        exact evaluation on a fine local grid (``refine_span`` coarse steps
+        either side of the coarse argmax, ``refine_factor`` times finer) then
+        measures it, for ~(2 * 2 * 10 + 1)^2 = 1681 extra nodes.
+
+        Why a fine map rather than a quadratic fit to the coarse one: logL
+        follows the *squared* correlation, so its peak is only ~sigma_ccf/sqrt(2)
+        wide (~2.4 km/s for 8 km/s lines), and a quadratic over +/-3 coarse
+        nodes picks up its quartic fall-off -- a bias of several CRLB sigma.
+        For the coarse argmax to be trustworthy at all the coarse step must
+        already resolve the peak (dvel <~ sigma_ccf); a tenth of it puts the
+        +/-``crlb_half``-node quadratic patch within ~0.3 sigma_ccf of the peak,
+        where the quartic term changes the curvature by only a few per cent and
+        the peak location negligibly.
         '''
         self.c = consts.c.to('km/s')                       # speed of light, km/s
         self.default_dv = 0.1 * u.kilometer / u.second     # log-lambda grid step
         self.default_dvel = 1.0                            # (v1, v2) map step, km/s
+        self.refine_span = 2       # fine-map half-width, in coarse steps
+        self.refine_factor = 10    # coarse step / fine step
+        self.crlb_half = 3         # half-width (nodes) of the quadratic patch
 
     # =============================================================================
     # =============================================================================
     def CrossCorrelateSpec(self, spec_in, template1_in, template2_in,
                            dv=None, VelBound=150, dvel=None,
-                           v1_grid=None, v2_grid=None, sigma=1.0, alpha=0.1,
+                           v1_grid=None, v2_grid=None, sigma=None, alpha=0.1,
                            nonneg=True, zeta_max=None, continuum='median',
                            orders=None, keep_windows=True):
         '''
@@ -80,6 +98,20 @@ class CCF2d:
         single joint fit with shared ``(v1, v2, a1, a2)``. Pooling orders this
         way is valid because they belong to one epoch -- see
         :func:`todcor.estimator.combine_stats`.
+
+        The coarse map locates the peak; the statistics are then re-evaluated
+        on a fine local grid around it (see ``__init__``), and the velocities
+        and their Cramer-Rao errors come from the fine map. The amplitudes and
+        chi2 are evaluated exactly at the refined velocities. If the coarse
+        peak is on the grid edge no refinement is done: a warning is issued and
+        the errors are NaN.
+
+        Each order counts its *native* pixels, not its resampled ones: the
+        spectrum's ``native_steps()`` (captured before any resampling) give
+        ``oversampling = max(1, dv_native / dv)``, and the Fisher weights are
+        divided by it. Otherwise the ~``dv_native / dv`` analysis pixels that
+        interpolate one native pixel would each count as independent, and the
+        CRLB would shrink by ``sqrt(dv_native / dv)``.
 
         :param: spec_in    - a Spectrum object with the observed data.
         :param: template1_in, template2_in - Template objects for the primary
@@ -95,9 +127,13 @@ class CCF2d:
                             Default 1 km/s.
         :param: v1_grid, v2_grid - explicit trial-velocity arrays (km/s), which
                             override ``VelBound``/``dvel``.
-        :param: sigma      - per-pixel noise of the observed flux, either a
-                            scalar (all orders) or one value per order. Sets the
-                            absolute scale of the uncertainties only.
+        :param: sigma      - per-pixel noise of the observed flux on its
+                            *native* pixels (flux units), either a scalar (all
+                            orders) or one value per order; taken at face value.
+                            Default None: fit at unit noise and estimate one
+                            common noise level from the fit, scaling the errors
+                            by sqrt(chi2_red). Either way it sets the absolute
+                            scale of the uncertainties only, not the RVs.
         :param: alpha      - Tukey apodisation parameter applied to each window.
                             Set 0 to skip (e.g. if the spectrum was already
                             tapered by ``SpecPreProccess``).
@@ -117,18 +153,40 @@ class CCF2d:
                             what dominates memory.
 
         :return: self, with the following fields:
-                 self.Corr2d  - a dictionary with 'v1_grid', 'v2_grid' (km/s),
-                                'logL_profile', 'logL_marginal', 'a1', 'a2',
-                                'chi2' (all (n1, n2) maps), 'best' (the profile
-                                argmax) and 'units'.
-                 self.stats   - the *combined* sufficient statistics, enough to
-                                re-profile (e.g. with a different 'nonneg')
-                                without touching the spectrum again.
+                 self.Corr2d  - a dictionary with the coarse map: 'v1_grid',
+                                'v2_grid' (km/s), 'logL_profile',
+                                'logL_marginal', 'a1', 'a2', 'chi2' (all
+                                (n1, n2) maps), 'best' (its argmax node) and
+                                'units'; 'fine', the same for the fine local map
+                                (None if refinement was skipped); and the
+                                results:
+                                'RV1', 'RV2' (km/s, refined), 'eRV1', 'eRV2'
+                                (km/s), 'rho12' (v1-v2 correlation), 'cov'
+                                (2x2, km^2/s^2), 'peak' (the coarse argmax
+                                node, km/s), 'a1_best', 'a2_best', 'chi2_best'
+                                (at the refined RVs), 'chi2_red' (chi2_best per
+                                noise degree of freedom, see below), 'sigma'
+                                (the native per-pixel noise behind the errors:
+                                the input, or the fitted estimate) and
+                                'sigma_from_fit'.
+                 self.stats   - the *combined* coarse-map sufficient statistics,
+                                enough to re-profile (e.g. with a different
+                                'nonneg') without touching the spectrum again.
                  self.windows - per-order diagnostics: the order index, the
-                                window's own 'S11'/'S22'/'SD', and (if
-                                keep_windows) the prepared arrays.
+                                window's own 'S11'/'S22'/'SD', 'oversampling'
+                                (dv_native / dv, at least 1), 'n_eff' (the
+                                independent-pixel count n_pix / oversampling),
+                                'nu' (the expected chi2 of its pure noise), and
+                                (if keep_windows) the prepared arrays.
                  self.n_ord   - the number of pooled windows.
-                 plus the fields set by :meth:`extract_RVs`.
+                 self.crlb    - the crlb_from_map output behind the RVs.
+
+        chi2_red = chi2_best / (sum(nu) - 4). Interpolated noise is smoother
+        than the native noise -- a cubic spline keeps ~0.87 of its variance,
+        and the taper ~0.94 more -- so dividing by the bare n_eff would leave
+        chi2_red ~0.8 for honest noise. ``nu`` instead counts the noise power
+        the fit actually sees (todcor.estimator.resampled_noise_psd, from the
+        resampler's impulse response), so chi2_red ~ 1 for honest noise.
         '''
         spec = deepcopy(spec_in)
         template1 = deepcopy(template1_in)
@@ -138,6 +196,8 @@ class CCF2d:
             dv = self.default_dv
         elif not isinstance(dv, u.quantity.Quantity):
             dv = float(dv) << u.kilometer / u.second
+
+        native = spec.native_steps()
 
         # The Fourier shift theorem holds only on a velocity-even grid.
         if spec.Info.get('GridType') != 'log':
@@ -159,10 +219,15 @@ class CCF2d:
 
         if orders is None:
             orders = range(len(spec.wv))
-        sigma = np.broadcast_to(np.atleast_1d(np.asarray(sigma, float)),
+        sigma_from_fit = sigma is None
+        sigma_in = 1.0 if sigma_from_fit else sigma
+        sigma = np.broadcast_to(np.atleast_1d(np.asarray(sigma_in, float)),
                                 (len(spec.wv),))
 
-        stats, windows = [], []
+        # The prepared arrays are needed until the fine pass and the evaluation
+        # at the refined peak are done; only keep_windows decides whether they
+        # outlive this call.
+        prepared, stats, windows = [], [], []
         for I in orders:
             w = np.asarray(spec.wv[I], float)
             data_g = self._residual(np.asarray(spec.sp[I], float), continuum)
@@ -173,19 +238,29 @@ class CCF2d:
                     raise ValueError(f"order {I}: {name} flux contains NaN/inf; "
                                      "mask or interpolate those pixels first")
 
+            taper_power = 1.0
             if alpha > 0:
                 taper = dsp.tukey_window(len(w), alpha=alpha)
                 data_g, g1, g2 = data_g * taper, g1 * taper, g2 * taper
+                taper_power = float(np.mean(taper ** 2))
 
-            st = window_stats(data_g, g1, g2, dv_kms, v1_grid, v2_grid,
-                              sigma=sigma[I], zeta_max=zeta_max)
+            ratio = native[I] / dv_kms
+            oversampling = max(1.0, ratio)
+            noise_psd = taper_power * self._resampling_noise_psd(
+                w, native[I], dv, ratio)
+            kw = dict(sigma=sigma[I], zeta_max=zeta_max,
+                      oversampling=oversampling, noise_psd=noise_psd)
+            st = window_stats(data_g, g1, g2, dv_kms, v1_grid, v2_grid, **kw)
             stats.append(st)
+            prepared.append((data_g, g1, g2, kw))
 
             # Keep the scalar powers always -- they say which component each
             # order can constrain, and they cost nothing. The full arrays are
             # optional (see keep_windows).
             win = {'order': I, 'dv': dv_kms,
-                   'S11': st['S11'], 'S22': st['S22'], 'SD': st['SD']}
+                   'S11': st['S11'], 'S22': st['S22'], 'SD': st['SD'],
+                   'oversampling': oversampling, 'n_eff': len(w) / oversampling,
+                   'nu': st['nu']}
             if keep_windows:
                 win.update(wv=w, data_g=data_g, g1=g1, g2=g2)
             windows.append(win)
@@ -205,44 +280,44 @@ class CCF2d:
         res = profile_from_stats(self.stats, v1_grid, v2_grid, nonneg=nonneg)
         res['units'] = u.km / u.s
 
-        self.windows = windows
-        self.n_ord = len(windows)
-        self.Corr2d = res
-
-        return self.extract_RVs()
-
-    # =============================================================================
-    # =============================================================================
-    def extract_RVs(self, half=3):
-        '''
-        Velocities, amplitudes and uncertainties from the likelihood surface.
-
-        The uncertainties are the Cramer-Rao bound from the local curvature of
-        the *profile* log-likelihood at its peak, so they already account for
-        the (linear) nuisance amplitudes. They are only as good as the ``sigma``
-        fed to the fit: if the reduced chi2 is not ~1, rescale by
-        ``sqrt(chi2_red)``.
-
-        :param: half - half-width, in grid nodes, of the local quadratic patch.
-        :return: self, with these added to self.Corr2d: 'RV1', 'RV2' (km/s,
-                 sub-grid refined), 'eRV1', 'eRV2' (km/s), 'rho12' (the v1-v2
-                 correlation coefficient), 'cov' (2x2, km^2/s^2), 'peak' (the
-                 un-refined argmax node), and 'a1_best', 'a2_best', 'chi2_best'
-                 at that peak. Note 'a1'/'a2' remain the full (n1, n2) maps.
-        '''
-        res = self.Corr2d
-        crlb = crlb_from_map(res['logL_profile'], res['v1_grid'], res['v2_grid'],
-                             half=half)
-
-        if crlb['on_edge']:
+        coarse = crlb_from_map(res['logL_profile'], v1_grid, v2_grid,
+                               half=self.crlb_half)
+        if coarse['on_edge']:
             warnings.warn("the TODCOR peak lies on the edge of the velocity grid; "
                           "the RVs are grid-limited and their errors are NaN. "
                           "Widen VelBound (or the explicit grids).", stacklevel=2)
-        res.update(RV1=crlb['peak_refined'][0], RV2=crlb['peak_refined'][1],
-                   eRV1=crlb['sigma_v1'], eRV2=crlb['sigma_v2'],
-                   rho12=crlb['rho'], cov=crlb['cov'], peak=crlb['peak'])
-        res.update(a1_best=res['best']['a1'], a2_best=res['best']['a2'],
-                   chi2_best=res['best']['chi2'])
+            res['fine'] = None
+        else:
+            res['fine'] = self._refine(prepared, dv_kms, res, nonneg)
+        crlb = coarse if res['fine'] is None else crlb_from_map(
+            res['fine']['logL_profile'], res['fine']['v1_grid'],
+            res['fine']['v2_grid'], half=self.crlb_half)
+
+        rv1, rv2 = crlb['peak_refined']
+        at_peak = self._profile_at(prepared, dv_kms, rv1, rv2, nonneg)
+        chi2_red = at_peak['chi2_red']
+        noise, scale = sigma_in, 1.0
+        if sigma_from_fit:
+            if not (np.isfinite(chi2_red) and chi2_red > 0):
+                raise ValueError(
+                    f"cannot estimate the noise from the fit (chi2_red = {chi2_red}); "
+                    "pass an explicit sigma")
+            # The fit ran at unit noise, so sqrt(chi2_red) *is* the common
+            # native per-pixel noise; chi2 and the map curvature scale as
+            # 1/sigma^2, the velocity errors as sigma.
+            noise = scale = float(np.sqrt(chi2_red))
+
+        res.update(RV1=rv1, RV2=rv2,
+                   eRV1=crlb['sigma_v1'] * scale, eRV2=crlb['sigma_v2'] * scale,
+                   rho12=crlb['rho'], cov=crlb['cov'] * scale ** 2,
+                   peak=coarse['peak'],
+                   a1_best=at_peak['a1'], a2_best=at_peak['a2'],
+                   chi2_best=at_peak['chi2'], chi2_red=chi2_red,
+                   sigma=noise, sigma_from_fit=sigma_from_fit)
+
+        self.windows = windows
+        self.n_ord = len(windows)
+        self.Corr2d = res
         self.crlb = crlb
         return self
 
@@ -265,10 +340,9 @@ class CCF2d:
             raise ValueError(
                 'the prepared arrays were not retained; re-run '
                 'CrossCorrelateSpec with keep_windows=True to inspect residuals')
-        best = self.Corr2d['best']
+        r = self.Corr2d
         model = model_flux(win['wv'], win['dv'], win['g1'], win['g2'],
-                           self.Corr2d['RV1'], self.Corr2d['RV2'],
-                           best['a1'], best['a2'])
+                           r['RV1'], r['RV2'], r['a1_best'], r['a2_best'])
         return win['wv'], model, win['data_g'] + 1.0
 
     # =============================================================================
@@ -351,6 +425,84 @@ class CCF2d:
         if v2_grid is None:
             v2_grid = grid
         return np.asarray(v1_grid, float), np.asarray(v2_grid, float)
+
+    def _refine(self, prepared, dv_kms, res, nonneg):
+        '''
+        Re-evaluate the statistics on a fine (v1, v2) grid around the coarse
+        argmax and profile them -- the second, exact pass (see ``__init__``).
+
+        :return: the fine-map profile_from_stats dict, or None (with a warning)
+                 if its argmax lands on its own edge -- the coarse argmax was
+                 then not close to the true peak (e.g. a ridge or a tie), and
+                 the coarse map is the more honest answer.
+        '''
+        v1, v2 = res['v1_grid'], res['v2_grid']
+        i, j = np.unravel_index(np.argmax(res['logL_profile']), res['logL_profile'].shape)
+        # Local steps, so explicit non-uniform grids refine sensibly too.
+        step1 = 0.5 * (v1[i + 1] - v1[i - 1])
+        step2 = 0.5 * (v2[j + 1] - v2[j - 1])
+        nodes = np.arange(-self.refine_span * self.refine_factor,
+                          self.refine_span * self.refine_factor + 1) / self.refine_factor
+        f1, f2 = v1[i] + step1 * nodes, v2[j] + step2 * nodes
+
+        stats = combine_stats(window_stats(d, g1, g2, dv_kms, f1, f2, **kw)
+                              for d, g1, g2, kw in prepared)
+        fine = profile_from_stats(stats, f1, f2, nonneg=nonneg)
+        fi, fj = np.unravel_index(np.argmax(fine['logL_profile']), fine['logL_profile'].shape)
+        if fi in (0, len(f1) - 1) or fj in (0, len(f2) - 1):
+            warnings.warn("the refined TODCOR peak lies outside the fine map "
+                          f"(+/-{self.refine_span} coarse steps around the coarse "
+                          "argmax); reporting the coarse-map estimate, whose "
+                          "sub-grid refinement may be biased.", stacklevel=3)
+            return None
+        return fine
+
+    @staticmethod
+    def _profile_at(prepared, dv_kms, v1, v2, nonneg):
+        '''
+        Profile amplitudes, chi2 and chi2_red exactly at one (v1, v2) (km/s),
+        so the reported amplitudes belong to the reported velocities.
+        '''
+        g1_, g2_ = np.array([v1]), np.array([v2])
+        stats = combine_stats(window_stats(d, g1, g2, dv_kms, g1_, g2_, **kw)
+                              for d, g1, g2, kw in prepared)
+        return profile_from_stats(stats, g1_, g2_, nonneg=nonneg)['best']
+
+    @staticmethod
+    def _resampling_noise_psd(wave, dv_native, dv, ratio, n_imp=8, spacing=40):
+        '''
+        Noise spectrum (todcor.estimator.resampled_noise_psd) of one order's
+        native white noise after Spectrum.InterpolateSpectrum to step ``dv``.
+
+        Resampling is linear, so it is fully described by its impulse response:
+        unit impulses on a synthetic native log grid of step ``dv_native``
+        (km/s), well separated (``spacing`` native pixels, far beyond the
+        spline's support) are pushed through the same InterpolateSpectrum call
+        CCF2d uses. This models a single resampling from a uniform native grid;
+        earlier filtering or repeated resampling is not represented.
+
+        :param: wave      - the order's analysis wavelength grid (Angstrom).
+        :param: dv_native - the order's native velocity step (km/s).
+        :param: dv        - the analysis step (astropy Quantity, km/s).
+        :param: ratio     - dv_native / dv (dimensionless).
+        :return: relative noise power per positive Fourier mode, length
+                 len(wave) // 2 -- all ones for an order on its native sampling.
+        '''
+        n = len(wave)
+        if np.isclose(ratio, 1.0, rtol=1e-3):
+            return np.ones(n // 2)
+        lam0 = float(np.median(wave))
+        native, _ = dsp.log_lambda_grid(
+            lam0, lam0 * np.exp((n_imp + 1) * spacing * dv_native / dsp.C_KMS), dv_native)
+        hits = spacing // 2 + spacing * np.arange(n_imp)
+        flux = np.zeros(len(native))
+        flux[hits] = 1.0
+        probe = Spectrum(wv=[native], sp=[flux]).InterpolateSpectrum(
+            delta=dv, InterpMethod='log')
+        wa, ya = np.asarray(probe.wv[0]), np.asarray(probe.sp[0])
+        responses = [ya[np.abs(dsp.C_KMS * np.log(wa / native[h]))
+                        < 0.5 * spacing * dv_native] for h in hits]
+        return resampled_noise_psd(responses, n, ratio)
 
     @staticmethod
     def _template_on_grid(template, order, wave):

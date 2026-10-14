@@ -280,3 +280,112 @@ def test_crlb_interior_peak_reports_on_edge_false():
     assert not cr["on_edge"]
     assert cr["sigma_v1"] == pytest.approx(1.0, rel=1e-6)
     assert cr["sigma_v2"] == pytest.approx(2.0, rel=1e-6)
+
+
+# =============================================================================
+# Oversampled analysis grids: Fisher weights and noise degrees of freedom
+# =============================================================================
+def _narrow_line_flux(wave, centers, depths, fwhm=8.0, v=0.0):
+    """Analytic narrow-line spectrum (FWHM in km/s), Doppler-shifted by ``v``."""
+    rest = np.asarray(wave, float)[None, :] / (1.0 + v / ops.C_KMS)
+    sig = centers[:, None] * fwhm / 2.3548200450309493 / ops.C_KMS
+    return 1.0 - np.sum(depths[:, None]
+                        * np.exp(-0.5 * ((rest - centers[:, None]) / sig) ** 2), axis=0)
+
+
+def _impulse_responses(wave_native, wave_grid, n_imp=6, spacing=30):
+    """Analysis-grid responses of `resample` to single native-pixel impulses.
+
+    The impulses sit well inside the analysis span, so no response is clipped.
+    """
+    first = np.searchsorted(wave_native, wave_grid[0]) + spacing // 2
+    out = []
+    for j in first + spacing * np.arange(n_imp):
+        x = np.zeros(len(wave_native))
+        x[j] = 1.0
+        y = ops.resample(wave_native, x, wave_grid)
+        out.append(y[y != 0.0])
+    return out
+
+
+def test_oversampling_divides_the_weights():
+    wave_grid, win, t1, t2, g1, g2, dv = _build_case()
+    flux = composite_flux(wave_grid, [t1, t2], [10.0, -20.0], [0.7, 0.5])
+    data_g = (flux - 1.0) * win
+    v = np.arange(-30.0, 31.0, 5.0)
+    st1 = window_stats(data_g, g1, g2, dv, v, v, sigma=0.02)
+    st8 = window_stats(data_g, g1, g2, dv, v, v, sigma=0.02, oversampling=8.0)
+    for k in ("S11", "S22", "SD", "b1", "b2", "A12", "nu"):
+        assert np.allclose(st8[k], st1[k] / 8.0, rtol=1e-12), k
+    # White noise on the analysis grid: one degree of freedom per retained
+    # Fourier coefficient (DC and the even-N Nyquist mode are dropped).
+    n = len(data_g)
+    assert st1["nu"] == pytest.approx(n - 2 if n % 2 == 0 else n - 1)
+    with pytest.raises(ValueError, match="oversampling"):
+        window_stats(data_g, g1, g2, dv, v, v, oversampling=0.5)
+    with pytest.raises(ValueError, match="noise_psd"):
+        window_stats(data_g, g1, g2, dv, v, v, noise_psd=np.ones(n))
+
+
+def test_resampled_noise_psd_counts_native_pixels():
+    # Linear interpolation of white native noise onto an M-times finer grid:
+    # the mean noise power per analysis pixel is (2 + 1/M^2)/3 sigma^2 (-> 2/3),
+    # and the noise occupies only n/M independent samples.
+    # The closed form assumes analysis nodes aligned with native nodes.
+    M = 10
+    wave_native, _ = ops.log_lambda_grid(4450.0, 4520.0, 1.0)
+    wave_grid, _ = ops.log_lambda_grid(wave_native[2], wave_native[-3], 1.0 / M)
+    n = len(wave_grid)
+    psd = ops.resampled_noise_psd(_impulse_responses(wave_native, wave_grid), n, M)
+    assert psd.shape == (n // 2,)
+    assert 2.0 * psd.sum() / n == pytest.approx((2.0 + 1.0 / M ** 2) / 3.0, rel=1e-3)
+    g = np.zeros(n)
+    st = window_stats(g, g + 1e-3, g + 2e-3, 1.0 / M, np.array([0.0]),
+                      np.array([0.0]), oversampling=M, noise_psd=psd)
+    assert st["nu"] == pytest.approx((n / M) * (2.0 + 1.0 / M ** 2) / 3.0, rel=2e-3)
+    with pytest.raises(ValueError, match="longer than the window"):
+        ops.resampled_noise_psd([np.ones(n + 1)], n, M)
+
+
+def test_crlb_and_chi2_red_honest_on_an_oversampled_grid():
+    # Noise drawn on a ~1 km/s native grid, then interpolated onto a 0.1 km/s
+    # analysis grid: ~10 analysis pixels share each native noise value. With
+    # the weights divided by the oversampling and the dof taken from the
+    # resampled-noise PSD, the CRLB must predict the Monte-Carlo scatter and
+    # chi2_red must be ~1. (Before the fix the CRLB was ~sqrt(10) too small.)
+    M, sigma = 10, 0.1
+    rng = np.random.default_rng(11)
+    c1, d1 = rng.uniform(4455.0, 4515.0, 20), rng.uniform(0.1, 0.6, 20)
+    c2, d2 = rng.uniform(4455.0, 4515.0, 20), rng.uniform(0.1, 0.6, 20)
+    v1_true, v2_true, a1, a2 = 3.3, -2.6, 0.7, 0.4
+
+    wave_native, _ = ops.log_lambda_grid(4450.0, 4520.0, 1.0)
+    wave_grid, _ = ops.log_lambda_grid(4452.0, 4518.0, 1.0 / M)
+    n, dv = len(wave_grid), 1.0 / M
+    win = ops.tukey_window(n, alpha=0.1)
+    g1 = (_narrow_line_flux(wave_grid, c1, d1) - 1.0) * win
+    g2 = (_narrow_line_flux(wave_grid, c2, d2) - 1.0) * win
+    flux0 = 1.0 + a1 * (_narrow_line_flux(wave_native, c1, d1, v=v1_true) - 1.0) \
+                + a2 * (_narrow_line_flux(wave_native, c2, d2, v=v2_true) - 1.0)
+    psd = ops.resampled_noise_psd(_impulse_responses(wave_native, wave_grid), n, M)
+    psd = psd * np.mean(win ** 2)       # the taper scales the noise too
+
+    v1 = v1_true + np.arange(-0.6, 0.6 + 1e-9, 0.05)
+    v2 = v2_true + np.arange(-0.6, 0.6 + 1e-9, 0.05)
+    kw = dict(sigma=sigma, oversampling=M, noise_psd=psd)
+
+    def fit(flux_native):
+        data_g = (ops.resample(wave_native, flux_native, wave_grid) - 1.0) * win
+        res = todcor_map(data_g, g1, g2, dv, v1, v2, **kw)
+        return res, crlb_from_map(res["logL_profile"], v1, v2)
+
+    _, cr0 = fit(flux0)
+    r1, r2, chi2_red = [], [], []
+    for _ in range(60):
+        res, cr = fit(flux0 + rng.normal(0.0, sigma, size=flux0.shape))
+        r1.append(cr["peak_refined"][0])
+        r2.append(cr["peak_refined"][1])
+        chi2_red.append(res["best"]["chi2_red"])
+    assert 0.75 < np.std(r1) / cr0["sigma_v1"] < 1.3
+    assert 0.75 < np.std(r2) / cr0["sigma_v2"] < 1.3
+    assert np.mean(chi2_red) == pytest.approx(1.0, abs=0.04)

@@ -113,7 +113,7 @@ class TimeSeries:
     # =============================================================================
     def calc_rv_against_two_templates(self, spec_list, template1, template2,
                                       dv=0.1, VelBound=150, dvel=None,
-                                      sigma=1.0, nonneg=True, **kwargs):
+                                      sigma=None, nonneg=True, **kwargs):
         '''
         Double-lined counterpart of calc_rv_against_template: a TODCOR fit of
         both components against two resting templates, one per observation.
