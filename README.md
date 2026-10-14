@@ -218,6 +218,7 @@ The `sparta` classes are importable from the top level
 | Module | Contents |
 | --- | --- |
 | `sparta.spectrum` | `Spectrum`: a multi-order spectrum, its preprocessing and log-λ resampling, and conversion to and from specutils |
+| `sparta.preprocess` | the per-order preprocessing steps of `Spectrum` (trim, resample, cosmics, band-pass), on plain arrays |
 | `sparta.template` | `Template`: PHOENIX models, arrays or line masks as templates; broadening and cutting to an observation's orders |
 | `sparta.ccf1d` | `CCF1d`: UNICOR on a `Spectrum` and a `Template` |
 | `sparta.ccf2d` | `CCF2d`: TODCOR on a `Spectrum` and two `Template`s |

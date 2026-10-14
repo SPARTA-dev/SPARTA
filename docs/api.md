@@ -8,6 +8,7 @@ Signatures and the numpydoc summary, Parameters, Returns and Raises of every pub
 
 - **sparta**
   - [`sparta.spectrum`](#spartaspectrum) — `Spectrum`
+  - [`sparta.preprocess`](#spartapreprocess)
   - [`sparta.template`](#spartatemplate) — `Template`
   - [`sparta.ccf1d`](#spartaccf1d) — `CCF1d`
   - [`sparta.ccf2d`](#spartaccf2d) — `CCF2d`
@@ -33,25 +34,6 @@ SPARTA -- SPectroscopic vARiabiliTy Analysis.
 ### sparta.spectrum
 
 Spectrum: one observed (multi-order) spectrum and its preprocessing.
-
-#### `sparta.spectrum.resample_flux`
-
-```python
-sparta.spectrum.resample_flux(wave, flux, new_wave, unit=Unit("Angstrom"))
-```
-
-Resample one order's flux with the cubic spline of `Spectrum.interpolate`.
-
-**Parameters**
-
-- `wave` (*array_like*): 1-D increasing wavelengths, in `unit`.
-- `flux` (*array_like*): 1-D flux matching `wave`.
-- `new_wave` (*array_like*): 1-D increasing wavelengths (`unit`) inside the span of `wave`.
-- `unit` (*astropy.units.Unit*): Unit of both wavelength arrays (default Angstrom).
-
-**Returns**
-
-- *ndarray*: The flux at `new_wave`; NaN outside the span of `wave`.
 
 #### `sparta.Spectrum`
 
@@ -296,6 +278,163 @@ Keep or discard orders, in place.
 
 - *ValueError*: If an index is outside 0 .. n_ord - 1.
 
+### sparta.preprocess
+
+Per-order preprocessing atoms: the steps of `Spectrum` on plain arrays.
+
+#### `sparta.preprocess.resample_flux`
+
+```python
+sparta.preprocess.resample_flux(wave, flux, new_wave, unit=Unit("Angstrom"))
+```
+
+Resample one order's flux with the cubic spline of `Spectrum.interpolate`.
+
+**Parameters**
+
+- `wave` (*array_like*): 1-D increasing wavelengths, in `unit`.
+- `flux` (*array_like*): 1-D flux matching `wave`.
+- `new_wave` (*array_like*): 1-D increasing wavelengths (`unit`) inside the span of `wave`.
+- `unit` (*astropy.units.Unit*): Unit of both wavelength arrays (default Angstrom).
+
+**Returns**
+
+- *ndarray*: The flux at `new_wave`; NaN outside the span of `wave`.
+
+#### `sparta.preprocess.trim_margins`
+
+```python
+sparta.preprocess.trim_margins(
+    wave,
+    flux,
+    n_left=0,
+    n_right=0,
+    clean_margins=False,
+    remove_nans=True,
+    margin_fraction=0.1,
+    margin_window=15,
+)
+```
+
+Trim the ends of one order: NaN pixels, padded margins, then fixed counts.
+
+**Parameters**
+
+- `wave` (*array_like*): 1-D wavelengths (Angstrom).
+- `flux` (*array_like*): 1-D flux matching `wave`.
+- `n_left, n_right` (*int*): Pixels to remove from the blue / red end, counted inside the margins when `clean_margins` is set.
+- `clean_margins` (*bool*): Drop the padded margins: the leading and trailing runs whose running median (`margin_window` pixels) is below `margin_fraction` of the order's median flux.
+- `remove_nans` (*bool*): Drop NaN pixels first.
+- `margin_fraction` (*float*): Flux level, as a fraction of the order's median, below which an edge pixel counts as padding.
+- `margin_window` (*int*): Width (pixels) of the running median that smooths the noise before the threshold is applied.
+
+**Returns**
+
+- `wave, flux` (*ndarray*): The trimmed order (Angstrom, flux).
+
+**Raises**
+
+- *ValueError*: If `clean_margins` finds no pixel above the margin level.
+
+#### `sparta.preprocess.resample_to_linear_grid`
+
+```python
+sparta.preprocess.resample_to_linear_grid(wave, flux, delta)
+```
+
+Resample one order onto an evenly spaced wavelength grid.
+
+**Parameters**
+
+- `wave` (*array_like*): 1-D increasing wavelengths (Angstrom), at least 2.
+- `flux` (*array_like*): 1-D flux matching `wave`.
+- `delta` (*float*): The step, in units of the order's median wavelength step (dimensionless; `Spectrum.interpolate`'s default is 0.5).
+
+**Returns**
+
+- `wave, flux` (*ndarray*): The new grid (Angstrom) and the resampled flux.
+
+**Raises**
+
+- *ValueError*: For an order of fewer than 2 pixels.
+
+#### `sparta.preprocess.resample_to_log_grid`
+
+```python
+sparta.preprocess.resample_to_log_grid(wave, flux, dv_kms)
+```
+
+Resample one order onto a log-lambda (velocity-even) grid.
+
+**Parameters**
+
+- `wave` (*array_like*): 1-D increasing wavelengths (Angstrom), at least 2.
+- `flux` (*array_like*): 1-D flux matching `wave`.
+- `dv_kms` (*float*): The velocity step (km/s).
+
+**Returns**
+
+- `wave, flux` (*ndarray*): The new grid (Angstrom) and the resampled flux.
+
+**Raises**
+
+- *ValueError*: For an order of fewer than 2 pixels.
+
+#### `sparta.preprocess.coarsest_native_step`
+
+```python
+sparta.preprocess.coarsest_native_step(previous_kms, wave)
+```
+
+The native velocity step of an order after it is put on a new grid.
+
+**Parameters**
+
+- `previous_kms` (*float*): The native step before (km/s).
+- `wave` (*array_like*): The new wavelength grid (Angstrom), at least 2 points.
+
+**Returns**
+
+- *float*: The native step (km/s).
+
+#### `sparta.preprocess.remove_cosmics`
+
+```python
+sparta.preprocess.remove_cosmics(wave, flux, sigma_upper=3)
+```
+
+Replace the upward outliers (cosmic-ray hits) of one order.
+
+**Parameters**
+
+- `wave` (*array_like*): 1-D wavelengths (Angstrom).
+- `flux` (*array_like*): 1-D flux matching `wave`; not modified.
+- `sigma_upper` (*float*): Clipping threshold, in units of mad_std.
+
+**Returns**
+
+- *ndarray*: The cleaned flux, on `wave`.
+
+#### `sparta.preprocess.bandpass`
+
+```python
+sparta.preprocess.bandpass(wave, flux, lowcut, highcut, order=1)
+```
+
+Band-pass filter one evenly sampled order with a Butterworth filter.
+
+**Parameters**
+
+- `wave` (*array_like*): 1-D evenly spaced wavelengths (Angstrom).
+- `flux` (*array_like*): 1-D flux matching `wave`.
+- `lowcut` (*float*): Lower band edge, in units of the lowest frequency of the order, 1 / (max(wave) - min(wave)).
+- `highcut` (*float*): Upper band edge, in units of the Nyquist frequency (0-1).
+- `order` (*int*): Order of the Butterworth filter.
+
+**Returns**
+
+- *ndarray*: The filtered, standardized flux (dimensionless).
+
 ### sparta.template
 
 Template: a reference spectrum for the correlation engines.
@@ -358,21 +497,15 @@ Template.from_phoenix(
 )
 ```
 
-A single-order PHOENIX-ACES-AGSS-COND-2011 HiRes model (Husser et al. 2013) over a wavelength range.
+A single-order PHOENIX-ACES-AGSS-COND-2011 HiRes model (Husser et al. 2013) over a wavelength range: `phoenix_spectrum` as a Template.
 
 **Parameters**
 
-- `teff` (*float*): Effective temperature (K), a grid value.
-- `logg` (*float*): Log surface gravity (cgs), a grid value.
-- `feh` (*float*): Metallicity [Fe/H] (dex), a grid value.
-- `alpha` (*float*): Alpha enhancement [alpha/Fe] (dex), a grid value.
-- `wave_range` (*(float, float)*): (lo, hi) wavelengths (Angstrom, in the frame chosen by `air`); the model keeps the grid points from the first above `lo` up to, not including, the first above `hi`.
-- `air` (*bool*): PHOENIX wavelengths are in vacuum. True converts them to air (Morton 2000, ApJS 130, 403) before `wave_range` is applied; use it for an observation in air (see the product's `wavelength_frame` in docs/instruments.md).
-- `allow_download` (*bool*): Fetch files missing from the cache from the Goettingen server over HTTPS. Default False: a missing file raises.
+- `teff, logg, feh, alpha, wave_range, air, allow_download`: See `phoenix_spectrum`.
 
 **Returns**
 
-- *Template*: One order: wavelengths (Angstrom) and the PHOENIX flux density (erg/s/cm^2/cm) divided by 1e13.
+- *Template*: One order: wavelengths (Angstrom) and the PHOENIX flux density (erg/s/cm^2/cm) divided by 1e13, held as (1, n_pixels) arrays.
 
 **Raises**
 
@@ -519,6 +652,43 @@ Cut the model into the orders of an observed spectrum, in place.
 **Returns**
 
 - *Template*: self.
+
+#### `sparta.template.phoenix_spectrum`
+
+```python
+sparta.template.phoenix_spectrum(
+    teff,
+    logg,
+    feh=0.0,
+    alpha=0.0,
+    *,
+    wave_range,
+    air=False,
+    allow_download=False,
+)
+```
+
+A PHOENIX-ACES-AGSS-COND-2011 HiRes model (Husser et al. 2013) over a wavelength range, as plain arrays.
+
+**Parameters**
+
+- `teff` (*float*): Effective temperature (K), a grid value.
+- `logg` (*float*): Log surface gravity (cgs), a grid value.
+- `feh` (*float*): Metallicity [Fe/H] (dex), a grid value.
+- `alpha` (*float*): Alpha enhancement [alpha/Fe] (dex), a grid value.
+- `wave_range` (*(float, float)*): (lo, hi) wavelengths (Angstrom, in the frame chosen by `air`); the model keeps the grid points from the first above `lo` up to, not including, the first above `hi`.
+- `air` (*bool*): PHOENIX wavelengths are in vacuum. True converts them to air (Morton 2000, ApJS 130, 403) before `wave_range` is applied; use it for an observation in air (see the product's `wavelength_frame` in docs/instruments.md).
+- `allow_download` (*bool*): Fetch files missing from the cache from the Goettingen server over HTTPS. Default False: a missing file raises.
+
+**Returns**
+
+- `wave` (*ndarray*): 1-D wavelengths (Angstrom; vacuum, or air if `air`).
+- `flux` (*ndarray*): The PHOENIX flux density (erg/s/cm^2/cm) divided by 1e13, in the file's precision.
+
+**Raises**
+
+- *FileNotFoundError*: For a file missing from the cache with downloads disabled.
+- *ValueError*: If `wave_range` is not inside the model grid.
 
 ### sparta.ccf1d
 

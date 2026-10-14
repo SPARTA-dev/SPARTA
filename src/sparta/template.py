@@ -7,7 +7,7 @@ the local cache in ``template_files/`` (``Template.from_phoenix``; fetched from
 the Goettingen server only on explicit opt-in, ``allow_download=True``), or
 from a line mask (``Template.from_mask``). Its methods broaden (rotational,
 instrumental), Doppler-shift, rebin and cut the model to the orders of an
-observation.
+observation. ``phoenix_spectrum`` returns the PHOENIX model as plain arrays.
 
 Conventions: wavelengths in Angstrom (PHOENIX grids are in vacuum; ``air=True``
 converts them with Morton 2000, ApJS 130, 403), velocities in km/s.
@@ -17,6 +17,7 @@ Reference: PHOENIX-ACES models -- Husser et al. 2013, A&A 553, A6.
 
 from astropy.io import fits
 from astropy.utils.data import download_file
+from sparta.preprocess import coarsest_native_step
 from sparta.spectrum import Spectrum
 from unicor import dsp
 import numpy as np
@@ -123,7 +124,7 @@ class Template:
                      air=False, allow_download=False):
         '''
         A single-order PHOENIX-ACES-AGSS-COND-2011 HiRes model (Husser et al.
-        2013) over a wavelength range.
+        2013) over a wavelength range: ``phoenix_spectrum`` as a Template.
 
         The model is read from the local cache, TEMPLATE_FILES_PATH (the
         package's ``template_files/``). SPARTA ships three models there --
@@ -136,32 +137,14 @@ class Template:
 
         Parameters
         ----------
-        teff : float
-            Effective temperature (K), a grid value.
-        logg : float
-            Log surface gravity (cgs), a grid value.
-        feh : float
-            Metallicity [Fe/H] (dex), a grid value.
-        alpha : float
-            Alpha enhancement [alpha/Fe] (dex), a grid value.
-        wave_range : (float, float)
-            (lo, hi) wavelengths (Angstrom, in the frame chosen by ``air``);
-            the model keeps the grid points from the first above ``lo`` up
-            to, not including, the first above ``hi``.
-        air : bool
-            PHOENIX wavelengths are in vacuum. True converts them to air
-            (Morton 2000, ApJS 130, 403) before ``wave_range`` is applied;
-            use it for an observation in air (see the product's
-            ``wavelength_frame`` in docs/instruments.md).
-        allow_download : bool
-            Fetch files missing from the cache from the Goettingen server over
-            HTTPS. Default False: a missing file raises.
+        teff, logg, feh, alpha, wave_range, air, allow_download
+            See ``phoenix_spectrum``.
 
         Returns
         -------
         Template
             One order: wavelengths (Angstrom) and the PHOENIX flux density
-            (erg/s/cm^2/cm) divided by 1e13.
+            (erg/s/cm^2/cm) divided by 1e13, held as (1, n_pixels) arrays.
 
         Raises
         ------
@@ -170,26 +153,9 @@ class Template:
         ValueError
             If ``wave_range`` is not inside the model grid.
         '''
-        wave_path = _cached_phoenix_file(_PHOENIX_WAVE_SUB_PATH, PHOENIX_WAVE_FILE,
-                                         allow_download)
-        flux_path = _cached_phoenix_file(*_phoenix_filename(teff, logg, feh, alpha),
-                                         allow_download)
-
-        with fits.open(flux_path) as hdul_spec:
-            s = np.squeeze(np.array(hdul_spec[0].data))
-        with fits.open(wave_path) as hdul_wl:
-            w = np.squeeze(np.array(hdul_wl[0].data))
-
-        if air:
-            # Morton (2000, ApJS 130, 403), vacuum to air.
-            s2 = 10**8 * w**(-2)
-            f = 1 + 0.0000834254 + 0.02406147 / (130 - s2) + 0.00015998 / (38.9 - s2)
-            w = w/f
-
-        cut = _wave_slice(w, wave_range)
-        spectrum = np.reshape(s[cut], (1, -1)) / (10 ** 13)
-        wavelengths = np.reshape(w[cut], (1, -1))
-        return cls(Spectrum(wv=wavelengths, sp=spectrum))
+        wave, flux = phoenix_spectrum(teff, logg, feh, alpha, wave_range=wave_range, air=air,
+                                      allow_download=allow_download)
+        return cls(Spectrum(wv=np.reshape(wave, (1, -1)), sp=np.reshape(flux, (1, -1))))
 
     # =============================================================================
     # =============================================================================
@@ -385,7 +351,7 @@ class Template:
         self.model.wv = new_wv
         self.model.Info.pop('NativeStep', None)
         if native is not None:
-            self.model.Info['NativeStep'] = [max(native, dsp.dv_from_wave(new_wv[0]))]
+            self.model.Info['NativeStep'] = [coarsest_native_step(native, new_wv[0])]
 
         return new_wv, new_sp
 
@@ -492,6 +458,76 @@ class Template:
         self.cut_multiorder(wv_bounds)
 
         return self
+
+
+def phoenix_spectrum(teff, logg, feh=0.0, alpha=0.0, *, wave_range, air=False,
+                     allow_download=False):
+    '''
+    A PHOENIX-ACES-AGSS-COND-2011 HiRes model (Husser et al. 2013) over a
+    wavelength range, as plain arrays.
+
+    The model is read from the local cache, TEMPLATE_FILES_PATH (the
+    package's ``template_files/``), which ships (teff, logg, feh) =
+    (4900, 4.5, 0.0), (5500, 4.5, 0.0) and (5800, 3.5, +0.5) and the
+    wavelength grid. Any other model needs ``allow_download=True`` once. The
+    flux is neither continuum-normalized nor broadened.
+
+    Parameters
+    ----------
+    teff : float
+        Effective temperature (K), a grid value.
+    logg : float
+        Log surface gravity (cgs), a grid value.
+    feh : float
+        Metallicity [Fe/H] (dex), a grid value.
+    alpha : float
+        Alpha enhancement [alpha/Fe] (dex), a grid value.
+    wave_range : (float, float)
+        (lo, hi) wavelengths (Angstrom, in the frame chosen by ``air``); the
+        model keeps the grid points from the first above ``lo`` up to, not
+        including, the first above ``hi``.
+    air : bool
+        PHOENIX wavelengths are in vacuum. True converts them to air (Morton
+        2000, ApJS 130, 403) before ``wave_range`` is applied; use it for an
+        observation in air (see the product's ``wavelength_frame`` in
+        docs/instruments.md).
+    allow_download : bool
+        Fetch files missing from the cache from the Goettingen server over
+        HTTPS. Default False: a missing file raises.
+
+    Returns
+    -------
+    wave : ndarray
+        1-D wavelengths (Angstrom; vacuum, or air if ``air``).
+    flux : ndarray
+        The PHOENIX flux density (erg/s/cm^2/cm) divided by 1e13, in the
+        file's precision.
+
+    Raises
+    ------
+    FileNotFoundError
+        For a file missing from the cache with downloads disabled.
+    ValueError
+        If ``wave_range`` is not inside the model grid.
+    '''
+    wave_path = _cached_phoenix_file(_PHOENIX_WAVE_SUB_PATH, PHOENIX_WAVE_FILE,
+                                     allow_download)
+    flux_path = _cached_phoenix_file(*_phoenix_filename(teff, logg, feh, alpha),
+                                     allow_download)
+
+    with fits.open(flux_path) as hdul_spec:
+        s = np.squeeze(np.array(hdul_spec[0].data))
+    with fits.open(wave_path) as hdul_wl:
+        w = np.squeeze(np.array(hdul_wl[0].data))
+
+    if air:
+        # Morton (2000, ApJS 130, 403), vacuum to air.
+        s2 = 10**8 * w**(-2)
+        f = 1 + 0.0000834254 + 0.02406147 / (130 - s2) + 0.00015998 / (38.9 - s2)
+        w = w/f
+
+    cut = _wave_slice(w, wave_range)
+    return w[cut], s[cut] / (10 ** 13)
 
 
 def _phoenix_filename(teff, logg, feh, alpha):

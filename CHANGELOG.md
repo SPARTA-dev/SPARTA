@@ -259,6 +259,15 @@ Keys of `results_frequency` / `results_power`:
   loses `sty` and returns the figure instead of showing it;
   `plot_periodograms` returns the figure. All the example notebooks use the
   style.
+- **New `sparta.preprocess`** (additive): the per-order steps of `Spectrum` as
+  functions on plain arrays (wavelengths in Angstrom, velocities in km/s) --
+  `trim_margins`, `resample_to_linear_grid`, `resample_to_log_grid`,
+  `remove_cosmics`, `bandpass`, `coarsest_native_step` (the native-step rule of
+  `interpolate`, `Observations` ingestion and `Template.integrate_spec`) and
+  `resample_flux` (moved from `sparta.spectrum`, still importable there). The
+  `Spectrum` methods are loops over them, bit-for-bit as before (pinned by
+  `tests/test_atoms_baseline.py`). New `sparta.template.phoenix_spectrum`: the
+  PHOENIX model as `(wave, flux)` arrays, which `Template.from_phoenix` wraps.
 
 ### Documentation
 

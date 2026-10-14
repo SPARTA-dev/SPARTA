@@ -27,8 +27,8 @@ OUTPUT = ROOT / "docs" / "api.md"
 
 # (heading, modules) in reading order; each module documents what it defines.
 LAYOUT = (
-    ("sparta", ("sparta.spectrum", "sparta.template", "sparta.ccf1d", "sparta.ccf2d",
-                "sparta.tiravel", "sparta.observations", "sparta.timeseries",
+    ("sparta", ("sparta.spectrum", "sparta.preprocess", "sparta.template", "sparta.ccf1d",
+                "sparta.ccf2d", "sparta.tiravel", "sparta.observations", "sparta.timeseries",
                 "sparta.periodogram", "sparta.pdc", "sparta.tiravel_ops",
                 "sparta.instruments", "sparta.plotting")),
     ("unicor", ("unicor.ccf", "unicor.dsp")),

@@ -22,7 +22,8 @@ Radial velocities and periodicity searches for spectroscopic time series:
     maps as grey-scale images with the peak black.
 
 The array-level engines are the standalone ``unicor`` and ``todcor``
-packages; the PDC math is in ``sparta.pdc`` and the TIRAVEL measure in
+packages; the per-order preprocessing steps are in ``sparta.preprocess``, the
+PDC math is in ``sparta.pdc`` and the TIRAVEL measure in
 ``sparta.tiravel_ops``.
 
 Conventions: wavelengths in Angstrom, velocities in km/s, times in days,

@@ -45,6 +45,7 @@ TOP_LEVEL = {
     "pdc": "module sparta.pdc",
     "periodogram": "module sparta.periodogram",
     "plotting": "module sparta.plotting",
+    "preprocess": "module sparta.preprocess",
     "spectrum": "module sparta.spectrum",
     "template": "module sparta.template",
     "timeseries": "module sparta.timeseries",
@@ -56,7 +57,10 @@ TOP_LEVEL = {
 # resolve there (existence, not an exhaustive list).
 DEEP = {
     "sparta.spectrum": ["Spectrum", "resample_flux"],
-    "sparta.template": ["Template"],
+    "sparta.preprocess": ["bandpass", "coarsest_native_step", "remove_cosmics",
+                          "resample_flux", "resample_to_linear_grid", "resample_to_log_grid",
+                          "trim_margins"],
+    "sparta.template": ["Template", "phoenix_spectrum"],
     "sparta.ccf1d": ["CCF1d"],
     "sparta.ccf2d": ["CCF2d"],
     "sparta.tiravel": ["TIRAVEL"],

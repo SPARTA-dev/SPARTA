@@ -5,7 +5,7 @@ import pytest
 
 from sparta import template as template_module
 from sparta.spectrum import Spectrum
-from sparta.template import Template
+from sparta.template import Template, phoenix_spectrum
 
 
 def test_download_disabled_raises_without_network():
@@ -64,6 +64,38 @@ def test_from_phoenix_cuts_the_bundled_model_to_the_range():
 def test_from_phoenix_refuses_a_range_off_the_grid(wave_range):
     with pytest.raises(ValueError, match="wave_range"):
         Template.from_phoenix(5800, 3.5, 0.5, 0.0, wave_range=wave_range)
+
+
+@pytest.mark.parametrize("air", [False, True])
+def test_phoenix_spectrum_is_the_array_behind_from_phoenix(air):
+    wave, flux = phoenix_spectrum(5800, 3.5, 0.5, 0.0, wave_range=(5000.0, 5010.0), air=air)
+    assert wave.ndim == flux.ndim == 1 and wave.shape == flux.shape
+    assert 5000.0 < wave[0] and wave[-1] <= 5010.0
+    model = Template.from_phoenix(5800, 3.5, 0.5, 0.0, wave_range=(5000.0, 5010.0),
+                                  air=air).model
+    assert np.array_equal(model.wv, wave.reshape(1, -1))
+    assert np.array_equal(model.sp, flux.reshape(1, -1))
+    assert model.sp.dtype == flux.dtype
+
+
+def test_phoenix_spectrum_is_vacuum_unless_air_is_asked_for():
+    vac, f_vac = phoenix_spectrum(5800, 3.5, 0.5, wave_range=(4990.0, 5020.0))
+    air, f_air = phoenix_spectrum(5800, 3.5, 0.5, wave_range=(5000.0, 5010.0), air=True)
+    k = np.flatnonzero(f_vac == f_air[0])
+    assert k.size == 1
+    # Morton (2000): n_air - 1 = 2.79e-4 at 5000 A.
+    assert vac[k[0]] / air[0] == pytest.approx(1 + 2.79e-4, abs=2e-6)
+
+
+def test_phoenix_spectrum_never_downloads_by_default(monkeypatch):
+    def no_network(*args, **kwargs):
+        raise AssertionError("network access attempted")
+
+    monkeypatch.setattr(template_module, "download_file", no_network)
+    with pytest.raises(FileNotFoundError, match="allow_download=True"):
+        phoenix_spectrum(9999, 9.99, wave_range=(5000.0, 5100.0))
+    with pytest.raises(ValueError, match="wave_range"):
+        phoenix_spectrum(5800, 3.5, 0.5, wave_range=(5100.0, 5000.0))
 
 
 def test_from_mask_marks_the_windows_with_negative_weights(tmp_path):

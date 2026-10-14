@@ -30,7 +30,7 @@ import warnings
 import numpy as np
 from sparta.spectrum import Spectrum
 from sparta import instruments
-from unicor import dsp
+from sparta.preprocess import coarsest_native_step
 from sparta.timeseries import TimeSeries, is_numeric_scalar
 from sparta.periodogram import PeriodicityDetector
 from sparta.ccf1d import CCF1d
@@ -202,8 +202,9 @@ class Observations:
         A record of a resampled product carries its native (detector) step,
         ``native_step_kms``; it becomes the spectrum's ``Info['NativeStep']``
         (km/s), so UNICOR / TODCOR count native pixels rather than archive
-        ones. Per order it is ``max(native, archive step)`` -- the rule of
-        ``Spectrum.interpolate``, since an archive grid coarser than
+        ones. Per order it is ``max(native, archive step)``
+        (``sparta.preprocess.coarsest_native_step``, the rule of
+        ``Spectrum.interpolate``), since an archive grid coarser than
         the detector (e.g. HARPS's 0.01 A bins blueward of ~4900 A) leaves
         fewer independent pixels than the detector had. This is approximate:
         the pipeline's own rebinning kernel is unknown, so the noise is
@@ -246,7 +247,7 @@ class Observations:
                     raise ValueError(f"{rec.path or rec.survey}: native_step_kms has "
                                      f"{len(rec.native_step_kms)} values for "
                                      f"{len(rec.wave)} orders")
-                sp.Info['NativeStep'] = [max(float(native), dsp.dv_from_wave(w))
+                sp.Info['NativeStep'] = [coarsest_native_step(float(native), w)
                                          for native, w in zip(rec.native_step_kms, rec.wave)]
             sp.barycentric_correction()
 

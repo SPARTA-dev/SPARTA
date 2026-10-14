@@ -5,7 +5,9 @@ order (orders may differ in length), plus metadata: time of observation,
 barycentric velocity correction, target name and the grid bookkeeping in
 ``Info``. The methods resample (linear or log-lambda), trim, filter, apodise,
 clip cosmics, apply the barycentric correction and select orders; ``orders`` /
-``from_spectrum1d`` convert to and from specutils ``Spectrum1D``.
+``from_spectrum1d`` convert to and from specutils ``Spectrum1D``. The
+preprocessing methods loop over the per-order functions of
+``sparta.preprocess``.
 
 Conventions: wavelengths in Angstrom, velocities in km/s, times in BJD (days).
 Cross-correlation needs a log-lambda (velocity-even) grid, step
@@ -13,42 +15,14 @@ Cross-correlation needs a log-lambda (velocity-even) grid, step
 """
 
 import numpy as np
-from scipy import signal
-from scipy.ndimage import median_filter
-from astropy.stats import sigma_clip, mad_std
 from astropy import constants as consts, units as u
 from specutils import Spectrum as Spec1D, SpectrumList
-from specutils.manipulation import SplineInterpolatedResampler
 from unicor import dsp
 
-
-def resample_flux(wave, flux, new_wave, unit=u.Angstrom):
-    '''
-    Resample one order's flux with the cubic spline of ``Spectrum.interpolate``.
-
-    The spline is specutils' ``SplineInterpolatedResampler``. Other code that
-    must model this resampling exactly (CCF2d's noise model, the simulator's
-    archive rebinning) calls this function too.
-
-    Parameters
-    ----------
-    wave : array_like
-        1-D increasing wavelengths, in ``unit``.
-    flux : array_like
-        1-D flux matching ``wave``.
-    new_wave : array_like
-        1-D increasing wavelengths (``unit``) inside the span of ``wave``.
-    unit : astropy.units.Unit
-        Unit of both wavelength arrays (default Angstrom).
-
-    Returns
-    -------
-    ndarray
-        The flux at ``new_wave``; NaN outside the span of ``wave``.
-    '''
-    src = Spec1D(flux=np.asarray(flux, float) * u.dimensionless_unscaled,
-                 spectral_axis=np.asarray(wave, float) * unit)
-    return SplineInterpolatedResampler()(src, np.asarray(new_wave, float) * unit).flux.value
+from sparta.preprocess import (
+    bandpass, coarsest_native_step, remove_cosmics, resample_flux, resample_to_linear_grid,
+    resample_to_log_grid, trim_margins,
+)
 
 
 class Spectrum:
@@ -336,61 +310,32 @@ class Spectrum:
                                  "it was trimmed away or a template does not cover it "
                                  "(drop it with select_orders)")
 
-        # Initialize data
-        wvI, spI, wnt = [], [], self.Info['WavelengthUnits']
+        wnt = self.Info['WavelengthUnits']
 
         # Remember the sampling that sets the noise scale, so later error
         # estimates can count independent pixels (native_steps).
         previous = self.native_steps()
 
-        # Set the interpolation deltas
         if method == 'linear':
             if delta is None:
                 delta = 0.5 * wnt
             elif type(delta) is not u.quantity.Quantity:
                 delta = float(delta) * wnt
             deltawv = ((delta/wnt).decompose()).value
-
-        if method == 'log':
+            resampled = [resample_to_linear_grid(w, s, deltawv)
+                         for w, s in zip(self.wv, self.sp)]
+        else:
             if delta is None:
                 delta = 0.1 * u.kilometer / u.second
             elif type(delta) is not u.quantity.Quantity:
                 delta = float(delta) * u.kilometer / u.second
-            betavel = ((delta/self.c).decompose()).value
+            dv_kms = delta.to_value(u.kilometer / u.second)
+            resampled = [resample_to_log_grid(w, s, dv_kms)
+                         for w, s in zip(self.wv, self.sp)]
+        wvI = [w for w, _ in resampled]
+        spI = [s for _, s in resampled]
 
-        # Resample the flux onto the new grid with specutils (cubic spline).
-        wunit = getattr(wnt, 'unit', u.Angstrom)
-
-        # Interpolate per order
-        for I, w in enumerate(self.wv):
-
-            # Calculate the median wavelength difference.
-            medianDiff = np.median(np.diff(w))
-
-            # If the grid is interpolated in wavelength:
-            if method == 'linear':
-                dlam = deltawv*medianDiff
-                wvI.append(np.arange(min(w) + abs(dlam), max(w) - abs(dlam), abs(dlam)))
-
-            # If the grid is interpolated in velocity
-            elif method == 'log':
-                dlam = np.log(1+betavel)
-                wvI.append(np.exp(
-                           np.arange(np.log(min(w)+medianDiff),
-                                     np.log(max(w)-medianDiff),
-                                     dlam)))
-
-            # Resample the flux onto the new grid. The target grid lies strictly
-            # inside the input span (built with a one-median-step margin), so no
-            # extrapolation occurs.
-            spI.append(resample_flux(w, self.sp[I], wvI[I], unit=wunit))
-
-        # Resampling onto a finer grid adds no independent pixels; resampling
-        # onto a coarser one leaves fewer. So the coarsest sampling seen so far
-        # is the native one. dv_from_wave takes the median d(lambda)/lambda:
-        # a linear grid's velocity step falls from the blue to the red end of
-        # the order, and this is its mid-order value.
-        self.Info['NativeStep'] = [max(old, dsp.dv_from_wave(new))
+        self.Info['NativeStep'] = [coarsest_native_step(old, new)
                                    for old, new in zip(previous, wvI)]
 
         # Replace the data with the interpolated wavelengths
@@ -446,37 +391,15 @@ class Spectrum:
         Spectrum
             self, with ``wv`` / ``sp`` trimmed.
         '''
-        # Initialize data
-        wvT, spT = [], []
-
         if n_trim is not None:
             n_trim_left, n_trim_right = n_trim, n_trim
 
-        for w, s in zip(self.wv, self.sp):
-            w = np.asarray(w, float)
-            s = np.asarray(s, float)
-
-            if remove_nans:
-                keep = ~np.isnan(s)
-                w, s = w[keep], s[keep]
-
-            # Inclusive bounds of the exposed part, on the arrays as they now
-            # are (after NaN removal).
-            first, last = 0, len(s) - 1
-            if clean_margins and len(s):
-                level = margin_fraction * np.nanmedian(s)
-                smooth = median_filter(np.nan_to_num(s), size=margin_window,
-                                       mode='nearest')
-                exposed = np.flatnonzero(smooth > level)
-                if exposed.size == 0:
-                    raise ValueError("an order has no flux above the margin level; "
-                                     "drop it (select_orders) or lower margin_fraction")
-                first, last = exposed[0], exposed[-1]
-
-            lo = first + n_trim_left
-            hi = last - n_trim_right + 1
-            wvT.append(w[lo:hi])
-            spT.append(s[lo:hi])
+        trimmed = [trim_margins(w, s, n_left=n_trim_left, n_right=n_trim_right,
+                                clean_margins=clean_margins, remove_nans=remove_nans,
+                                margin_fraction=margin_fraction, margin_window=margin_window)
+                   for w, s in zip(self.wv, self.sp)]
+        wvT = [w for w, _ in trimmed]
+        spT = [s for _, s in trimmed]
 
         self.wv, self.sp = wvT, spT
         return self
@@ -509,37 +432,8 @@ class Spectrum:
         Spectrum
             self, with ``sp`` filtered.
         '''
-        # Initialize data
-        spF = []
-
-        # Filter the spectrum per order
-        for I, w in enumerate(self.wv):
-            # the bandpass values are normalized to the Nyquist frequency.
-            # here we assume that the spectrum in evenly sampled, therefore:
-            nyq = 0.5/np.abs(w[1]-w[0])
-
-            # The minimal frequency is set by the full range of the datapoints
-            # here we use express the minimal frequency in terms of the Nyquist
-            df = (max(w)-min(w))**(-1)/nyq
-
-            # The highpass frequency is already given in terms of the Nyquist
-            # the lowpass filter is provided in terms of the minimal frequency.
-            # it is therefore expressed by the Nyquist frequency.
-            low = lowcut*df
-
-            # Define the Butterworth filter
-            b, a = signal.butter(order, [low, highcut], btype='band')
-
-            # Subtract a continuum-like level (the 80th percentile) so the
-            # filter's edge transients start near zero.
-            s = signal.filtfilt(b, a, self.sp[I]-np.percentile(self.sp[I], 80),
-                                padlen=10*max(len(b), len(a)))
-
-            s = (s-np.mean(s))/np.std(s)
-
-            # Filter the data
-            spF.append(s)
-
+        spF = [bandpass(w, s, lowcut, highcut, order=order)
+               for w, s in zip(self.wv, self.sp)]
         self.sp = spF
         return self
 
@@ -563,15 +457,7 @@ class Spectrum:
         Spectrum
             self, with ``sp`` tapered.
         '''
-        # Initialize data
-        spC = []
-
-        # Interpolate per order
-        for I, w in enumerate(self.wv):
-            window = signal.windows.tukey(len(w), alpha)
-            spC.append(
-                    np.multiply(self.sp[I], window))
-
+        spC = [s * dsp.tukey_window(len(w), alpha) for w, s in zip(self.wv, self.sp)]
         self.sp = spC
         return self
 
@@ -603,19 +489,8 @@ class Spectrum:
             self, with ``sp`` cleaned.
         '''
 
-        spR = []
-        for w, s in zip(self.wv, self.sp):
-            w = np.asarray(w, float)
-            s = np.array(s, float)
-            clipped = np.ma.getmaskarray(sigma_clip(s, sigma_lower=np.inf,
-                                                    sigma_upper=sigma_upper,
-                                                    masked=True, cenfunc='median',
-                                                    stdfunc=mad_std))
-            finite = np.isfinite(s)
-            cosmic = clipped & finite
-            anchors = ~clipped & finite
-            s[cosmic] = np.interp(w[cosmic], w[anchors], s[anchors])
-            spR.append(s)
+        spR = [remove_cosmics(w, s, sigma_upper=sigma_upper)
+               for w, s in zip(self.wv, self.sp)]
 
         self.sp = spR
         return self

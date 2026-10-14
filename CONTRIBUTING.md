@@ -61,7 +61,7 @@ handling belongs in `sparta`.
 
 ## The golden master
 
-Two test files pin the numbers the user-facing workflows produce:
+Three test files pin the numbers the user-facing workflows produce:
 
 - `tests/test_golden_pipeline.py` → `tests/golden/pipeline.json`: UNICOR and
   TODCOR RVs on seeded simulations, TIRAVEL on the bundled HARPS spectra, and
@@ -70,6 +70,12 @@ Two test files pin the numbers the user-facing workflows produce:
 - `tests/test_golden_instruments.py` → `tests/golden/instruments.json`: what
   the HARPS and NRES loaders and `Observations` produce from the bundled
   files, pinned bit for bit (spectra by hash).
+- `tests/test_atoms_baseline.py` → `tests/golden/atoms_sha256.json`: every
+  `Spectrum` preprocessing step, `CCF1d`, `CCF2d`, TIRAVEL and periodogram
+  output on seeded inputs, by SHA-256 of the float64 bytes. Exact, so it holds
+  only on the recorded Python/numpy/scipy/astropy/specutils versions and skips
+  elsewhere; the two files above are the cross-platform anchor. Re-bless with
+  `python tests/_atoms_baseline.py --write`, in a commit of its own.
 
 A refactor must reproduce them unchanged. A change that alters results on
 purpose (a bug fix, a better estimator) regenerates the reference
