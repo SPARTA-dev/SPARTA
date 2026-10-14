@@ -26,8 +26,11 @@
   fitting a fixed pair.
 - **Templates with any continuum in TODCOR** — fill uncovered pixels with the
   template's own continuum, so TIRAVEL templates can feed `CCF2d`.
-- **Broaden on a ln λ grid internally** — so a linear-λ model (PHOENIX) gets
-  the requested width at every wavelength.
+- **A band-pass cut in physical units** — `filter_lowcut` / `filter_highcut`
+  in 1/Å or s/km instead of the order's span and pixel Nyquist frequency, so
+  template and data are filtered alike whatever their pixel scales.
+- **A wavelength `delta` for `Spectrum.interpolate`** — read a length
+  Quantity as the step itself (a behaviour change, so a deliberate one).
 
 ## Periodograms
 

@@ -286,6 +286,72 @@ def test_broadening_keeps_every_order():
         assert s.min() > s0.min()          # each order was actually broadened
 
 
+def _phoenix_like_order():
+    """A linear-lambda order across 5000 A with PHOENIX HiRes's step change
+    (0.006 A below, 0.01 A above: 0.36 vs 0.60 km/s) and the same narrow
+    line (sigma 0.5 km/s) 10 A to each side of it."""
+    from unicor import C_KMS
+    wave = np.concatenate([np.arange(4980.0, 5000.0, 0.006),
+                           np.arange(5000.0, 5020.0 + 1e-9, 0.01)])
+    flux = np.ones_like(wave)
+    for centre in (4990.0, 5010.0):
+        flux -= 0.5 * np.exp(-0.5 * (C_KMS * np.log(wave / centre) / 0.5) ** 2)
+    return wave, flux
+
+
+def _line_sigma_kms(wave, flux, centre, half_width_kms=60.0):
+    """Velocity second moment (km/s) of the absorption line at ``centre``."""
+    from unicor import C_KMS
+    x = C_KMS * np.log(np.asarray(wave) / centre)
+    near = np.abs(x) < half_width_kms
+    depth = 1.0 - np.asarray(flux)[near]
+    return np.sqrt(np.sum(depth * x[near] ** 2) / np.sum(depth))
+
+
+def test_instrumental_broadening_has_the_requested_width_across_a_step_change():
+    # One median velocity step per order broadened the 0.60 km/s side of a
+    # PHOENIX order spanning 5000 A by ~1.67x the requested width; the kernel
+    # now acts on a uniform ln(lambda) grid.
+    from unicor import C_KMS
+    wave, flux = _phoenix_like_order()
+    t = Template.from_arrays(wave, flux).broaden_instrumental(resolution=50_000)
+    sigma_r = C_KMS / 50_000 / (2.0 * np.sqrt(2.0 * np.log(2.0)))
+    expected = np.hypot(0.5, sigma_r)
+    for centre in (4990.0, 5010.0):
+        assert _line_sigma_kms(t.model.wv[0], t.model.sp[0], centre) == pytest.approx(expected, rel=0.01)
+
+
+def test_rotational_broadening_is_the_same_on_both_sides_of_a_step_change():
+    wave, flux = _phoenix_like_order()
+    t = Template.from_arrays(wave, flux).broaden_rotational(vsini=20.0, epsilon=0.6)
+    blue, red = (_line_sigma_kms(t.model.wv[0], t.model.sp[0], c) for c in (4990.0, 5010.0))
+    assert blue == pytest.approx(red, rel=0.01)
+    assert blue > 5.0                      # actually broadened (intrinsic 0.5 km/s)
+
+
+def test_a_non_log_order_keeps_its_grid_and_the_round_trip_is_lossless():
+    # Zero width isolates the ln(lambda) round trip: on a resolved line (sigma
+    # 2 km/s on 0.36-0.60 km/s pixels) it must give the input back.
+    from unicor import C_KMS
+    wave = np.concatenate([np.arange(4980.0, 5000.0, 0.006),
+                           np.arange(5000.0, 5020.0 + 1e-9, 0.01)])
+    flux = 1.0 - 0.5 * np.exp(-0.5 * (C_KMS * np.log(wave / 5010.0) / 2.0) ** 2)
+    t = Template.from_arrays(wave, flux).broaden_instrumental(resolution=np.inf)
+    assert np.array_equal(t.model.wv[0], wave)
+    assert isinstance(t.model.sp, np.ndarray) and t.model.sp.shape == (1, wave.size)
+    np.testing.assert_allclose(t.model.sp[0], flux, rtol=0, atol=1e-4)
+
+
+def test_broadening_leaves_a_log_lambda_order_on_its_grid():
+    # Already velocity-even: broadened where it is, exactly as the kernel alone.
+    from unicor import broaden_gaussian, dv_from_wave, log_lambda_grid, C_KMS
+    wave = log_lambda_grid(5000.0, 5050.0, 0.5)[0]
+    flux = 1.0 - 0.5 * np.exp(-0.5 * ((wave - 5025.0) / 0.1) ** 2)
+    t = Template.from_arrays(wave, flux).broaden_instrumental(resolution=50_000)
+    assert np.array_equal(t.model.wv[0], wave)
+    assert np.array_equal(t.model.sp[0], broaden_gaussian(flux, dv_from_wave(wave), C_KMS / 50_000))
+
+
 def test_save_template_model_round_trips_every_order(tmp_path):
     import numpy as np
     from sparta.spectrum import Spectrum

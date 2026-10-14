@@ -152,15 +152,16 @@ The calibration of UNICOR's and TODCOR's errors is summarised in
 - **`Spectrum` is not yet a specutils object.** It is a multi-order container
   of per-order arrays plus an `Info` dict; specutils is the interchange format
   (`Spectrum.orders`, `Spectrum.from_spectrum1d`), not the working store.
-- **Broadening uses one velocity step per order.** `broaden_instrumental` and
-  `broaden_rotational` take each order's median step c·Δλ/λ, which is exact
-  on a ln λ grid. On a linear-λ grid the kernel's velocity width drifts as
-  λ_median/λ across the order. PHOENIX HiRes models are on a linear grid whose
-  step changes at 5000 Å (0.006 Å below, 0.01 Å above): for the README's
-  4950–5130 Å template the median step is 0.587 km/s, but below 5000 Å the
-  pixels are 0.36 km/s, so that part is broadened by ~0.6 of the requested
-  width. Resample such a model onto a ln λ grid first
-  (`template.model.interpolate(delta=dv, method='log')`).
+- **The band-pass cut is in pixel units.** `filter_highcut` is a fraction of
+  each order's pixel Nyquist frequency (and `filter_lowcut` a multiple of its
+  span), so the same setting smooths two spectra on different pixel scales
+  differently, and changing `delta` changes the cut in 1/Å. In the NRES
+  golden recipe, putting the unbroadened template on 0.018–0.029 Å pixels
+  instead of 0.030 Å before `preprocess(delta=1)` moved the RVs by −12 and
+  −18 m/s (≲ 1σ). Preprocess template and data on comparable pixel scales.
+- **`Spectrum.interpolate(method='linear')` reads `delta` as a multiple of
+  the median step, even as a Quantity:** `delta=0.25 * u.AA` gives a step of
+  0.25 × the order's median step, not 0.25 Å.
 - **Downloaded PHOENIX models go into the package directory**
   (`sparta.template.TEMPLATE_FILES_PATH`, the installed `template_files/`),
   which may be read-only or replaced on upgrade. Downloads happen only with

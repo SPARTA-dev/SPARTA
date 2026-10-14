@@ -47,6 +47,47 @@ def _per_order(like, orders):
     return np.array(orders) if isinstance(like, np.ndarray) else list(orders)
 
 
+def _is_log_uniform(wave, rtol=1e-3):
+    """True if ``wave`` is uniform in ln(lambda) to ``rtol`` (as ``unicor.log_grid_dln`` checks)."""
+    dln = np.diff(np.log(np.asarray(wave, float)))
+    return dln.size > 0 and np.ptp(dln) <= rtol * np.median(dln)
+
+
+def _broaden_velocity_even(wave, flux, broaden):
+    """Apply a velocity kernel to one order on a uniform ln(lambda) grid.
+
+    One kernel has one velocity width only on a velocity-even grid. PHOENIX
+    HiRes is linear in wavelength with a step of 0.006 A below 5000 A and
+    0.01 A above (0.36 vs 0.60 km/s), and any linear grid's velocity step
+    drifts as 1/lambda; on such an order the median step made the kernel up
+    to ~1.7x too wide or too narrow. So an order that is not uniform in
+    ln(lambda) is resampled onto one at its finest velocity step (cubic, no
+    part sampled more coarsely), broadened there, and resampled back onto
+    its own wavelengths -- the template keeps the grid it had.
+
+    Parameters
+    ----------
+    wave : array_like
+        1-D increasing wavelengths (Angstrom).
+    flux : array_like
+        1-D flux matching ``wave``.
+    broaden : callable
+        ``broaden(flux, dv)`` with ``dv`` the grid's velocity step (km/s).
+
+    Returns
+    -------
+    ndarray
+        The broadened flux on ``wave``.
+    """
+    wave = np.asarray(wave, float)
+    if _is_log_uniform(wave):
+        return broaden(flux, dsp.dv_from_wave(wave))
+    dv = dsp.C_KMS * np.min(np.diff(wave) / wave[:-1])
+    grid, _ = dsp.log_lambda_grid(wave[0], wave[-1], dv)
+    broadened = broaden(dsp.resample(wave, flux, grid, kind='cubic'), dv)
+    return dsp.resample(grid, broadened, wave, kind='cubic')
+
+
 class Template:
     '''
     A reference spectrum for UNICOR (``CCF1d``), TODCOR (``CCF2d``) and the
@@ -220,11 +261,11 @@ class Template:
         The kernel acts on flux - 1, with continuum 1 beyond the order's ends;
         for flux that is not continuum-normalized (e.g. PHOENIX) only the
         pixels within a kernel width of the ends are affected by that padding.
-        Each order's velocity step is its median c * d(lambda)/lambda
-        (``unicor.dv_from_wave``): exact for a log-lambda grid, but on a wide
-        linear-wavelength order the kernel is then too wide at the blue end
-        and too narrow at the red end, so resample such a model to log-lambda
-        first.
+        The kernel has one velocity width, so it is applied on a uniform
+        ln(lambda) grid: an order not on one (e.g. PHOENIX, linear in
+        wavelength with a step change at 5000 A) is resampled onto ln(lambda)
+        at its finest velocity step, broadened, and resampled back onto its
+        own wavelengths. The grid of the model does not change.
 
         Parameters
         ----------
@@ -236,8 +277,11 @@ class Template:
         Template
             self.
         '''
+        def kernel(flux, dv):
+            return dsp.broaden_gaussian(flux, dv, dsp.C_KMS / resolution)
+
         self.model.sp = _per_order(self.model.sp,
-                                   [dsp.broaden_gaussian(s, dsp.dv_from_wave(w), dsp.C_KMS / resolution)
+                                   [_broaden_velocity_even(w, s, kernel)
                                     for w, s in zip(self.model.wv, self.model.sp)])
         return self
 
@@ -247,8 +291,8 @@ class Template:
         '''
         Broaden every order with a rotational profile (Gray 2005), in place.
 
-        As ``broaden_instrumental``: the kernel acts on flux - 1, and the
-        order's velocity step is its median one.
+        As ``broaden_instrumental``: the kernel acts on flux - 1, on a
+        uniform ln(lambda) grid, and the model keeps its own grid.
 
         Parameters
         ----------
@@ -262,8 +306,11 @@ class Template:
         Template
             self.
         '''
+        def kernel(flux, dv):
+            return dsp.broaden_rotational(flux, dv, vsini, epsilon)
+
         self.model.sp = _per_order(self.model.sp,
-                                   [dsp.broaden_rotational(s, dsp.dv_from_wave(w), vsini, epsilon)
+                                   [_broaden_velocity_even(w, s, kernel)
                                     for w, s in zip(self.model.wv, self.model.sp)])
         return self
 
