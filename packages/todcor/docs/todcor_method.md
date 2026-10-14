@@ -236,7 +236,8 @@ quartic fall-off: on noiseless 8 km/s lines the refined RVs were off by
 0.03–0.1 km/s against an eRV of ~0.005–0.009 km/s (several σ), and by up to
 0.06 km/s with twin templates and the truth exactly on a node. The quadratic's
 validity is set by the line/template width, not by the S/N, so the fix is a
-finer patch, not a ΔlogL cut. `CCF2d` therefore runs two passes:
+finer patch, not a ΔlogL cut. `CCF2d` therefore runs two passes (one call of
+`joint_fit`, its fine grid from `refine_grid`):
 
 1. the coarse map (default `dvel` = 1 km/s) only *locates* the peak;
 2. the six statistics are re-evaluated **exactly** (`window_stats` on the
@@ -316,9 +317,10 @@ weighting was not). `CCF2d`'s default `sigma=None` therefore fits twice:
 
        σ_i² = χ²_i / (ν_i (1 − 4/Σν))
 
-   The four shared parameters take four dof from the joint χ²; each window is
-   charged a share proportional to `ν_i`. Its exact charge — the trace of its
-   block of the hat matrix — follows its line content instead, but the two
+   (`window_noise`). The four shared parameters take four dof from the joint
+   χ²; each window is charged a share proportional to `ν_i`. Its exact
+   charge — the trace of its block of the hat matrix — follows its line
+   content instead, but the two
    differ by at most `4/ν_i` in `σ_i²` (≲ 0.2 % for an order with `ν ≈ 2000`).
    The charges sum to four, so with one window `σ² = χ²_red`, the old estimate.
 3. **Pass 2** weights each window by `1/σ_i²` and re-profiles. No FFT is
@@ -427,6 +429,10 @@ All of these except `CCF2d` are reachable from the `todcor` namespace; the
 | `profile_from_stats` | `todcor.estimator` | profile/marginalise amplitudes → `R` and logL maps (§4–5) |
 | `todcor_map` | `todcor.estimator` | single-window convenience wrapper (§4) |
 | `crlb_from_map` | `todcor.estimator` | Cramér–Rao velocity errors from curvature (§8) |
+| `prepare_window` → `TodcorWindow` | `todcor.estimator` | one window's continuum-removed, template-resampled, tapered residuals (§1) |
+| `refine_grid` | `todcor.estimator` | the fine local `(v1, v2)` grid around a coarse node (§8) |
+| `joint_fit` → `TodcorFit` | `todcor.estimator` | one pass of the multi-window fit: pool, coarse map, fine map, CRLB, values at the refined peak (§7, §8) |
+| `window_noise` | `todcor.estimator` | per-window noise from its share of the joint χ² (§8, `sigma=None`) |
 | `model_flux` | `todcor.simulate` | reconstruct the best-fit composite for residual plots |
 | `CCF2d` | `sparta.ccf2d` | `Spectrum` + two `Template`s → coarse + fine maps, RVs, errors, χ²_red, per-order noise (orders as windows) |
 

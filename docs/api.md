@@ -24,7 +24,7 @@ Signatures and the numpydoc summary, Parameters, Returns and Raises of every pub
   - [`unicor.ccf`](#unicorccf) — `CCFOrder`, `RVMeasurement`
   - [`unicor.dsp`](#unicordsp)
 - **todcor**
-  - [`todcor.estimator`](#todcorestimator)
+  - [`todcor.estimator`](#todcorestimator) — `TodcorWindow`, `TodcorFit`
   - [`todcor.simulate`](#todcorsimulate)
 
 ## sparta
@@ -434,6 +434,44 @@ Band-pass filter one evenly sampled order with a Butterworth filter.
 **Returns**
 
 - *ndarray*: The filtered, standardized flux (dimensionless).
+
+#### `sparta.preprocess.resampling_noise_psd`
+
+```python
+sparta.preprocess.resampling_noise_psd(n, dv_native, dv, phases=None, n_phase=32)
+```
+
+Noise spectrum of one order's white native noise after `resample_flux`.
+
+**Parameters**
+
+- `n` (*int*): Length of the analysis window (pixels).
+- `dv_native` (*float*): The order's native velocity step (km/s).
+- `dv` (*float*): The analysis step (km/s).
+- `phases` (*array_like, optional*): Sub-pixel phases in [0, 1) of the order's native pixels on the analysis grid (analysis pixels); None for uniformly spread.
+- `n_phase` (*int*): Number of phase bins probed.
+
+**Returns**
+
+- *ndarray*: Relative noise power per positive Fourier mode (white noise of the native variance on the analysis grid = 1), length `n // 2`.
+
+#### `sparta.preprocess.native_phases`
+
+```python
+sparta.preprocess.native_phases(native_wave, wave, dv)
+```
+
+Sub-pixel phase of each native pixel on a log analysis grid.
+
+**Parameters**
+
+- `native_wave` (*array_like*): The order's native wavelengths (Angstrom).
+- `wave` (*ndarray*): The log analysis grid (Angstrom), step `dv`.
+- `dv` (*float*): Analysis velocity step (km/s): `c` times the actual ln(lambda) step of `wave`.
+
+**Returns**
+
+- *ndarray*: Phases in [0, 1) (analysis pixels) of the native pixels inside the analysis grid.
 
 ### sparta.template
 
@@ -3234,6 +3272,161 @@ Single-window TODCOR correlation and log-likelihood maps (convenience wrapper).
 **Returns**
 
 - *dict*: The `profile_from_stats` result: the (n1, n2) maps 'R', 'logL_profile', 'logL_marginal', 'a1', 'a2', 'chi2', and 'map' (the one `output` selects) with 'output'; 'v1_grid', 'v2_grid'; and 'best' (v1, v2, a1, a2, chi2, chi2_red, R at the profile argmax).
+
+#### `todcor.TodcorWindow`
+
+```python
+TodcorWindow(wave, dv, data_g, g1, g2, taper_power)
+```
+
+One prepared TODCOR window: data and templates as tapered line residuals.
+
+**Parameters**
+
+- `wave` (*ndarray*): The window's uniform log-lambda grid (Angstrom).
+- `dv` (*float*): Its actual velocity step, `c` times its ln(lambda) step (km/s; `unicor.dsp.log_grid_step`).
+- `data_g` (*ndarray*): Observed flux minus its continuum, tapered (flux units).
+- `g1, g2` (*ndarray*): The two templates on `wave`, minus their continuum, tapered the same way (flux units).
+- `taper_power` (*float*): Mean square of the taper (dimensionless; 1.0 without one): the factor it puts on the window's noise power, i.e. on `noise_psd`.
+
+#### `todcor.prepare_window`
+
+```python
+todcor.prepare_window(
+    wave,
+    flux,
+    t1_wave,
+    t1_flux,
+    t2_wave,
+    t2_flux,
+    continuum='median',
+    alpha=0.1,
+)
+```
+
+Prepare one window for TODCOR: residuals on one log-lambda grid, apodised.
+
+**Parameters**
+
+- `wave` (*array_like*): The observed window's wavelengths (Angstrom), uniform in ln(lambda).
+- `flux` (*array_like*): Its flux, one value per wavelength.
+- `t1_wave, t1_flux, t2_wave, t2_flux` (*array_like*): The primary's and the secondary's rest-frame templates: strictly increasing wavelengths (Angstrom) and flux, continuum ~1.
+- `continuum` (*'median' or float*): Subtract each array's median (default), or this fixed level (flux units).
+- `alpha` (*float*): Tukey taper parameter (`unicor.dsp.tukey_window`); 0 for no taper (e.g. for a spectrum tapered already).
+
+**Returns**
+
+- *TodcorWindow*: The grid, its step `dv` (km/s), the three tapered residuals and the taper's mean square.
+
+**Raises**
+
+- *ValueError*: If `wave` is not uniform in ln(lambda), `flux` does not match it, or a residual is not finite (`'<spectrum|template1|template2> flux contains NaN/inf; ...'`).
+
+#### `todcor.refine_grid`
+
+```python
+todcor.refine_grid(v1_grid, v2_grid, i, j, span=2, factor=10)
+```
+
+The fine local (v1, v2) grid around a coarse-map node.
+
+**Parameters**
+
+- `v1_grid, v2_grid` (*array_like*): The coarse trial velocities (km/s).
+- `i, j` (*int*): The node to refine around (e.g. the coarse argmax); interior.
+- `span` (*int*): Half-width of the fine grid, in local coarse steps.
+- `factor` (*int*): Coarse step over fine step.
+
+**Returns**
+
+- `f1, f2` (*ndarray*): The fine trial velocities (km/s), `2 * span * factor + 1` each, centred on `v1_grid[i]` and `v2_grid[j]`.
+
+**Raises**
+
+- *ValueError*: If `(i, j)` is on the edge of the grid (no local step there).
+
+#### `todcor.TodcorFit`
+
+```python
+TodcorFit(pooled, profile, coarse, fine, crlb, at_peak, best, window_chi2)
+```
+
+One joint TODCOR fit of pooled windows, as made by `joint_fit`.
+
+**Parameters**
+
+- `pooled` (*dict*): The weighted coarse-map statistics (`combine_stats`).
+- `profile` (*dict*): The coarse map (`profile_from_stats`): 'R', 'logL_profile', ..., 'best' at its argmax node.
+- `coarse` (*dict*): `crlb_from_map` on the coarse map; `coarse['on_edge']` says the coarse argmax is on the grid edge.
+- `fine` (*dict or None*): The fine local map (`profile_from_stats` on `refine_grid`); None if the coarse argmax is on the grid edge, or if the fine argmax is on the fine map's edge (a ridge or a tie: the coarse map is then the more honest answer).
+- `crlb` (*dict*): `crlb_from_map` on the map behind the result: the fine one, or `coarse` itself if `fine` is None. `crlb['peak_refined']` are the velocities (km/s), with `sigma_v1`, `sigma_v2`, `rho`, `cov`.
+- `at_peak` (*list of dict*): Each window's `window_stats` at the refined velocities (1 x 1), unweighted.
+- `best` (*dict*): The joint profile at the refined velocities (`profile_from_stats`'s 'best': 'v1', 'v2' (km/s), 'a1', 'a2', 'chi2', 'chi2_red', 'R').
+- `window_chi2` (*ndarray*): Each window's share of the joint chi2 at `best`'s amplitudes, on its own (unweighted) noise scale: `chi2_from_stats` of `at_peak` -- the input of `window_noise`.
+
+#### `todcor.joint_fit`
+
+```python
+todcor.joint_fit(
+    stats_list,
+    weights,
+    prepared,
+    v1_grid,
+    v2_grid,
+    *,
+    nonneg,
+    output,
+    half=3,
+    span=2,
+    factor=10,
+    fine_cache=None,
+)
+```
+
+One joint fit of pooled windows: coarse map, fine map, CRLB, peak values.
+
+**Parameters**
+
+- `stats_list` (*sequence of dict*): Each window's `window_stats` on `v1_grid` x `v2_grid`.
+- `weights` (*array_like or None*): One positive factor per window on its statistics (dimensionless, e.g. `1 / sigma_i**2` for unit-noise windows); None for all ones.
+- `prepared` (*sequence of (TodcorWindow, dict)*): Each window and the `window_stats` keyword arguments behind its statistics (`sigma`, `zeta_max`, `oversampling`, `noise_psd`, `velocity_convention`), in the order of `stats_list`.
+- `v1_grid, v2_grid` (*ndarray*): The coarse trial velocities (km/s).
+- `nonneg` (*bool*): Constrain both amplitudes to be non-negative (`profile_from_stats`).
+- `output` (*{'ccf', 'loglike'}*): The primary map, `'map'`, of `profile` and `fine`.
+- `half` (*int*): Half-width (nodes) of the quadratic patch of `crlb_from_map`.
+- `span, factor` (*int*): The fine grid (`refine_grid`).
+- `fine_cache` (*dict, optional*): Per-window fine statistics by coarse node `(i, j)`, read and filled here; pass the same dict to calls that should share them. Default None: a fresh one.
+
+**Returns**
+
+- *TodcorFit*: The pooled statistics, the coarse and fine maps, the CRLB behind the velocities and every value at the refined peak.
+
+**Raises**
+
+- *ValueError*: If `prepared` and `stats_list` differ in length, or as `combine_stats` and `profile_from_stats`.
+
+#### `todcor.window_noise`
+
+```python
+todcor.window_noise(chi2, nu, min_dof=50)
+```
+
+Each window's noise from its own share of a unit-noise joint fit's chi2.
+
+**Parameters**
+
+- `chi2` (*array_like*): Each window's share of the joint chi2 at unit noise (dimensionless).
+- `nu` (*array_like*): Each window's noise degrees of freedom (`window_stats`'s `nu`).
+- `min_dof` (*float*): The fewest dof for a window's own estimate.
+
+**Returns**
+
+- `sigma` (*ndarray*): Each window's noise, per native pixel (flux units: the unit noise the statistics were computed at, times the estimate).
+- `fallback` (*ndarray of bool*): The windows that got the common estimate.
+
+**Raises**
+
+- *ValueError*: If `chi2` and `nu` are not one value per window each, or no positive, finite noise can be estimated.
 
 ### todcor.simulate
 

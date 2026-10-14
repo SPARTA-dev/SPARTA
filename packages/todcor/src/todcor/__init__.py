@@ -22,7 +22,10 @@ SPARTA's ``CCF2d`` (Spectrum + two Templates) is a layer on top.
 
 Layout
 ------
-``todcor.estimator`` - sufficient statistics, window pooling, profiling, CRLB.
+``todcor.estimator`` - sufficient statistics, window pooling, profiling, CRLB;
+                     and the per-window atoms of a multi-window fit
+                     (``prepare_window``, ``refine_grid``, ``joint_fit``,
+                     ``window_noise``), which SPARTA's ``CCF2d`` composes.
 ``todcor.simulate``  - the forward model: composites and best-fit reconstructions.
 
 Grid, FFT and broadening primitives come from :mod:`unicor.dsp` and are
@@ -36,16 +39,18 @@ from unicor.dsp import (
 )
 
 from .estimator import (
-    chi2_from_stats, combine_stats, crlb_from_map, profile_from_stats,
-    resampled_noise_psd, todcor_map, window_stats,
+    TodcorFit, TodcorWindow, chi2_from_stats, combine_stats, crlb_from_map, joint_fit,
+    prepare_window, profile_from_stats, refine_grid, resampled_noise_psd, todcor_map,
+    window_noise, window_stats,
 )
 from .simulate import composite_flux, model_flux, shift_template_flux
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     'window_stats', 'combine_stats', 'chi2_from_stats', 'profile_from_stats',
     'crlb_from_map', 'todcor_map', 'resampled_noise_psd',
+    'TodcorWindow', 'prepare_window', 'refine_grid', 'TodcorFit', 'joint_fit', 'window_noise',
     'shift_template_flux', 'composite_flux', 'model_flux',
     'C_KMS', 'log_lambda_grid', 'log_grid_step', 'resample', 'tukey_window',
     'shift_kms', 'doppler_factor', 'velocity_from_log_shift',

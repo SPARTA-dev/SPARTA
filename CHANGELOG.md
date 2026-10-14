@@ -11,7 +11,8 @@ aliases or shims**: every old name below is gone and raises `ImportError`,
 `AttributeError` or `TypeError`. Numerical results are unchanged; the golden
 master (UNICOR, TODCOR, TIRAVEL, periodograms, instrument readers) passes
 bit-for-bit or at 1e-9 relative. The `unicor` and `todcor` engine APIs changed
-only by the additive `output` modes (see "Other changes").
+only additively: the `output` modes and the per-order / per-window atoms (see
+"Other changes").
 
 ### Modules
 
@@ -268,6 +269,23 @@ Keys of `results_frequency` / `results_power`:
   `Spectrum` methods are loops over them, bit-for-bit as before (pinned by
   `tests/test_atoms_baseline.py`). New `sparta.template.phoenix_spectrum`: the
   PHOENIX model as `(wave, flux)` arrays, which `Template.from_phoenix` wraps.
+- **Per-order UNICOR atoms** (additive; `sparta-unicor` 0.2.0): `unicor.lag_axis`,
+  `ccf_order` (returns `CCFOrder`), `template_coverage`, `effective_bins` and
+  `measure_rv` (returns `RVMeasurement`) -- one order's CCF, log-likelihood, RV,
+  uncertainty and `n_eff` on plain arrays (km/s, Angstrom). `CCF1d.cross_correlate`
+  is a loop over `ccf_order`, and `combine` / `extract_rv` read the RV with
+  `measure_rv`, bit-for-bit as before (pinned by `tests/test_atoms_baseline.py`).
+  A malformed template (wavelengths not strictly increasing, or not one per flux
+  value) raises `ValueError` naming the template order.
+- **Per-window TODCOR atoms** (additive; `sparta-todcor` 0.2.0): `prepare_window`
+  (returns `TodcorWindow`: continuum removal, template resampling with continuum
+  fill, Tukey taper), `refine_grid` (the fine local map), `joint_fit` (returns
+  `TodcorFit`: pool, coarse map, fine map, CRLB and the values at the refined
+  peak; `fine_cache` shares the fine statistics between passes) and
+  `window_noise` (each window's noise from its share of the joint chi2).
+  `CCF2d.cross_correlate` is a composition of them, bit-for-bit as before; the
+  resampled-noise model is public as `sparta.preprocess.resampling_noise_psd` and
+  `native_phases`. `CCF2d` prefixes `order {I}: ` to window-preparation errors.
 
 ### Documentation
 

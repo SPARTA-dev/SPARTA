@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 # Prefixed to match sparta-unicor and to keep the SPARTA engines grouped on PyPI.
 # The import name is plain `todcor`.
 name = "sparta-todcor"
-version = "0.1.0"
+version = "0.2.0"
 description = "Standalone Fourier-domain two-component (TODCOR) radial-velocity engine for SB2 spectra."
 readme = "README.md"
 license = "MIT"

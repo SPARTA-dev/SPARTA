@@ -7,9 +7,16 @@ are loops over these, so chaining them by hand reproduces the object's
 result exactly. The taper of ``apply_cosine_bell`` is
 ``flux * unicor.tukey_window(len(flux), alpha)``.
 
+``resampling_noise_psd`` and ``native_phases`` model what that resampling
+does to white native noise -- the noise budget of ``CCF2d``, which feeds
+them to ``todcor.window_stats`` as ``noise_psd``. They probe
+``resample_flux`` itself, so they live here rather than in ``todcor``.
+
 Conventions: wavelengths in Angstrom, velocities in km/s. The log-lambda
 step is ``ln(1 + dv/c)``, c from ``astropy.constants``.
 """
+
+from functools import lru_cache
 
 import numpy as np
 from scipy import signal
@@ -18,10 +25,12 @@ from astropy.stats import sigma_clip, mad_std
 from astropy import constants as consts, units as u
 from specutils import Spectrum as Spec1D
 from specutils.manipulation import SplineInterpolatedResampler
+from todcor.estimator import resampled_noise_psd
 from unicor import dsp
 
 __all__ = ["resample_flux", "trim_margins", "resample_to_linear_grid",
-           "resample_to_log_grid", "coarsest_native_step", "remove_cosmics", "bandpass"]
+           "resample_to_log_grid", "coarsest_native_step", "remove_cosmics", "bandpass",
+           "resampling_noise_psd", "native_phases"]
 
 
 def resample_flux(wave, flux, new_wave, unit=u.Angstrom):
@@ -29,8 +38,9 @@ def resample_flux(wave, flux, new_wave, unit=u.Angstrom):
     Resample one order's flux with the cubic spline of ``Spectrum.interpolate``.
 
     The spline is specutils' ``SplineInterpolatedResampler``. Other code that
-    must model this resampling exactly (CCF2d's noise model, the simulator's
-    archive rebinning) calls this function too.
+    must model this resampling exactly (the noise model of
+    ``resampling_noise_psd``, the simulator's archive rebinning) calls this
+    function too.
 
     Parameters
     ----------
@@ -298,6 +308,132 @@ def bandpass(wave, flux, lowcut, highcut, order=1):
     s = signal.filtfilt(b, a, s-np.percentile(s, 80), padlen=10*max(len(b), len(a)))
     return (s-np.mean(s))/np.std(s)
 
+
+def resampling_noise_psd(n, dv_native, dv, phases=None, n_phase=32):
+    '''
+    Noise spectrum of one order's white native noise after ``resample_flux``.
+
+    The ``noise_psd`` of ``todcor.window_stats`` (see
+    ``todcor.resampled_noise_psd``) for an order resampled once, by the
+    cubic spline of ``Spectrum.interpolate``, from a uniform native grid onto
+    a log grid of step ``dv``, finer or coarser than native. Each native
+    pixel's impulse response depends on its sub-pixel phase relative to the
+    analysis nodes, so the responses at ``n_phase`` phases are averaged with
+    weights counting the order's native pixels at each phase
+    (``native_phases``). With unknown native positions the phases are taken
+    as uniformly spread -- true for a linear-wavelength native grid, whose
+    velocity step drifts across the order, but not for a commensurate log
+    grid (e.g. one exactly half as fine), whose few fixed phases can change
+    the noise power by ~15 per cent.
+
+    The responses depend on the two steps only (a log grid is the same at
+    every wavelength), so they are cached on them, rounded to 1e-9 km/s:
+    the same grid, epoch after epoch, shares one probe. Earlier filtering or
+    repeated resampling is not represented.
+
+    Parameters
+    ----------
+    n : int
+        Length of the analysis window (pixels).
+    dv_native : float
+        The order's native velocity step (km/s).
+    dv : float
+        The analysis step (km/s).
+    phases : array_like, optional
+        Sub-pixel phases in [0, 1) of the order's native pixels on the
+        analysis grid (analysis pixels); None for uniformly spread.
+    n_phase : int
+        Number of phase bins probed.
+
+    Returns
+    -------
+    ndarray
+        Relative noise power per positive Fourier mode (white noise of the
+        native variance on the analysis grid = 1), length ``n // 2``.
+    '''
+    responses = _impulse_responses(round(float(dv_native), 9), round(float(dv), 9), n_phase)
+    weights = None
+    if phases is not None:
+        bins = np.floor(np.asarray(phases) * n_phase).astype(int) % n_phase
+        weights = np.bincount(bins, minlength=n_phase)
+    return resampled_noise_psd(responses, n, dv_native / dv, weights=weights)
+
+
+@lru_cache(maxsize=256)
+def _impulse_responses(dv_native, dv, n_phase=32, half=20):
+    '''
+    Analysis-grid responses of ``resample_flux`` to a unit impulse in one
+    native pixel, at ``n_phase`` sub-pixel phases.
+
+    The native grid is synthetic: log-uniform with step ``dv_native``, with
+    impulses ``2 * half`` pixels apart. Impulse k is evaluated at analysis
+    nodes placed so that it sits (k + 0.5) / n_phase analysis pixels above the
+    node below it, out to ``half`` native pixels either side -- far beyond the
+    cubic spline's support (its cardinal function decays as 0.27 per pixel).
+    One spline evaluation serves every phase: the nodes of all impulses are
+    concatenated.
+
+    Parameters
+    ----------
+    dv_native : float
+        Native velocity step (km/s).
+    dv : float
+        Analysis velocity step (km/s).
+    n_phase : int
+        Number of phases.
+    half : int
+        Native pixels kept either side of each impulse.
+
+    Returns
+    -------
+    tuple of ndarray
+        n_phase read-only responses (analysis pixels).
+    '''
+    lam0 = 5000.0                            # Angstrom; the response is scale-free
+    step_native, step = dv_native / dsp.C_KMS, dv / dsp.C_KMS
+    hits = half + 2 * half * np.arange(n_phase)
+    ln_native = np.log(lam0) + step_native * np.arange(2 * half * n_phase + 1)
+    flux = np.zeros(ln_native.size)
+    flux[hits] = 1.0
+
+    reach = half * dv_native / dv            # analysis pixels within `half` native ones
+    nodes = []
+    for k, j in enumerate(hits):
+        phase = (k + 0.5) / n_phase
+        m = np.arange(np.floor(phase - reach) + 1, np.ceil(phase + reach))
+        nodes.append(ln_native[j] + (m - phase) * step)
+    response = resample_flux(np.exp(ln_native), flux, np.exp(np.concatenate(nodes)))
+    out = np.split(response, np.cumsum([len(x) for x in nodes])[:-1])
+    for h in out:
+        h.flags.writeable = False
+    return tuple(out)
+
+
+def native_phases(native_wave, wave, dv):
+    '''
+    Sub-pixel phase of each native pixel on a log analysis grid.
+
+    The ``phases`` of ``resampling_noise_psd`` for an order whose native
+    wavelengths are known (i.e. it has not been resampled before).
+
+    Parameters
+    ----------
+    native_wave : array_like
+        The order's native wavelengths (Angstrom).
+    wave : ndarray
+        The log analysis grid (Angstrom), step ``dv``.
+    dv : float
+        Analysis velocity step (km/s): ``c`` times the actual ln(lambda)
+        step of ``wave``.
+
+    Returns
+    -------
+    ndarray
+        Phases in [0, 1) (analysis pixels) of the native pixels inside the
+        analysis grid.
+    '''
+    x = dsp.C_KMS * np.log(np.asarray(native_wave, float) / wave[0]) / dv
+    return np.mod(x[(x >= 0) & (x <= len(wave) - 1)], 1.0)
 
 def _require_two_pixels(wave):
     if len(wave) < 2:

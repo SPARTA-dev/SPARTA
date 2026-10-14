@@ -16,6 +16,10 @@
 # algorithm."
 #
 # Dependencies: numpy, unicor (dsp, and ccf.check_output).
+#
+# The per-window atoms at the end (prepare_window, refine_grid, joint_fit,
+# window_noise) are the steps of SPARTA's CCF2d on plain arrays: chaining them
+# by hand reproduces its fit bit for bit.
 """The Fourier-domain TODCOR estimator (the derivation).
 
 Method
@@ -151,10 +155,15 @@ Assumptions (exact only under these)
 * **Shared velocity grid** for :func:`combine_stats` (below).
 """
 
+from dataclasses import dataclass
+from typing import Optional
+
 import numpy as np
 
 from unicor.ccf import check_output
-from unicor.dsp import parseval_weights, rfft_positive, shift_kms
+from unicor.dsp import (
+    log_grid_step, parseval_weights, resample, rfft_positive, shift_kms, tukey_window,
+)
 
 
 # =============================================================================
@@ -702,3 +711,349 @@ def todcor_map(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None,
         velocity_convention=velocity_convention,
     )
     return profile_from_stats(stats, v1_grid, v2_grid, nonneg=nonneg, output=output)
+
+
+# =============================================================================
+# Per-window atoms: the steps of a multi-window fit (sparta.ccf2d.CCF2d)
+# =============================================================================
+@dataclass(frozen=True, eq=False)
+class TodcorWindow:
+    """One prepared TODCOR window: data and templates as tapered line residuals.
+
+    Made by :func:`prepare_window`; its arrays are the inputs of
+    :func:`window_stats` and :func:`joint_fit`.
+
+    Parameters
+    ----------
+    wave : ndarray
+        The window's uniform log-lambda grid (Angstrom).
+    dv : float
+        Its actual velocity step, ``c`` times its ln(lambda) step (km/s;
+        :func:`unicor.dsp.log_grid_step`).
+    data_g : ndarray
+        Observed flux minus its continuum, tapered (flux units).
+    g1, g2 : ndarray
+        The two templates on ``wave``, minus their continuum, tapered the
+        same way (flux units).
+    taper_power : float
+        Mean square of the taper (dimensionless; 1.0 without one): the factor
+        it puts on the window's noise power, i.e. on ``noise_psd``.
+    """
+    wave: np.ndarray
+    dv: float
+    data_g: np.ndarray
+    g1: np.ndarray
+    g2: np.ndarray
+    taper_power: float
+
+
+def prepare_window(wave, flux, t1_wave, t1_flux, t2_wave, t2_flux, continuum='median',
+                   alpha=0.1):
+    """Prepare one window for TODCOR: residuals on one log-lambda grid, apodised.
+
+    Each template is resampled linearly onto ``wave``; pixels outside its
+    coverage are filled with 1.0 (the normalised continuum) rather than
+    clamped to the edge value, so an uncovered margin adds no spurious lines.
+    Data and templates then lose the same continuum -- each array's median
+    (``'median'``, a robust proxy for absorption-dominated, continuum-
+    normalised spectra, and ~0 for band-pass filtered ones) or the given
+    level -- which is what makes the amplitudes meaningful. The continuum
+    goes *before* the taper: dropping the DC Fourier mode removes a constant
+    offset for free, but not a window-shaped one.
+
+    Parameters
+    ----------
+    wave : array_like
+        The observed window's wavelengths (Angstrom), uniform in ln(lambda).
+    flux : array_like
+        Its flux, one value per wavelength.
+    t1_wave, t1_flux, t2_wave, t2_flux : array_like
+        The primary's and the secondary's rest-frame templates: strictly
+        increasing wavelengths (Angstrom) and flux, continuum ~1.
+    continuum : 'median' or float
+        Subtract each array's median (default), or this fixed level (flux
+        units).
+    alpha : float
+        Tukey taper parameter (:func:`unicor.dsp.tukey_window`); 0 for no
+        taper (e.g. for a spectrum tapered already).
+
+    Returns
+    -------
+    TodcorWindow
+        The grid, its step ``dv`` (km/s), the three tapered residuals and the
+        taper's mean square.
+
+    Raises
+    ------
+    ValueError
+        If ``wave`` is not uniform in ln(lambda), ``flux`` does not match it,
+        or a residual is not finite (``'<spectrum|template1|template2> flux
+        contains NaN/inf; ...'``).
+    """
+    wave = np.asarray(wave, float)
+    dv = log_grid_step(wave)
+    if np.shape(flux) != wave.shape:
+        raise ValueError(f"one flux per wavelength needed: wave has {wave.shape}, "
+                         f"flux {np.shape(flux)}")
+    data_g = _residual(flux, continuum)
+    g1 = _residual(resample(t1_wave, t1_flux, wave, fill=1.0), continuum)
+    g2 = _residual(resample(t2_wave, t2_flux, wave, fill=1.0), continuum)
+    for name, arr in (('spectrum', data_g), ('template1', g1), ('template2', g2)):
+        if not np.all(np.isfinite(arr)):
+            raise ValueError(f"{name} flux contains NaN/inf; "
+                             "mask or interpolate those pixels first")
+
+    taper_power = 1.0
+    if alpha > 0:
+        taper = tukey_window(len(wave), alpha=alpha)
+        data_g, g1, g2 = data_g * taper, g1 * taper, g2 * taper
+        taper_power = float(np.mean(taper ** 2))
+    return TodcorWindow(wave=wave, dv=dv, data_g=data_g, g1=g1, g2=g2,
+                        taper_power=taper_power)
+
+
+def _residual(flux, continuum):
+    flux = np.asarray(flux, float)
+    level = np.median(flux) if continuum == 'median' else float(continuum)
+    return flux - level
+
+
+def refine_grid(v1_grid, v2_grid, i, j, span=2, factor=10):
+    """The fine local (v1, v2) grid around a coarse-map node.
+
+    ``span`` local steps either side of node ``(i, j)``, ``factor`` times
+    finer. The local step is the mean of the two neighbouring intervals, so
+    explicit non-uniform grids refine sensibly too.
+
+    Parameters
+    ----------
+    v1_grid, v2_grid : array_like
+        The coarse trial velocities (km/s).
+    i, j : int
+        The node to refine around (e.g. the coarse argmax); interior.
+    span : int
+        Half-width of the fine grid, in local coarse steps.
+    factor : int
+        Coarse step over fine step.
+
+    Returns
+    -------
+    f1, f2 : ndarray
+        The fine trial velocities (km/s), ``2 * span * factor + 1`` each,
+        centred on ``v1_grid[i]`` and ``v2_grid[j]``.
+
+    Raises
+    ------
+    ValueError
+        If ``(i, j)`` is on the edge of the grid (no local step there).
+    """
+    v1, v2 = np.asarray(v1_grid, float), np.asarray(v2_grid, float)
+    if not (0 < i < len(v1) - 1 and 0 < j < len(v2) - 1):
+        raise ValueError(f"node ({i}, {j}) is not interior to the ({len(v1)}, {len(v2)}) "
+                         "grid; the fine map needs a neighbour on each side")
+    step1 = 0.5 * (v1[i + 1] - v1[i - 1])
+    step2 = 0.5 * (v2[j + 1] - v2[j - 1])
+    nodes = np.arange(-span * factor, span * factor + 1) / factor
+    return v1[i] + step1 * nodes, v2[j] + step2 * nodes
+
+
+@dataclass(frozen=True, eq=False)
+class TodcorFit:
+    """One joint TODCOR fit of pooled windows, as made by :func:`joint_fit`.
+
+    The maps are on the noise scale of the pooled (weighted) statistics.
+
+    Parameters
+    ----------
+    pooled : dict
+        The weighted coarse-map statistics (:func:`combine_stats`).
+    profile : dict
+        The coarse map (:func:`profile_from_stats`): 'R', 'logL_profile', ...,
+        'best' at its argmax node.
+    coarse : dict
+        :func:`crlb_from_map` on the coarse map; ``coarse['on_edge']`` says
+        the coarse argmax is on the grid edge.
+    fine : dict or None
+        The fine local map (:func:`profile_from_stats` on
+        :func:`refine_grid`); None if the coarse argmax is on the grid edge,
+        or if the fine argmax is on the fine map's edge (a ridge or a tie:
+        the coarse map is then the more honest answer).
+    crlb : dict
+        :func:`crlb_from_map` on the map behind the result: the fine one, or
+        ``coarse`` itself if ``fine`` is None. ``crlb['peak_refined']`` are
+        the velocities (km/s), with ``sigma_v1``, ``sigma_v2``, ``rho``,
+        ``cov``.
+    at_peak : list of dict
+        Each window's :func:`window_stats` at the refined velocities (1 x 1),
+        unweighted.
+    best : dict
+        The joint profile at the refined velocities (``profile_from_stats``'s
+        'best': 'v1', 'v2' (km/s), 'a1', 'a2', 'chi2', 'chi2_red', 'R').
+    window_chi2 : ndarray
+        Each window's share of the joint chi2 at ``best``'s amplitudes, on its
+        own (unweighted) noise scale: :func:`chi2_from_stats` of ``at_peak``
+        -- the input of :func:`window_noise`.
+    """
+    pooled: dict
+    profile: dict
+    coarse: dict
+    fine: Optional[dict]
+    crlb: dict
+    at_peak: list
+    best: dict
+    window_chi2: np.ndarray
+
+
+def joint_fit(stats_list, weights, prepared, v1_grid, v2_grid, *, nonneg, output,
+              half=3, span=2, factor=10, fine_cache=None):
+    """One joint fit of pooled windows: coarse map, fine map, CRLB, peak values.
+
+    Pools the per-window coarse statistics with ``weights`` and profiles them;
+    unless its argmax is on the grid edge, re-evaluates every window exactly
+    on the fine grid of :func:`refine_grid` around it and profiles that; takes
+    the velocities and their Cramer-Rao errors from the fine map
+    (:func:`crlb_from_map`, ``half`` nodes); and evaluates every window and
+    the joint profile exactly at the refined velocities, so the velocities
+    and amplitudes belong to one point.
+
+    The fine statistics are the expensive part, and they are linear in the
+    weights: ``fine_cache`` keeps them by coarse node, so a second call with
+    other weights (e.g. per-window noise estimates, :func:`window_noise`)
+    whose coarse argmax has not moved only re-pools them.
+
+    Parameters
+    ----------
+    stats_list : sequence of dict
+        Each window's :func:`window_stats` on ``v1_grid`` x ``v2_grid``.
+    weights : array_like or None
+        One positive factor per window on its statistics (dimensionless,
+        e.g. ``1 / sigma_i**2`` for unit-noise windows); None for all ones.
+    prepared : sequence of (TodcorWindow, dict)
+        Each window and the :func:`window_stats` keyword arguments behind its
+        statistics (``sigma``, ``zeta_max``, ``oversampling``, ``noise_psd``,
+        ``velocity_convention``), in the order of ``stats_list``.
+    v1_grid, v2_grid : ndarray
+        The coarse trial velocities (km/s).
+    nonneg : bool
+        Constrain both amplitudes to be non-negative
+        (:func:`profile_from_stats`).
+    output : {'ccf', 'loglike'}
+        The primary map, ``'map'``, of ``profile`` and ``fine``.
+    half : int
+        Half-width (nodes) of the quadratic patch of :func:`crlb_from_map`.
+    span, factor : int
+        The fine grid (:func:`refine_grid`).
+    fine_cache : dict, optional
+        Per-window fine statistics by coarse node ``(i, j)``, read and filled
+        here; pass the same dict to calls that should share them. Default
+        None: a fresh one.
+
+    Returns
+    -------
+    TodcorFit
+        The pooled statistics, the coarse and fine maps, the CRLB behind the
+        velocities and every value at the refined peak.
+
+    Raises
+    ------
+    ValueError
+        If ``prepared`` and ``stats_list`` differ in length, or as
+        :func:`combine_stats` and :func:`profile_from_stats`.
+    """
+    stats_list, prepared = list(stats_list), list(prepared)
+    if len(prepared) != len(stats_list):
+        raise ValueError(f"one prepared window per statistics needed: {len(prepared)} "
+                         f"windows, {len(stats_list)} statistics")
+    if fine_cache is None:
+        fine_cache = {}
+
+    pooled = combine_stats(stats_list, weights)
+    profile = profile_from_stats(pooled, v1_grid, v2_grid, nonneg=nonneg, output=output)
+    coarse = crlb_from_map(profile['logL_profile'], v1_grid, v2_grid, half=half)
+
+    fine = None
+    if not coarse['on_edge']:
+        logl = profile['logL_profile']
+        i, j = np.unravel_index(np.argmax(logl), logl.shape)
+        f1, f2 = refine_grid(profile['v1_grid'], profile['v2_grid'], i, j, span, factor)
+        if (i, j) not in fine_cache:
+            fine_cache[(i, j)] = [window_stats(win.data_g, win.g1, win.g2, win.dv, f1, f2, **kw)
+                                  for win, kw in prepared]
+        fine = profile_from_stats(combine_stats(fine_cache[(i, j)], weights), f1, f2,
+                                  nonneg=nonneg, output=output)
+        fi, fj = np.unravel_index(np.argmax(fine['logL_profile']), fine['logL_profile'].shape)
+        if fi in (0, len(f1) - 1) or fj in (0, len(f2) - 1):
+            fine = None
+    crlb = coarse if fine is None else crlb_from_map(
+        fine['logL_profile'], fine['v1_grid'], fine['v2_grid'], half=half)
+
+    p1, p2 = np.array([crlb['peak_refined'][0]]), np.array([crlb['peak_refined'][1]])
+    at_peak = [window_stats(win.data_g, win.g1, win.g2, win.dv, p1, p2, **kw)
+               for win, kw in prepared]
+    best = profile_from_stats(combine_stats(at_peak, weights), p1, p2, nonneg=nonneg)['best']
+    window_chi2 = np.array([chi2_from_stats(st, best['a1'], best['a2']).item()
+                            for st in at_peak])
+    return TodcorFit(pooled=pooled, profile=profile, coarse=coarse, fine=fine, crlb=crlb,
+                     at_peak=at_peak, best=best, window_chi2=window_chi2)
+
+
+def window_noise(chi2, nu, min_dof=50):
+    """Each window's noise from its own share of a unit-noise joint fit's chi2.
+
+    Window i's share chi2_i (``TodcorFit.window_chi2``) is set against its
+    noise degrees of freedom::
+
+        sigma_i^2 = chi2_i / (nu_i * (1 - 4 / sum(nu)))
+
+    The four shared parameters (v1, v2, a1, a2) take four dof from the joint
+    chi2, charged to the windows in proportion to ``nu_i``. (A window's exact
+    charge -- the trace of its block of the hat matrix -- follows its line
+    content instead; the two differ by at most ``4 / nu_i`` in sigma_i^2.)
+    The charges sum to four, so with one window this is ``sqrt(chi2_red)``.
+
+    A window with fewer than ``min_dof`` dof (its estimate would scatter by
+    more than ~10 per cent at 50), or no residual to measure (chi2_i <= 0 or
+    not finite, e.g. a masked order filled with continuum), falls back to the
+    common estimate ``sum(chi2_i) / sum(dof_i)`` over the windows that did
+    measure their own -- a flat window's zero chi2 would drag a pooled
+    estimate down -- or over all windows (i.e. chi2_red) if none did. No
+    warning is issued here; the caller decides how to report ``fallback``.
+
+    Parameters
+    ----------
+    chi2 : array_like
+        Each window's share of the joint chi2 at unit noise (dimensionless).
+    nu : array_like
+        Each window's noise degrees of freedom (``window_stats``'s ``nu``).
+    min_dof : float
+        The fewest dof for a window's own estimate.
+
+    Returns
+    -------
+    sigma : ndarray
+        Each window's noise, per native pixel (flux units: the unit noise
+        the statistics were computed at, times the estimate).
+    fallback : ndarray of bool
+        The windows that got the common estimate.
+
+    Raises
+    ------
+    ValueError
+        If ``chi2`` and ``nu`` are not one value per window each, or no
+        positive, finite noise can be estimated.
+    """
+    chi2, nu = np.asarray(chi2, float), np.asarray(nu, float)
+    if chi2.ndim != 1 or chi2.shape != nu.shape:
+        raise ValueError(f"one chi2 per window and one nu per window needed, got "
+                         f"{chi2.shape} and {nu.shape}")
+    dof = nu * (1.0 - 4.0 / nu.sum())
+    own = (dof >= min_dof) & np.isfinite(chi2) & (chi2 > 0)
+    pool = own if own.any() else np.ones_like(own)
+    common = chi2[pool].sum() / dof[pool].sum()
+    if not (np.isfinite(common) and common > 0):
+        raise ValueError(
+            f"cannot estimate the noise from the fit (chi2 per dof = {common}); "
+            "pass an explicit sigma")
+    fallback = ~own
+    var = np.where(fallback, common, chi2 / np.where(fallback, 1.0, dof))
+    return np.sqrt(var), fallback

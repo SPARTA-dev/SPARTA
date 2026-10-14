@@ -7,7 +7,12 @@ the windows' sufficient statistics are pooled into one joint fit, a coarse map
 locates the peak and a fine local map measures the velocities, amplitudes and
 Cramer-Rao uncertainties. The estimator lives in ``todcor.estimator``, the
 forward model in ``todcor.simulate``, the grid/FFT/broadening primitives in
-``unicor.dsp``; this class handles the SPARTA-object orchestration.
+``unicor.dsp``, the noise model of the resampling in ``sparta.preprocess``;
+this class handles the SPARTA-object orchestration. ``cross_correlate`` is a
+composition of per-window atoms on plain arrays -- ``todcor.prepare_window``,
+``todcor.window_stats``, ``todcor.joint_fit``, ``todcor.window_noise`` and
+``sparta.preprocess.resampling_noise_psd`` / ``native_phases`` -- so chaining
+them by hand reproduces its result exactly.
 
 Two output modes (``output``): 'ccf' (default) makes the two-dimensional
 correlation R(v1, v2) of Zucker & Mazeh (1994) the primary map, 'loglike' the
@@ -23,7 +28,6 @@ Reference: Zucker & Mazeh 1994, ApJ 420, 806.
 """
 
 from copy import deepcopy
-from functools import lru_cache
 import warnings
 
 import numpy as np
@@ -34,11 +38,10 @@ from unicor import dsp
 from unicor.ccf import check_output
 from todcor.simulate import model_flux
 from todcor.estimator import (
-    chi2_from_stats, combine_stats, crlb_from_map, profile_from_stats,
-    resampled_noise_psd, window_stats,
+    combine_stats, joint_fit, prepare_window, window_noise, window_stats,
 )
 from sparta import plotting as sp_plot
-from sparta.spectrum import resample_flux
+from sparta.preprocess import native_phases, resampling_noise_psd
 
 
 class CCF2d:
@@ -124,7 +127,8 @@ class CCF2d:
         noise and locates the joint peak (coarse and fine maps). Each order's
         noise is then estimated from its own share of the joint chi2 there,
         sigma_i^2 = chi2_i / (nu_i * (1 - 4 / sum(nu))) -- the four shared
-        parameters' dof charged in proportion to nu_i (see _window_noise).
+        parameters' dof charged in proportion to nu_i (see
+        todcor.window_noise).
         Pass 2 re-weights each order's statistics by 1 / sigma_i^2 (no new
         FFTs: the statistics are linear in the weights, and the per-order fine
         maps are reused when the coarse argmax has not moved) and re-profiles;
@@ -143,7 +147,7 @@ class CCF2d:
         when its nodes fall at random between the native pixels, and the
         taper ~0.94 more -- so dividing by the bare n_eff would leave chi2_red
         ~0.8 for honest noise. ``nu`` instead counts the noise power the fit
-        actually sees (todcor.estimator.resampled_noise_psd, from the
+        actually sees (sparta.preprocess.resampling_noise_psd, from the
         resampler's impulse responses at the sub-pixel phases of the native
         pixels), so chi2_red ~ 1 for honest noise on any analysis step, finer
         or coarser than native. The phases are measured when CCF2d does the
@@ -344,47 +348,39 @@ class CCF2d:
         # outlive this call.
         prepared, stats, windows = [], [], []
         for I in orders:
-            w = np.asarray(spec.wv[I], float)
-            data_g = self._residual(np.asarray(spec.sp[I], float), continuum)
-            g1 = self._residual(self._template_on_grid(template1, I, w), continuum)
-            g2 = self._residual(self._template_on_grid(template2, I, w), continuum)
-            for name, arr in (('spectrum', data_g), ('template1', g1), ('template2', g2)):
-                if not np.all(np.isfinite(arr)):
-                    raise ValueError(f"order {I}: {name} flux contains NaN/inf; "
-                                     "mask or interpolate those pixels first")
-
-            taper_power = 1.0
-            if alpha > 0:
-                taper = dsp.tukey_window(len(w), alpha=alpha)
-                data_g, g1, g2 = data_g * taper, g1 * taper, g2 * taper
-                taper_power = float(np.mean(taper ** 2))
-
-            step = steps[I]
+            try:
+                win = prepare_window(spec.wv[I], spec.sp[I],
+                                     *_template_order(template1, I),
+                                     *_template_order(template2, I),
+                                     continuum=continuum, alpha=alpha)
+            except ValueError as err:
+                raise ValueError(f"order {I}: {err}") from err
+            w, step = win.wave, win.dv
             ratio = native[I] / step
             oversampling = max(1.0, ratio)
             if resampled:
-                phases = None if native_wv is None else _native_phases(native_wv[I], w, step)
-                psd = _resampling_noise_psd(len(w), native[I], step, phases)
+                phases = None if native_wv is None else native_phases(native_wv[I], w, step)
+                psd = resampling_noise_psd(len(w), native[I], step, phases)
             else:
                 psd = np.ones(len(w) // 2)
-            noise_psd = taper_power * psd
+            noise_psd = win.taper_power * psd
             kw = dict(sigma=sigma[I], zeta_max=zeta_max,
                       oversampling=oversampling, noise_psd=noise_psd,
                       velocity_convention=velocity_convention)
-            st = window_stats(data_g, g1, g2, step, v1_grid, v2_grid, **kw)
+            st = window_stats(win.data_g, win.g1, win.g2, step, v1_grid, v2_grid, **kw)
             stats.append(st)
-            prepared.append((data_g, g1, g2, step, kw))
+            prepared.append((win, kw))
 
             # Keep the scalar powers always -- they say which component each
             # order can constrain, and they cost nothing. The full arrays are
             # optional (see keep_windows).
-            win = {'order': I, 'dv': step,
-                   'S11': st['S11'], 'S22': st['S22'], 'SD': st['SD'],
-                   'oversampling': oversampling, 'n_eff': len(w) / oversampling,
-                   'nu': st['nu'], 'sigma': float(sigma[I]), 'sigma_fallback': False}
+            diag = {'order': I, 'dv': step,
+                    'S11': st['S11'], 'S22': st['S22'], 'SD': st['SD'],
+                    'oversampling': oversampling, 'n_eff': len(w) / oversampling,
+                    'nu': st['nu'], 'sigma': float(sigma[I]), 'sigma_fallback': False}
             if keep_windows:
-                win.update(wv=w, data_g=data_g, g1=g1, g2=g2)
-            windows.append(win)
+                diag.update(wv=w, data_g=win.data_g, g1=win.g1, g2=win.g2)
+            windows.append(diag)
 
         # Only *pooled* statistics outlive this call: each window's A12 is an
         # (n1, n2) array, so keeping one per order would dominate memory on a
@@ -403,18 +399,27 @@ class CCF2d:
         # Per-window fine-map statistics, keyed by the coarse node they are
         # centred on: the re-weighted pass reuses them if its coarse argmax
         # has not moved.
-        fine_cache = {}
-        fit = self._joint_fit(stats, None, prepared, v1_grid, v2_grid,
-                              nonneg, fine_cache, output)
+        fit_kw = dict(nonneg=nonneg, output=output, half=self.crlb_half,
+                      span=self.refine_span, factor=self.refine_factor, fine_cache={})
+        fit = joint_fit(stats, None, prepared, v1_grid, v2_grid, **fit_kw)
         noise = sigma_in
         if sigma_from_fit:
-            noise, fallback = self._window_noise(fit, windows)
-            for win, s_i, fb in zip(windows, noise, fallback):
-                win.update(sigma=float(s_i), sigma_fallback=bool(fb))
-            fit = self._joint_fit(stats, 1.0 / noise ** 2, prepared,
-                                  v1_grid, v2_grid, nonneg, fine_cache, output)
+            noise, fallback = window_noise(fit.window_chi2, [st['nu'] for st in fit.at_peak],
+                                           min_dof=self.min_noise_dof)
+            if fallback.any():
+                bad = [diag['order'] for diag, fb in zip(windows, fallback) if fb]
+                warnings.warn(
+                    f"order(s) {bad}: too few noise degrees of freedom (< "
+                    f"{self.min_noise_dof}) or no residual to measure their own noise; "
+                    "using the common noise estimate for them", stacklevel=2)
+            for diag, s_i, fb in zip(windows, noise, fallback):
+                diag.update(sigma=float(s_i), sigma_fallback=bool(fb))
+            fit = joint_fit(stats, 1.0 / noise ** 2, prepared, v1_grid, v2_grid, **fit_kw)
 
-        res, coarse, crlb, at_peak = fit['res'], fit['coarse'], fit['crlb'], fit['best']
+        coarse, crlb, at_peak = fit.coarse, fit.crlb, fit.best
+        res = dict(fit.profile)
+        res['units'] = u.km / u.s
+        res['fine'] = fit.fine
         if coarse['on_edge']:
             warnings.warn("the TODCOR peak lies on the edge of the velocity grid; "
                           "the RVs are grid-limited and their errors are NaN. "
@@ -435,7 +440,7 @@ class CCF2d:
                    sigma=noise, sigma_from_fit=sigma_from_fit,
                    velocity_convention=velocity_convention)
 
-        self.stats = fit['pooled']
+        self.stats = fit.pooled
         self.windows = windows
         self.n_ord = len(windows)
         self.Corr2d = res
@@ -608,347 +613,25 @@ class CCF2d:
             v2_grid = grid
         return np.asarray(v1_grid, float), np.asarray(v2_grid, float)
 
-    def _joint_fit(self, stats, weights, prepared, v1_grid, v2_grid, nonneg, fine_cache,
-                   output):
-        '''
-        One pass of the joint fit: pool the per-window coarse statistics with
-        the given weights, locate the peak on the coarse map, refine it on the
-        fine map, and evaluate every window exactly at the refined peak.
 
-        Parameters
-        ----------
-        stats : list of dict
-            Per-window coarse-map ``window_stats``.
-        weights : array_like or None
-            Per-window factors on the statistics (1/sigma_i^2 for unit-noise
-            windows), or None for all ones.
-        prepared : list of tuple
-            Per-window (data_g, g1, g2, dv, window_stats kwargs).
-        v1_grid, v2_grid : ndarray
-            Coarse trial velocities (km/s).
-        nonneg : bool
-            See ``cross_correlate``.
-        fine_cache : dict
-            Per-window fine-map statistics by coarse node, filled here and
-            reused across passes.
-        output : {'ccf', 'loglike'}
-            The primary map of the profile dicts (see ``cross_correlate``).
-
-        Returns
-        -------
-        dict
-            'pooled' (the weighted coarse statistics), 'res' (the coarse
-            profile_from_stats dict, plus 'fine': the fine one, or None if
-            refinement was skipped or failed), 'coarse' and 'crlb'
-            (crlb_from_map on the coarse map and on the map behind the RVs),
-            'at_peak' (per-window window_stats at the refined peak) and
-            'best' (the joint profile there).
-        '''
-        pooled = combine_stats(stats, weights)
-        res = profile_from_stats(pooled, v1_grid, v2_grid, nonneg=nonneg, output=output)
-        res['units'] = u.km / u.s
-
-        coarse = crlb_from_map(res['logL_profile'], v1_grid, v2_grid,
-                               half=self.crlb_half)
-        res['fine'] = None if coarse['on_edge'] else self._refine(
-            prepared, res, nonneg, weights, fine_cache, output)
-        crlb = coarse if res['fine'] is None else crlb_from_map(
-            res['fine']['logL_profile'], res['fine']['v1_grid'],
-            res['fine']['v2_grid'], half=self.crlb_half)
-
-        # Amplitudes and chi2 exactly at the refined velocities, so the
-        # reported RVs and amplitudes belong to one point.
-        p1, p2 = np.array([crlb['peak_refined'][0]]), np.array([crlb['peak_refined'][1]])
-        at_peak = [window_stats(d, g1, g2, dv, p1, p2, **kw)
-                   for d, g1, g2, dv, kw in prepared]
-        best = profile_from_stats(combine_stats(at_peak, weights), p1, p2,
-                                  nonneg=nonneg)['best']
-        return dict(pooled=pooled, res=res, coarse=coarse, crlb=crlb,
-                    at_peak=at_peak, best=best)
-
-    def _refine(self, prepared, res, nonneg, weights, fine_cache, output):
-        '''
-        Re-evaluate the statistics on a fine (v1, v2) grid around the coarse
-        argmax and profile them -- the second, exact pass (see ``__init__``).
-        The per-window fine statistics are cached in ``fine_cache`` by coarse
-        node, so a re-weighted pass with the same coarse argmax only re-pools
-        them.
-
-        Parameters
-        ----------
-        prepared, nonneg, weights, fine_cache, output
-            See ``_joint_fit``.
-        res : dict
-            The coarse ``profile_from_stats`` result.
-
-        Returns
-        -------
-        dict or None
-            The fine-map profile_from_stats dict, or None if its argmax lands
-            on its own edge -- the coarse argmax was then not close to the
-            true peak (e.g. a ridge or a tie), and the coarse map is the more
-            honest answer.
-        '''
-        v1, v2 = res['v1_grid'], res['v2_grid']
-        i, j = np.unravel_index(np.argmax(res['logL_profile']), res['logL_profile'].shape)
-        # Local steps, so explicit non-uniform grids refine sensibly too.
-        step1 = 0.5 * (v1[i + 1] - v1[i - 1])
-        step2 = 0.5 * (v2[j + 1] - v2[j - 1])
-        nodes = np.arange(-self.refine_span * self.refine_factor,
-                          self.refine_span * self.refine_factor + 1) / self.refine_factor
-        f1, f2 = v1[i] + step1 * nodes, v2[j] + step2 * nodes
-
-        if (i, j) not in fine_cache:
-            fine_cache[(i, j)] = [window_stats(d, g1, g2, dv, f1, f2, **kw)
-                                  for d, g1, g2, dv, kw in prepared]
-        fine = profile_from_stats(combine_stats(fine_cache[(i, j)], weights), f1, f2,
-                                  nonneg=nonneg, output=output)
-        fi, fj = np.unravel_index(np.argmax(fine['logL_profile']), fine['logL_profile'].shape)
-        if fi in (0, len(f1) - 1) or fj in (0, len(f2) - 1):
-            return None
-        return fine
-
-    def _window_noise(self, fit, windows):
-        '''
-        Each window's native per-pixel noise, from its own residual at the
-        joint best fit of a unit-noise pass.
-
-        Window i's share of the joint chi2, chi2_i
-        (todcor.estimator.chi2_from_stats at the joint amplitudes), is set
-        against its noise degrees of freedom:
-
-            sigma_i^2 = chi2_i / (nu_i * (1 - 4 / sum(nu)))
-
-        The four shared parameters (v1, v2, a1, a2) take four dof from the
-        joint chi2, charged to the windows in proportion to nu_i. (A window's
-        exact charge -- the trace of its block of the hat matrix -- follows its
-        line content instead; the two differ by at most 4 / nu_i in sigma_i^2.)
-        The charges sum to four, so with one window this is sqrt(chi2_red).
-
-        A window with fewer than ``self.min_noise_dof`` dof (its estimate
-        would scatter by more than ~10 per cent), or with no residual to
-        measure (chi2_i <= 0, e.g. a masked order filled with continuum), gets
-        the common estimate instead, with a warning: sum(chi2_i) / sum(dof_i)
-        over the windows that measured their own noise -- a flat order's
-        zero chi2 would drag a pooled estimate down -- or over all windows
-        (i.e. chi2_red) if none did.
-
-        Parameters
-        ----------
-        fit : dict
-            A unit-noise ``_joint_fit`` result.
-        windows : list of dict
-            The per-window diagnostics (for the warning).
-
-        Returns
-        -------
-        sigma : ndarray
-            Per-window noise (flux units, per native pixel).
-        fallback : ndarray of bool
-            The windows that got the common estimate.
-
-        Raises
-        ------
-        ValueError
-            If no positive, finite noise can be estimated.
-        '''
-        best = fit['best']
-        chi2 = np.array([chi2_from_stats(st, best['a1'], best['a2']).item()
-                         for st in fit['at_peak']])
-        nu = np.array([st['nu'] for st in fit['at_peak']])
-        dof = nu * (1.0 - 4.0 / nu.sum())
-        own = (dof >= self.min_noise_dof) & np.isfinite(chi2) & (chi2 > 0)
-        pool = own if own.any() else np.ones_like(own)
-        common = chi2[pool].sum() / dof[pool].sum()
-        if not (np.isfinite(common) and common > 0):
-            raise ValueError(
-                f"cannot estimate the noise from the fit (chi2 per dof = {common}); "
-                "pass an explicit sigma")
-        fallback = ~own
-        if fallback.any():
-            bad = [win['order'] for win, fb in zip(windows, fallback) if fb]
-            warnings.warn(
-                f"order(s) {bad}: too few noise degrees of freedom (< "
-                f"{self.min_noise_dof}) or no residual to measure their own noise; "
-                "using the common noise estimate for them", stacklevel=3)
-        var = np.where(fallback, common, chi2 / np.where(fallback, 1.0, dof))
-        return np.sqrt(var), fallback
-
-    @staticmethod
-    def _template_on_grid(template, order, wave):
-        '''
-        Resample one template order onto the observation's wavelength grid.
-
-        A single-order template (e.g. a synthetic library spectrum covering the
-        whole range) is reused for every order. Points outside the template's
-        coverage are filled with the continuum (1.0) rather than clamped to the
-        edge value, so an uncovered margin contributes no spurious lines.
-
-        Parameters
-        ----------
-        template : Template
-        order : int
-            The observed order's index.
-        wave : ndarray
-            The observed order's wavelengths (Angstrom).
-
-        Returns
-        -------
-        ndarray
-            The template flux on ``wave`` (linear interpolation).
-        '''
-        model = template.model
-        I = order if len(model.wv) > 1 else 0
-        return dsp.resample(np.asarray(model.wv[I], float),
-                            np.asarray(model.sp[I], float),
-                            wave, fill=1.0)
-
-    @staticmethod
-    def _residual(flux, continuum):
-        '''
-        Remove the continuum, so the arrays entering the fit are line residuals.
-
-        'median' is a robust proxy for absorption-dominated, continuum-
-        normalized spectra and is also correct (~0) for spectra already
-        high-pass filtered by ``Spectrum.preprocess``. Pass a float to override.
-        The continuum must be removed *before* apodisation: dropping the DC
-        Fourier mode removes a constant offset for free, but not a
-        window-shaped one.
-
-        Parameters
-        ----------
-        flux : array_like
-        continuum : 'median' or float
-
-        Returns
-        -------
-        ndarray
-            ``flux`` minus the continuum level.
-        '''
-        flux = np.asarray(flux, float)
-        level = np.median(flux) if continuum == 'median' else float(continuum)
-        return flux - level
-
-
-# =============================================================================
-# The resampled-noise model
-# =============================================================================
-def _resampling_noise_psd(n, dv_native, dv, phases=None, n_phase=32):
+def _template_order(template, order):
     '''
-    Noise spectrum (todcor.estimator.resampled_noise_psd) of one order's white
-    native noise after Spectrum.interpolate onto a log grid of step
-    ``dv``, finer or coarser than native.
+    One template order's arrays for an observed order.
 
-    Each native pixel's impulse response depends on its sub-pixel phase
-    relative to the analysis nodes, so the responses at ``n_phase`` phases
-    (:func:`_impulse_responses`) are averaged with weights counting the
-    order's native pixels at each phase. With unknown native positions the
-    phases are taken as uniformly spread -- true for a linear-wavelength
-    native grid, whose velocity step drifts across the order, but not for a
-    commensurate log grid (e.g. one exactly half as fine), whose few fixed
-    phases can change the noise power by ~15 per cent.
-
-    This models a single resampling from a uniform native grid; earlier
-    filtering or repeated resampling is not represented.
+    A single-order template (e.g. a synthetic library spectrum covering the
+    whole range) is reused for every order.
 
     Parameters
     ----------
-    n : int
-        Length of the analysis window (pixels).
-    dv_native : float
-        The order's native velocity step (km/s).
-    dv : float
-        The analysis step (km/s).
-    phases : array_like, optional
-        Sub-pixel phases in [0, 1) of the order's native pixels on the
-        analysis grid (analysis pixels); None for uniformly spread.
-    n_phase : int
-        Number of phase bins probed.
+    template : Template
+    order : int
+        The observed order's index.
 
     Returns
     -------
-    ndarray
-        Relative noise power per positive Fourier mode, length n // 2.
+    wave, flux : ndarray
+        The template's wavelengths (Angstrom) and flux for that order.
     '''
-    # Rounded keys let near-identical steps (the same grid, epoch after
-    # epoch) share one probe.
-    responses = _impulse_responses(round(float(dv_native), 9), round(float(dv), 9), n_phase)
-    weights = None
-    if phases is not None:
-        bins = np.floor(np.asarray(phases) * n_phase).astype(int) % n_phase
-        weights = np.bincount(bins, minlength=n_phase)
-    return resampled_noise_psd(responses, n, dv_native / dv, weights=weights)
-
-
-@lru_cache(maxsize=256)
-def _impulse_responses(dv_native, dv, n_phase=32, half=20):
-    '''
-    Analysis-grid responses of the Spectrum.interpolate resampler to a unit
-    impulse in one native pixel, at ``n_phase`` sub-pixel phases.
-
-    The native grid is synthetic: log-uniform with step ``dv_native``, with
-    impulses ``2 * half`` pixels apart. Impulse k is evaluated at analysis
-    nodes placed so that it sits (k + 0.5) / n_phase analysis pixels above the
-    node below it, out to ``half`` native pixels either side -- far beyond the
-    cubic spline's support (its cardinal function decays as 0.27 per pixel).
-    One spline evaluation serves every phase: the nodes of all impulses are
-    concatenated. The responses depend on the two steps only (a log grid is
-    the same at every wavelength), so they are cached on them.
-
-    Parameters
-    ----------
-    dv_native : float
-        Native velocity step (km/s).
-    dv : float
-        Analysis velocity step (km/s).
-    n_phase : int
-        Number of phases.
-    half : int
-        Native pixels kept either side of each impulse.
-
-    Returns
-    -------
-    tuple of ndarray
-        n_phase read-only responses (analysis pixels).
-    '''
-    lam0 = 5000.0                            # Angstrom; the response is scale-free
-    step_native, step = dv_native / dsp.C_KMS, dv / dsp.C_KMS
-    hits = half + 2 * half * np.arange(n_phase)
-    ln_native = np.log(lam0) + step_native * np.arange(2 * half * n_phase + 1)
-    flux = np.zeros(ln_native.size)
-    flux[hits] = 1.0
-
-    reach = half * dv_native / dv            # analysis pixels within `half` native ones
-    nodes = []
-    for k, j in enumerate(hits):
-        phase = (k + 0.5) / n_phase
-        m = np.arange(np.floor(phase - reach) + 1, np.ceil(phase + reach))
-        nodes.append(ln_native[j] + (m - phase) * step)
-    response = resample_flux(np.exp(ln_native), flux, np.exp(np.concatenate(nodes)))
-    out = np.split(response, np.cumsum([len(x) for x in nodes])[:-1])
-    for h in out:
-        h.flags.writeable = False
-    return tuple(out)
-
-
-def _native_phases(native_wave, wave, dv):
-    '''
-    Sub-pixel phase of each native pixel on a log analysis grid.
-
-    Parameters
-    ----------
-    native_wave : array_like
-        The order's native wavelengths (Angstrom).
-    wave : ndarray
-        The log analysis grid (Angstrom), step ``dv``.
-    dv : float
-        Analysis velocity step (km/s).
-
-    Returns
-    -------
-    ndarray
-        Phases in [0, 1) (analysis pixels) of the native pixels inside the
-        analysis grid.
-    '''
-    x = dsp.C_KMS * np.log(np.asarray(native_wave, float) / wave[0]) / dv
-    return np.mod(x[(x >= 0) & (x <= len(wave) - 1)], 1.0)
+    model = template.model
+    I = order if len(model.wv) > 1 else 0
+    return model.wv[I], model.sp[I]

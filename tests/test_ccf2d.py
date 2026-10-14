@@ -352,7 +352,7 @@ def test_ccf2d_noise_budget_on_a_grid_coarser_than_native(factor):
 def test_ccf2d_noise_psd_is_cached_per_sampling():
     # The probe depends only on the native and analysis steps; it must not be
     # rebuilt for every order of every epoch.
-    from sparta.ccf2d import _impulse_responses
+    from sparta.preprocess import _impulse_responses
     _impulse_responses.cache_clear()
     wave, flux, tmpl1, tmpl2 = _narrow_case(37.3, -52.6)
     g1, g2 = _local_grids(37.3, -52.6)

@@ -57,9 +57,9 @@ TOP_LEVEL = {
 # resolve there (existence, not an exhaustive list).
 DEEP = {
     "sparta.spectrum": ["Spectrum", "resample_flux"],
-    "sparta.preprocess": ["bandpass", "coarsest_native_step", "remove_cosmics",
-                          "resample_flux", "resample_to_linear_grid", "resample_to_log_grid",
-                          "trim_margins"],
+    "sparta.preprocess": ["bandpass", "coarsest_native_step", "native_phases",
+                          "remove_cosmics", "resample_flux", "resample_to_linear_grid",
+                          "resample_to_log_grid", "resampling_noise_psd", "trim_margins"],
     "sparta.template": ["Template", "phoenix_spectrum"],
     "sparta.ccf1d": ["CCF1d"],
     "sparta.ccf2d": ["CCF2d"],
