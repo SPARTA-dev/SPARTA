@@ -66,6 +66,12 @@ class CCF1d:
                          calculated (from maximum likelihood) to each
                          order.
 
+        The ML uncertainties (Zucker 2003, MNRAS 342, 1291) need the number of
+        independent spectral bins. Resampling onto a finer grid adds samples
+        but no information, so order i counts
+        ``len(order) * min(1, dv / native_step_i)`` bins, with the native step
+        from ``spec_in.native_steps()`` (km/s).
+
         :return: self.Corr - a dictionary with the following fields:
                          'vel' - velocity vector at which correlation
                                  was calculated.
@@ -74,6 +80,8 @@ class CCF1d:
                          'RV'  - Derived radial velocity
                          'eRV' - Corresponding uncertainty.
                          'peakCorr' - Corresponding CCF peak.
+                         'n_eff' - effective number of independent spectral
+                                   bins per order (dimensionless).
         '''
 
         # Initialize:
@@ -94,6 +102,15 @@ class CCF1d:
         # Symmetric velocity half-range for the CCF scan (both signs valid).
         vmax = np.max(np.abs(VelBound))
 
+        # Read before any resampling below; InterpolateSpectrum preserves it,
+        # but the sampling that sets the noise is the one the data arrived on.
+        native_steps = np.asarray(spec.native_steps(), float)
+        if native_steps.shape != (len(spec.wv),):
+            raise ValueError(f"{native_steps.size} native steps recorded for "
+                             f"{len(spec.wv)} orders")
+        if not np.all(np.isfinite(native_steps) & (native_steps > 0)):
+            raise ValueError(f"native steps must be finite and positive, got {native_steps}")
+
         # Ensure the observed spectrum is on a log-lambda (velocity-even) grid.
         if spec.Info.get('GridType') != 'log':
             spec.InterpolateSpectrum(delta=dv, InterpMethod='log')
@@ -106,6 +123,7 @@ class CCF1d:
         RV = np.full((Nord, 1), np.nan)
         eRV = np.full((Nord, 1), np.nan)
         SpecCorr = np.full((Nord, 1), np.nan)
+        n_eff = np.array([len(w) for w in spec.wv], float) * np.minimum(1.0, dv_kms / native_steps)
         V, corr = None, None
 
         for I, w in enumerate(spec.wv):
@@ -148,11 +166,9 @@ class CCF1d:
             # An order whose peak cannot be located (e.g. at the edge of the
             # velocity scan) is reported as NaN rather than failing the epoch.
             try:
-                if err_per_ord:
-                    vPeak, vPeakErr, ccfPeak, _ = self.extract_RV(V, C, n_ord=1)
-                else:
-                    vPeak, ccfPeak = self.subpixel_CCF(V, C)
-                    vPeakErr = np.nan
+                vPeak, ccfPeak = unicor_ccf.subpixel_peak(v_kms, C)
+                vPeakErr = (unicor_ccf.rv_uncertainty(v_kms, C, vPeak, n_eff[I])
+                            if err_per_ord else np.nan)
             except (ValueError, np.linalg.LinAlgError):
                 vPeak, vPeakErr, ccfPeak = np.nan, np.nan, np.nan
 
@@ -167,7 +183,8 @@ class CCF1d:
             'RV': RV,
             'eRV': eRV,
             'units': V.unit,
-            'peakCorr': SpecCorr}
+            'peakCorr': SpecCorr,
+            'n_eff': n_eff}
         self.n_ord = Nord
 
         return self
@@ -179,19 +196,23 @@ class CCF1d:
         This routine takes a matrix of CCF values (# orders X length of velocity vector)
         that were calculated by the CrossCorrelateSpec routine, combines the CCFs into
         a single one, based on a maximum-likelihood approach (Zucker, 2003, MNRAS).
-        The RV is derived from the peak of the cross-coreelation, and the uncertainty
-        is calculated as well
+        Orders are weighted by their effective number of independent bins
+        (``self.Corr['n_eff']``). The RV is derived from the peak of the
+        cross-correlation, and its uncertainty from the curvature of the combined
+        CCF with the total number of bins.
 
         :param: none.
         :return: A 'CorrCombined' dictionary, with derived combined correlation,
                 derived velocity and uncertainty. The structure is similar
-                to the 'Corr' dictionary.
+                to the 'Corr' dictionary; 'n_eff' is the total number of
+                independent bins.
 
         NOTE: the number of lags is assumed to be identical for all orders
         '''
 
         velocities = self.Corr['vel']
-        CombinedCorr = unicor_ccf.combine_ccfs(self.Corr['corr'])
+        CombinedCorr = unicor_ccf.combine_ccfs(self.Corr['corr'], n_eff=self.Corr['n_eff'])
+        n_eff_total = float(np.sum(self.Corr['n_eff']))
 
         try:
             V, eRV, CorrPeak, vUnit = self.extract_RV(velocities, CombinedCorr)
@@ -203,7 +224,8 @@ class CCF1d:
                 'RV': V,
                 'eRV': eRV,
                 'units': vUnit,
-                'peakCorr': CorrPeak}
+                'peakCorr': CorrPeak,
+                'n_eff': n_eff_total}
 
         except (ValueError, np.linalg.LinAlgError):
             self.CorrCombined = {
@@ -212,7 +234,8 @@ class CCF1d:
                 'RV': np.nan,
                 'eRV': np.nan,
                 'units': '',
-                'peakCorr': np.nan}
+                'peakCorr': np.nan,
+                'n_eff': n_eff_total}
 
         return self
 
@@ -222,12 +245,19 @@ class CCF1d:
         """
         Radial velocity and its maximum-likelihood uncertainty from a CCF.
 
+        The uncertainty uses the effective number of independent bins stored
+        by :meth:`CrossCorrelateSpec` (``self.Corr['n_eff']``), summed over the
+        orders behind ``y``.
+
         :param x: velocity lags (Quantity or km/s array).
         :param y: CCF values at ``x``.
         :param vel: if given, the uncertainty is evaluated at this velocity
                     (km/s) instead of at the fitted peak, and no peak value
                     is returned.
-        :param n_ord: number of orders behind ``y``; defaults to ``self.n_ord``.
+        :param n_ord: number of orders behind ``y``: all of them (the default,
+                      ``self.n_ord``), i.e. the combined CCF. A single order of
+                      a multi-order spectrum is ambiguous here -- use
+                      ``unicor.rv_uncertainty`` with ``self.Corr['n_eff'][i]``.
         :return: (RV, eRV, ccf_peak, unit) -- velocities in the unit of ``x``.
         """
         x_kms = x.value if isinstance(x, u.Quantity) else np.asarray(x, float)
@@ -236,8 +266,7 @@ class CCF1d:
         else:
             RV, ccf_value = vel, np.nan
 
-        Nord = self.n_ord if n_ord is None else n_ord
-        eRV = unicor_ccf.rv_uncertainty(x_kms, y, RV, Nord)
+        eRV = unicor_ccf.rv_uncertainty(x_kms, y, RV, self._n_eff_total(n_ord))
 
         xUnit = x.unit if isinstance(x, u.Quantity) else None
         return RV, eRV, ccf_value, xUnit
@@ -252,15 +281,35 @@ class CCF1d:
         :param y: CCF values at ``x``.
         :param bisect_val: lower and upper bisector levels, as fractions of the
                            CCF maximum.
-        :param n_ord: number of orders behind ``y``; defaults to ``self.n_ord``.
+        :param n_ord: number of orders behind ``y``; see :meth:`extract_RV`.
         :return: (BIS, eBIS, unit); (nan, nan, None) when a level does not cut
                  the CCF exactly twice.
         """
-        Nord = self.n_ord if n_ord is None else n_ord
-        BIS, eBIS = unicor_ccf.bisector_span(x.value, y, Nord, levels=bisect_val)
+        BIS, eBIS = unicor_ccf.bisector_span(x.value, y, self._n_eff_total(n_ord),
+                                             levels=bisect_val)
         if np.isnan(BIS):
             return np.nan, np.nan, None
         return BIS, eBIS, x.unit
+
+    def _n_eff_total(self, n_ord):
+        """
+        Independent spectral bins behind a CCF built from ``n_ord`` orders.
+
+        :param n_ord: number of orders; None means all of them.
+        :return: float, the summed ``self.Corr['n_eff']``.
+        :raises ValueError: before :meth:`CrossCorrelateSpec` has run, or when
+                            ``n_ord`` names a strict subset of the orders
+                            (which orders is then unknown).
+        """
+        if not hasattr(self, 'Corr'):
+            raise ValueError("run CrossCorrelateSpec first: the uncertainty needs "
+                             "the number of independent spectral bins it records")
+        if n_ord is not None and n_ord != self.n_ord:
+            raise ValueError(
+                f"n_ord={n_ord} is a subset of the {self.n_ord} orders; for one "
+                "order use unicor.rv_uncertainty / unicor.bisector_span with "
+                "self.Corr['n_eff'][i]")
+        return float(np.sum(self.Corr['n_eff']))
 
     def subpixel_CCF(self, vels, ccf, v=None, Npts=5):
         """

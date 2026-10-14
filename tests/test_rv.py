@@ -99,3 +99,90 @@ def test_an_order_the_template_does_not_cover_is_nan_not_fatal():
         ccf = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=tmpl, dv=0.5, VelBound=50)
     assert np.isnan(ccf.Corr["RV"][0, 0])
     assert float(ccf.Corr["RV"][1, 0]) == pytest.approx(4.0, abs=0.05)
+
+
+# --- ML uncertainty calibration (Zucker 2003, MNRAS 342, 1291, §2.3) --------
+# sigma^2 = -[N C'' C / (1 - C^2)]^-1 with N the number of independent spectral
+# bins. Resampling onto a finer log grid adds correlated samples, not bins, so N
+# must be counted on the native grid -- and never from the number of velocity
+# lags, which made eRV scale with the scan half-width.
+
+NATIVE_DV = 1.0     # km/s, the "detector" sampling the noise is drawn on
+MC_WAVE, _ = so.log_lambda_grid(5480.0, 5520.0, NATIVE_DV)
+_LINES = np.random.default_rng(1)
+MC_CENTERS = _LINES.uniform(5483.0, 5517.0, 30)
+MC_DEPTHS = _LINES.uniform(0.2, 0.7, 30)
+
+
+def _forest(wave, v_kms):
+    """Thirty Gaussian absorption lines (sigma 0.08 A), shifted by ``v_kms``."""
+    centers = MC_CENTERS * (1.0 + v_kms / C)
+    return 1.0 - (MC_DEPTHS * np.exp(
+        -0.5 * ((wave[:, None] - centers) / 0.08) ** 2)).sum(axis=1)
+
+
+@pytest.fixture(scope="module")
+def forest_template():
+    twave, _ = so.log_lambda_grid(5470.0, 5530.0, 0.25)
+    return Template(template=Spectrum(wv=[twave], sp=[_forest(twave, 0.0)], name="t"))
+
+
+def _noisy_rvs(template, n_real, dv, vel_bound, seed=42):
+    rng = np.random.default_rng(seed)
+    clean = _forest(MC_WAVE, 3.0)
+    rv, erv = np.empty(n_real), np.empty(n_real)
+    for k in range(n_real):
+        # SNR 50 white noise on the NATIVE grid; CCF1d then resamples to dv.
+        obs = Spectrum(wv=[MC_WAVE.copy()],
+                       sp=[clean + rng.normal(0.0, 0.02, MC_WAVE.size)], name="o")
+        ccf = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=template,
+                                         dv=dv, VelBound=vel_bound).CombineCCFs()
+        rv[k] = float(ccf.CorrCombined["RV"])
+        erv[k] = float(ccf.CorrCombined["eRV"])
+    return rv, erv
+
+
+def test_rv_uncertainty_is_calibrated_by_monte_carlo(forest_template):
+    rv, erv = _noisy_rvs(forest_template, n_real=200, dv=NATIVE_DV / 4, vel_bound=30)
+    ratio = np.median(erv) / np.std(rv, ddof=1)
+    # With 200 realizations the scatter itself is known to ~5% (1/sqrt(2*199)).
+    # The cubic-spline resampling smooths the white noise a little, so the
+    # resampled CCF peak is slightly higher than on the native grid and the
+    # formula leans optimistic: measured ratios 0.93-1.02 over four seeds and
+    # dv = 0.1-0.5 km/s. The band is that bias plus ~4 sigma of MC noise; the
+    # old len(v)-based error gave 2.8 here (3.4 at VelBound=20).
+    assert 0.8 < ratio < 1.2
+    assert np.mean(rv) == pytest.approx(3.0, abs=4 * np.std(rv) / np.sqrt(rv.size))
+
+
+def test_rv_uncertainty_does_not_depend_on_the_velocity_scan(forest_template):
+    _, erv_narrow = _noisy_rvs(forest_template, n_real=5, dv=0.25, vel_bound=20)
+    _, erv_wide = _noisy_rvs(forest_template, n_real=5, dv=0.25, vel_bound=200)
+    np.testing.assert_allclose(erv_wide, erv_narrow, rtol=0.01)
+
+
+def test_effective_bins_count_native_pixels_not_resampled_ones(forest_template):
+    obs = Spectrum(wv=[MC_WAVE.copy()], sp=[_forest(MC_WAVE, 0.0)], name="o")
+    fine = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=forest_template,
+                                      dv=0.25, VelBound=20)
+    coarse = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=forest_template,
+                                        dv=NATIVE_DV, VelBound=20)
+    # Both count the ~MC_WAVE.size native pixels (minus the resampling margin).
+    for ccf in (fine, coarse):
+        assert ccf.Corr["n_eff"][0] == pytest.approx(MC_WAVE.size, rel=0.01)
+
+
+def test_per_order_and_bisector_errors_use_the_same_bin_count(forest_template):
+    obs = Spectrum(wv=[MC_WAVE.copy(), MC_WAVE.copy()],
+                   sp=[_forest(MC_WAVE, 3.0), _forest(MC_WAVE, 3.0)], name="o")
+    ccf = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=forest_template,
+                                     dv=0.25, VelBound=30, err_per_ord=True).CombineCCFs()
+    # Two identical orders carry twice the bins of one: sqrt(2) smaller error.
+    assert ccf.CorrCombined["n_eff"] == pytest.approx(ccf.Corr["n_eff"].sum())
+    assert float(ccf.Corr["eRV"][0, 0]) == pytest.approx(
+        np.sqrt(2) * float(ccf.CorrCombined["eRV"]), rel=1e-3)
+    _, ebis, _ = ccf.calcBIS(ccf.CorrCombined["vel"], ccf.CorrCombined["corr"])
+    assert ebis == pytest.approx(np.sqrt(2) * float(ccf.CorrCombined["eRV"]), rel=1e-3)
+    # A single order of a two-order spectrum: which order's bins is ambiguous.
+    with pytest.raises(ValueError, match="subset"):
+        ccf.extract_RV(ccf.Corr["vel"], ccf.Corr["corr"][0], n_ord=1)

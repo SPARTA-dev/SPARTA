@@ -114,3 +114,54 @@ def test_resample_refuses_a_decreasing_source_axis(grid):
     flux = _line_spectrum(0.0, grid)
     with pytest.raises(ValueError, match="increasing"):
         unicor.resample(grid[::-1], flux[::-1], grid)
+
+
+def _three_order_ccfs(grid):
+    shifts = (1.0, 3.0, 6.0)
+    ccfs = [unicor.ccf_vs_velocity(_line_spectrum(0.0, grid),
+                                   _line_spectrum(s, grid), DV, vmax=20)[1]
+            for s in shifts]
+    return np.vstack(ccfs)
+
+
+def test_equal_weight_combination_is_the_zucker_formula(grid):
+    ccfs = _three_order_ccfs(grid)
+    expected = np.sqrt(1 - np.prod(1 - ccfs ** 2, axis=0) ** (1 / 3))
+    np.testing.assert_allclose(unicor.combine_ccfs(ccfs), expected, atol=1e-12)
+    np.testing.assert_allclose(unicor.combine_ccfs(ccfs, n_eff=[700, 700, 700]),
+                               expected, atol=1e-12)
+
+
+def test_weighted_combination_matches_the_summed_log_likelihood(grid):
+    # Zucker (2003): log L = -1/2 sum_i N_i log(1 - C_i^2) must equal the
+    # single-CCF form -N_tot/2 log(1 - ML^2) of the combined CCF.
+    ccfs = _three_order_ccfs(grid)
+    n_eff = np.array([100.0, 400.0, 1500.0])
+    ml = unicor.combine_ccfs(ccfs, n_eff=n_eff)
+    np.testing.assert_allclose(n_eff.sum() * np.log(1 - ml ** 2),
+                               (n_eff[:, None] * np.log(1 - ccfs ** 2)).sum(axis=0),
+                               rtol=1e-10, atol=1e-12)
+
+
+@pytest.mark.parametrize("bad", [[100.0, 100.0], [100.0, 0.0, 100.0], [100.0, np.nan, 1.0]])
+def test_weighted_combination_refuses_bad_bin_counts(grid, bad):
+    with pytest.raises(ValueError, match="n_eff"):
+        unicor.combine_ccfs(_three_order_ccfs(grid), n_eff=bad)
+
+
+@pytest.mark.parametrize("vmax", [10.0, 60.0])
+def test_rv_uncertainty_matches_the_closed_form_for_a_gaussian_ccf(vmax):
+    # C(v) = A exp(-v^2 / 2s^2) has C'' = -A/s^2 at the peak, so Zucker's
+    # sigma^2 = -[N C'' C / (1 - C^2)]^-1 = s^2 (1 - A^2) / (N A^2) -- with no
+    # dependence on how many velocity lags were scanned.
+    A, s, n_eff = 0.8, 4.0, 2500.0
+    v = np.arange(-vmax, vmax + 1e-9, 0.25)
+    ccf = A * np.exp(-0.5 * (v / s) ** 2)
+    expected = s * np.sqrt(1 - A ** 2) / (A * np.sqrt(n_eff))
+    assert unicor.rv_uncertainty(v, ccf, 0.0, n_eff) == pytest.approx(expected, rel=1e-3)
+
+
+def test_rv_uncertainty_refuses_a_non_positive_bin_count():
+    v = np.arange(-10, 10.25, 0.25)
+    with pytest.raises(ValueError, match="n_eff"):
+        unicor.rv_uncertainty(v, np.exp(-0.5 * v ** 2), 0.0, 0)

@@ -375,41 +375,42 @@ class Spectrum:
 # =============================================================================
     def RemoveCosmics(self, **kwargs):
         '''
-        This function removes positive outliers, i.e., points that
+        This function replaces positive outliers, i.e., points that
         significantly deviate above the measured spectra. Significant deviation
-        is defined as points that deviate more than (sigma_upper)X(1.48mad_std)
-        from the main part of the spectrum. Points that deviate below are
-        not removed.
+        is defined as points that lie more than sigma_upper x mad_std above the
+        median of the order (iterated, as in astropy's sigma_clip). Points that
+        deviate below are never touched.
 
-        :param: self.wv - list of 1D wavelength arrays (evenly sampled).
+        A clipped pixel is replaced by linear interpolation (in wavelength)
+        between its nearest unclipped neighbours, rather than dropped: dropping
+        it would break the uniform (linear or log-lambda) grid that
+        ``Info['GridType']`` declares and the CCF requires. NaN pixels are left
+        as they are and never used as interpolation anchors.
+
+        :param: self.wv - list of 1D wavelength arrays (Angstrom); unchanged.
         :param: self.sp - list of 1D flux arrays, correspond to the wv arrays.
         :param: sigma_upper - float. Number of sigma beyond which points will
-                              be removed. (Optional. default=3).
+                              be replaced. (Optional. default=3).
 
-        :return: spR - list of flux values at wvR,
-                      after exclusion of the outliers.
+        :return: self, with self.sp holding the cleaned fluxes.
         '''
-
-        # Initialize data
-        if 'sigma_upper' in kwargs:
-            sigma_upper = kwargs['sigma_upper']
-        else:
-            sigma_upper = 3
+        sigma_upper = kwargs.get('sigma_upper', 3)
 
         spR = []
-        wvR = []
+        for w, s in zip(self.wv, self.sp):
+            w = np.asarray(w, float)
+            s = np.array(s, float)
+            clipped = np.ma.getmaskarray(sigma_clip(s, sigma_lower=np.inf,
+                                                    sigma_upper=sigma_upper,
+                                                    masked=True, cenfunc='median',
+                                                    stdfunc=mad_std))
+            finite = np.isfinite(s)
+            cosmic = clipped & finite
+            anchors = ~clipped & finite
+            s[cosmic] = np.interp(w[cosmic], w[anchors], s[anchors])
+            spR.append(s)
 
-        # Interpolate per order
-        for I, s in enumerate(self.sp):
-            filtered_data = sigma_clip(s, sigma_lower=np.inf,
-                                       sigma_upper=sigma_upper,
-                                       masked=True, cenfunc='median',
-                                       stdfunc=mad_std)
-
-            spR.append(np.array([x for i, x in enumerate(s) if filtered_data[i]]))
-            wvR.append(np.array([x for i, x in enumerate(self.wv[I]) if filtered_data[i]]))
-
-        self.wv, self.sp = wvR, spR
+        self.sp = spR
         return self
 
 # =============================================================================

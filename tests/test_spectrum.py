@@ -70,3 +70,54 @@ def test_from_spectrum1d_roundtrip():
     # a single Spectrum1D also builds a one-order Spectrum
     single = Spectrum.from_spectrum1d(sp.orders[0])
     assert single.n_ord == 1
+
+
+def _log_grid_spec():
+    w = np.linspace(5000.0, 5020.0, 2000)
+    rng = np.random.default_rng(3)
+    s = 1 - 0.5 * np.exp(-0.5 * ((w - 5010.0) / 0.3) ** 2) + rng.normal(0, 0.01, w.size)
+    sp = Spectrum(wv=[w], sp=[s], name="t")
+    sp.InterpolateSpectrum(delta=0.5, InterpMethod="log")
+    return sp
+
+
+def test_remove_cosmics_keeps_the_log_grid_and_ccf_still_runs():
+    from sparta.UNICOR.Template import Template
+    from sparta.UNICOR.CCF1d import CCF1d
+    sp = _log_grid_spec()
+    tmpl = Template(template=Spectrum(wv=[sp.wv[0].copy()], sp=[sp.sp[0].copy()], name="tm"))
+    wave = sp.wv[0].copy()
+    sp.sp[0][[300, 1200, 2000]] += 1.0                  # three cosmics
+    sp.RemoveCosmics(sigma_upper=5)
+    np.testing.assert_array_equal(sp.wv[0], wave)       # grid untouched
+    assert sp.Info["GridType"] == "log"
+    ccf = CCF1d().CrossCorrelateSpec(spec_in=sp, template_in=tmpl, VelBound=20).CombineCCFs()
+    assert float(ccf.CorrCombined["RV"]) == pytest.approx(0.0, abs=0.05)
+
+
+def test_remove_cosmics_replaces_a_cosmic_by_its_neighbours():
+    sp = _log_grid_spec()
+    clean = sp.sp[0].copy()
+    sp.sp[0][1200] += 1.0
+    sp.RemoveCosmics(sigma_upper=5)
+    w = sp.wv[0]
+    expected = np.interp(w[1200], w[[1199, 1201]], clean[[1199, 1201]])
+    assert sp.sp[0][1200] == pytest.approx(expected, abs=1e-12)
+    others = np.arange(clean.size) != 1200
+    np.testing.assert_array_equal(sp.sp[0][others], clean[others])
+
+
+def test_remove_cosmics_keeps_zero_valued_and_below_median_pixels():
+    # The old filter tested the truthiness of each masked value, which also
+    # dropped every pixel whose flux was exactly 0.0; negative outliers (deep
+    # lines, below the median) are never clipped -- the clip is one-sided.
+    w = np.linspace(5000.0, 5010.0, 500)
+    s = np.ones_like(w) + np.random.default_rng(0).normal(0, 0.01, w.size)
+    s[100:105] = 0.0
+    s[250] = -3.0
+    sp = Spectrum(wv=[w.copy()], sp=[s.copy()], name="t")
+    sp.RemoveCosmics(sigma_upper=3)
+    assert sp.sp[0].size == w.size
+    np.testing.assert_array_equal(sp.wv[0], w)
+    below = s < np.median(s)
+    np.testing.assert_array_equal(sp.sp[0][below], s[below])

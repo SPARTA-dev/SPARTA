@@ -41,10 +41,16 @@ observed = unicor.resample(unicor.doppler_shift_wave(wave, 12.3), template, wave
 
 v, c = unicor.ccf_vs_velocity(template, observed, dv=0.5, vmax=50)
 rv, peak = unicor.subpixel_peak(v, c)                 # ~12.3 km/s
-erv = unicor.rv_uncertainty(v, c, rv, n_orders=1)
+# n_eff: independent spectral bins -- native (detector) pixels, not the
+# pixels of a finer resampled grid. Here the grid is the native sampling.
+erv = unicor.rv_uncertainty(v, c, rv, n_eff=wave.size)  # km/s
 
-# Several orders on the same lag axis -> one ML-combined CCF.
-combined = unicor.combine_ccfs(np.vstack([c, c]))
+# Several orders on the same lag axis -> one ML-combined CCF, each order
+# weighted by its bins; its error uses the total.
+n_eff = np.array([wave.size, wave.size])
+combined = unicor.combine_ccfs(np.vstack([c, c]), n_eff=n_eff)
+rv_all, _ = unicor.subpixel_peak(v, combined)
+erv_all = unicor.rv_uncertainty(v, combined, rv_all, n_eff=n_eff.sum())
 ```
 
 ## Test
