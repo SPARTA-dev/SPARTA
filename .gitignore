@@ -21,8 +21,6 @@ dist/
 .worktrees/
 *.ipynb_checkpoints
 *__pycache__
-examples/Binni/
-examples/res/
 src/sparta/UNICOR/template_files/
 *.zip
 

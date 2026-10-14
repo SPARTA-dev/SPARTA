@@ -1,23 +1,17 @@
-#                   ---------------------------------------------
-#                     PeriodicityDetector.py (SPARTA USuRPer file)
-#                   ---------------------------------------------
-# This file defines the "PeriodicityDetector" class. An object of this class handles the "TimeSeries" class
-# and enables running GLS and Zucker PDC and USuRPer on the data (arxiv.org/pdf/1711.06075.pdf).
-#
-# A PeriodicityDetector class stores the following methods:
-# ---------------------------------------------
-# 1) calc_PDC                 - run the full Zucker PDC over the frequency grid
-#                               (uses USURPER_functions).
-# 2) calc_USURPER             - run the full USuRPER (high-dimensional PDC).
-# 3) calc_partial_periodogram - run the partial (shift/shape) PDC.
-# 4) calc_GLS                 - run the generalized Lomb-Scargle periodogram.
-# 5) calc_pdc_pval            - PDC peak p-value and its inverse (Shen et al. 2019).
-# 6) plot_periodograms        - plot the calculated periodograms.
-#
-# Conventions: times in days, frequency grid in 1/day.
-#
-# Dependencies: numpy, astropy, scipy and matplotlib.
-# Last update: Sahar Shahaf, 20220327.
+"""PeriodicityDetector: periodograms of a TimeSeries.
+
+GLS (astropy ``LombScargle``) and the phase-distance-correlation periodogram
+(PDC; biased, unbiased, and error-aware) on scalar series such as RVs;
+USuRPER and the shift/shape partial periodograms on single-order spectra. The
+distance-correlation kernels are in ``sparta.USURPER.USURPER_functions``.
+
+Conventions: times in days, frequency grid in 1/day (``freq_range`` and
+``periodogram_grid_resolution`` points per 1/day).
+
+References: PDC -- Zucker 2018, MNRAS 474, L86; USuRPER -- Binnenfeld, Shahaf
+& Zucker 2020, A&A 642, A146; partial periodograms -- Binnenfeld et al. 2022,
+A&A 659, A189; PDC p-values -- Shen et al. 2019 (arXiv:1912.12150).
+"""
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -71,10 +65,6 @@ class PeriodicityDetector:
             raise ValueError("periodogram_grid_resolution must be > 0 (grid points per 1/day); "
                              f"got {self.periodogram_grid_resolution}.")
         self.period_truth = None
-        self.GLS_flag = False
-        self.biased_PDC_flag = False
-        self.unbiased_PDC_flag = False
-        self.partial_flag = False
         self.partial_type = "shift"
 
         self.method = []
@@ -85,7 +75,6 @@ class PeriodicityDetector:
         # Initialize pdc process variables
         self.pdc_a = None
         self.pdc_c = None
-        self.pdc_mat_A_biased = None
         self.pdc_mat_A_unbiased = None
         self.pdc_mat_C_unbiased = None
 
@@ -97,8 +86,6 @@ class PeriodicityDetector:
         self.pdc_res_power_unbiased = grid_template.copy()
         self.GLS_power = grid_template.copy()
         self.GLS_frequency = grid_template.copy()
-
-        self.fap_dict = {}
 
     # =============================================================================
     # =============================================================================
@@ -121,9 +108,6 @@ class PeriodicityDetector:
         else:
             raise ValueError('PDC is available for scalar time-series only')
 
-
-        self.biased_PDC_flag = calc_biased_flag
-        self.unbiased_PDC_flag = calc_unbiased_flag
 
         calc_pdc_distance_matrix(self, calc_biased_flag, calc_unbiased_flag, errors=errors)
 
@@ -159,9 +143,6 @@ class PeriodicityDetector:
             self.method = "USURPER"
         else:
             raise ValueError('USURPER is available for spectrum time-series only')
-
-        self.biased_PDC_flag = calc_biased_flag
-        self.unbiased_PDC_flag = calc_unbiased_flag
 
         calc_pdc_distance_matrix(self, calc_biased_flag, calc_unbiased_flag)
 
@@ -220,8 +201,6 @@ class PeriodicityDetector:
                 self.GLS_power = LombScargle(self.time_series.times, self.time_series.calculated_vrad_list).power(self.GLS_frequency)
             else:
                 raise ValueError('GLS is possible for scalar time-series only')
-
-        self.GLS_flag = True
 
         self.results_frequency.update({"GLS": self.GLS_frequency})
         self.results_power.update({"GLS": self.GLS_power})

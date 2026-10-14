@@ -1,36 +1,19 @@
-#                   ------------------------------
-#                     Spectrum.py (SPARTA UNICOR class)
-#                   ------------------------------
-# This file defines the "Spectrum" class: a container for one observed
-# spectrum -- wavelengths and their fluxes -- plus basic metadata (time of
-# observation, barycentric velocity correction, etc.; see __init__). A spectrum
-# may be single- or multi-order: ``wv`` and ``sp`` are lists holding one 1-D
-# array per order, and different orders may have different lengths.
-#
-# Conventions: wavelengths in Angstrom, velocities in km/s, times in BJD (days).
-# Cross-correlation runs on a log-lambda (velocity-even) grid -- see
-# InterpolateSpectrum(InterpMethod='log').
-#
-# A Spectrum class stores the following methods:
-# ---------------------------------------------
-#  1) InterpolateSpectrum   - resample onto a linear or log-lambda grid.
-#  2) TrimSpec              - trim the edges (drop NaNs / zero padding).
-#  3) FilterSpectrum        - Butterworth bandpass filter.
-#  4) ApplyCosineBell       - apply a Tukey window.
-#  5) RemoveCosmics         - clip positive outliers (cosmic rays).
-#  6) BarycentricCorrection - apply the barycentric velocity correction.
-#  7) SelectOrders          - keep or drop specific orders.
-#  8) SpecPreProccess       - run the above in a recommended order.
-# The ``orders`` property and ``from_spectrum1d`` classmethod convert to/from
-# specutils Spectrum1D, the interchange representation.
-# The module function ``resample_flux`` is the spline resampler that
-# InterpolateSpectrum applies to each order.
-#
-# Dependencies: numpy, scipy, astropy, specutils.
-# Last update: Avraham Binnenfeld, 20200607.
+"""Spectrum: one observed (multi-order) spectrum and its preprocessing.
+
+``wv`` and ``sp`` are lists holding one 1-D wavelength and flux array per
+order (orders may differ in length), plus metadata: time of observation,
+barycentric velocity correction, target name and the grid bookkeeping in
+``Info``. The methods resample (linear or log-lambda), trim, filter, apodise,
+clip cosmics, apply the barycentric correction and select orders; ``orders`` /
+``from_spectrum1d`` convert to and from specutils ``Spectrum1D``.
+
+Conventions: wavelengths in Angstrom, velocities in km/s, times in BJD (days).
+Cross-correlation needs a log-lambda (velocity-even) grid, step
+``log(1 + dv/c)`` -- see ``InterpolateSpectrum(InterpMethod='log')``.
+"""
 
 import numpy as np
-from scipy import interpolate, signal
+from scipy import signal
 from astropy.stats import sigma_clip, mad_std
 from astropy import constants as consts, units as u
 from specutils import Spectrum as Spec1D, SpectrumList
@@ -396,8 +379,7 @@ class Spectrum:
             s = signal.filtfilt(b, a, self.sp[I]-np.percentile(self.sp[I], 80),
                                 padlen=10*max(len(b), len(a)))
 
-            sLen = len(s)
-            s = (s-np.mean(s))/np.std(s)  #(np.sum((s-np.mean(s))**2)/sLen)
+            s = (s-np.mean(s))/np.std(s)
 
             # Filter the data
             spF.append(s)

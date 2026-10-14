@@ -3,7 +3,7 @@
 Pins the current numeric output of the packaged PDC path so later refactors
 (vectorizing USURPER_functions, dropping numba) can be proven behavior-
 preserving. Golden values captured 2026-07-22 on the transitional stack
-(numpy 1.23.5); see PROJECT_LOG.md.
+(numpy 1.23.5).
 """
 import numpy as np
 import pytest

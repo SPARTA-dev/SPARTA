@@ -1,38 +1,23 @@
-#                   ----------------------------
-#                    Template.py (SPARTA UNICOR class)
-#                   ----------------------------
-# This file defines the "Template" class. An object of this class stores
-# a Spectrum object, saved in the self.model field. This class has some
-# additional attributes added to the ones of the Spectrum class, including
-# the ability to download, process and store PHOENIX synthetic spectrum.
-#
-# A Template class stores the following methods:
-# ---------------------------------------------
-#
-# 1) create_PHOENIX_fname - Prepare the needed spectra files names and paths for downloading
-# 2) download_PHOENIX_files - Downloads the synthetic spectrum files over HTTPS from Goettingen
-# 3) doppler - Shifts the synthetic spectrum according to a given velocity (Doppler effect)
-# 4) add_noise - Adds simulated noise to the synthetic spectrum according to a given snr
-# 5) GaussianBroadening - broadens the template with a Gaussian window,
-#                      to account for the instrumental broadening.
-# 6) RotationalBroadening - broadens the template with a rotational profile
-#                        to account for stellar rotation.
-# 7) integrate_spec - sums up consecutive pixels in the given Template model,
-#                           to lower the resolution for computational needs
-# 8) save_template_model - exports the template model, possibly after being edited and manipulated.
-# 9) cut_multiorder - cuts the template according to a given wavelength bound.
-# 10) cut_multiorder_like - cuts the template to the shape of a given Spectrum object.
-#
-# Dependencies: numpy, astropy, shutil, pathlib and os.
-# Last update: Avraham Binnenfeld, 20210510.
+"""Template: a reference spectrum for the correlation engines.
 
+A ``Template`` wraps a ``Spectrum`` in ``self.model``: a PHOENIX-ACES
+synthetic spectrum read from the local cache in ``template_files/`` (fetched
+from the Goettingen server only on explicit opt-in, ``allow_download=True``),
+user-supplied wavelengths and fluxes, or a ready ``Spectrum``. Its methods
+broaden (rotational, instrumental), Doppler-shift, rebin and cut the model to
+the orders of an observation.
+
+Conventions: wavelengths in Angstrom (PHOENIX grids are in vacuum; ``air=True``
+converts them with Morton 2000, ApJS 130, 403), velocities in km/s.
+
+Reference: PHOENIX-ACES models -- Husser et al. 2013, A&A 553, A6.
+"""
 
 from astropy.io import fits
 from astropy.utils.data import download_file
 from sparta.UNICOR.Spectrum import Spectrum
 from unicor import dsp
 import numpy as np
-from pathlib import Path
 import os
 import shutil
 from astropy import units as u
@@ -64,7 +49,11 @@ class Template:
                 temp, log_g, metal, alpha.
 
         :param: min_val - minimal value for wavelength range (Angstrom)
-        :param: min_val - maximal value for wavelength range (Angstrom)
+        :param: max_val - maximal value for wavelength range (Angstrom)
+        :param: air - bool, convert the (vacuum) PHOENIX wavelengths to air.
+        :param: allow_download - bool, default False. Fetch PHOENIX files missing
+                from the local cache (TEMPLATE_FILES_PATH) over HTTPS; when
+                False a missing file raises FileNotFoundError.
 
         alternatively:
         1) Template spectrum and wavelengths can be passed on to the class and will be saved as-is.
@@ -74,10 +63,6 @@ class Template:
         '''
         if 'template' in kwargs:
             self.model = kwargs['template']
-            if 'vel' in kwargs:
-                self.vel = kwargs['vel']
-            else:
-                self.vel = []
 
         elif all(k in kwargs for k in ('temp', 'log_g', 'metal', 'alpha')):
             self.temp = kwargs['temp']
@@ -91,17 +76,16 @@ class Template:
 
             p, f_n = self.create_PHOENIX_fname(self.temp, self.log_g, self.metal, self.alpha)
 
-            # Fetch the wavelength grid and the requested spectrum if they are
-            # not already cached locally. Downloads can be disabled with
-            # allow_download=False (then a missing file raises instead of
-            # silently reaching out to the network).
-            allow_download = kwargs.get('allow_download', True)
+            # Network access is opt-in: a file missing from the local cache
+            # raises unless allow_download=True.
+            allow_download = kwargs.get('allow_download', False)
             for sub_path, fname in [('HiResFITS/', self.wl_f_n), (p, f_n)]:
                 if not os.path.exists(os.path.join(TEMPLATE_FILES_PATH, fname)):
                     if not allow_download:
                         raise FileNotFoundError(
                             f"PHOENIX file '{fname}' is not in {TEMPLATE_FILES_PATH} "
-                            "and downloads are disabled (allow_download=False).")
+                            "and downloads are disabled (allow_download=False); pass "
+                            "allow_download=True to fetch it.")
                     self.download_PHOENIX_files(sub_path, fname)
 
             with fits.open(os.path.join(TEMPLATE_FILES_PATH, f_n)) as hdul_spec:
@@ -180,7 +164,6 @@ class Template:
 
         else:
             self.model = Spectrum()
-            self.vel = []
 
         if 'PHXMASS' in kwargs:
             self.PHXMASS = kwargs['PHXMASS']
@@ -418,7 +401,7 @@ class Template:
                   if 'NativeStep' in self.model.Info else None)
 
         wvRangeInd = []
-        for ordInd, bnd in enumerate(wv_bounds):
+        for bnd in wv_bounds:
             Indices = (self.model.wv >= bnd[0]) & (self.model.wv<=bnd[1])
             wvRangeInd.append(Indices[0])
 

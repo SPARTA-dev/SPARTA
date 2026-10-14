@@ -1,8 +1,8 @@
 """Correctness tests for the reimplemented CCF / RV extraction.
 
-The legacy CrossCorrelateSpec could not recover non-negative radial velocities
-(see KNOWN_TRAPS.md): it truncated the template to a shifted sub-grid and used
-a constant (not per-lag) normalization, so only RV <~ 0 was recoverable. Its
+The legacy CrossCorrelateSpec could not recover non-negative radial velocities:
+it truncated the template to a shifted sub-grid and used a constant (not
+per-lag) normalization, so only RV <~ 0 was recoverable. Its
 first replacement correlated against a template on the observed span only, so
 fewer pixels overlapped at larger lags and the peak was pulled toward v = 0.
 CrossCorrelateSpec now resamples the template onto the observed log-lambda grid

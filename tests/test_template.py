@@ -12,6 +12,18 @@ def test_download_disabled_raises_without_network():
                  min_val=5000, max_val=5100, allow_download=False)
 
 
+def test_download_is_opt_in_by_default(monkeypatch):
+    import sys
+    template_module = sys.modules["sparta.UNICOR.Template"]   # the package exports the class
+
+    def no_network(*args, **kwargs):
+        raise AssertionError("network access attempted")
+
+    monkeypatch.setattr(template_module, "download_file", no_network)
+    with pytest.raises(FileNotFoundError, match="allow_download=True"):
+        Template(temp=9999, log_g=9.99, metal=0, alpha=0, min_val=5000, max_val=5100)
+
+
 def test_download_url_is_https_and_correct():
     t = Template.__new__(Template)
     t.server_url = "https://phoenix.astro.physik.uni-goettingen.de/data/"

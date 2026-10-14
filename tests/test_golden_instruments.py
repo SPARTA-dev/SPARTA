@@ -121,7 +121,7 @@ def _record_unicor(directory):
     obs = Observations(survey="NRES", target_visits_lib=str(directory))
     obs.SelectOrders([10 + i for i in np.arange(40)], remove=False)
     obs.PreProccessSpectra(Ntrim=100, CleanMargins=True, RemoveNaNs=True, delta=0.5,
-                           RemCosmicNum=3, FilterLC=4, FilterHC=0.15, alpha=0.3, verbose=False)
+                           RemCosmicNum=3, FilterLC=4, FilterHC=0.15, alpha=0.3)
     template = Template(temp=5800, log_g=3.5, metal=0.5, alpha=0.0, min_val=4650,
                         max_val=7500, air=False, allow_download=False)
     template.integrate_spec(integration_ratio=3)
@@ -132,7 +132,7 @@ def _record_unicor(directory):
     template.model.SpecPreProccess(Ntrim=10, CleanMargins=False, RemoveNaNs=False, delta=1,
                                    RemCosmicNum=3, FilterLC=4, FilterHC=0.15, alpha=0.3)
     obs.calc_rv_against_template(template, dv=0.05, VelBound=[-50, 100], err_per_ord=False,
-                                 combine_ccfs=True, fastccf=True)
+                                 combine_ccfs=True)
     return {os.path.basename(p): {"rv": float(v), "erv": float(e)}
             for p, v, e in zip(obs.file_list, obs.vels, obs.evels)}
 

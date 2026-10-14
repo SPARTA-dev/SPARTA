@@ -12,10 +12,11 @@ readme = "README.md"
 license = "MIT"
 authors = [{ name = "Sahar Shahaf" }]
 requires-python = ">=3.10"
-# numpy + scipy + unicor's DSP layer ONLY -- enforced by tests/test_todcor_isolation.py.
+# numpy + unicor's DSP layer ONLY -- enforced by tests/test_todcor_isolation.py.
+# todcor never imports scipy itself; it arrives through sparta-unicor, which
+# declares the version it needs, so it is not repeated here.
 dependencies = [
     "numpy>=1.24",
-    "scipy>=1.10",
     "sparta-unicor>=0.1",
 ]
 

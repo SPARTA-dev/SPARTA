@@ -12,7 +12,7 @@ import pytest
 from sparta import instruments
 from sparta.Observations import Observations
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
+ROOT = pathlib.Path(__file__).resolve().parents[2]
 HARPS = sorted((ROOT / "examples" / "data" / "TOI193").glob("*.fits"))
 NRES = sorted((ROOT / "examples" / "data" / "TOI677").glob("*.fits"))
 

@@ -1,37 +1,20 @@
-#                   ----------------------------------
-#                     CCF2d.py (SPARTA TODCOR class)
-#                   ----------------------------------
-# This file defines the "CCF2d" class -- the two-component (double-lined)
-# counterpart of UNICOR's CCF1d. Where CCF1d correlates one observation against
-# one template and reads a 1-D CCF peak, CCF2d fits *both* components of an SB2
-# simultaneously against two templates, on a 2-D (v1, v2) grid: TODCOR
-# (Zucker & Mazeh 1994) recast as a Gaussian profile likelihood in the Fourier
-# domain.
-#
-# ---------------------------------------------
-# A CCF2d class stores the following methods:
-# ---------------------------------------------
-# 1) CrossCorrelateSpec - two-dimensional correlation of a spectrum against two
-#                         templates; each spectral order is one "window" and the
-#                         windows are pooled into a single joint fit. A coarse
-#                         (v1, v2) map locates the peak, a fine local map refines
-#                         it, and the velocities, amplitudes and CRLB
-#                         uncertainties are read from the fine map.
-# 2) plotTODCOR         - plot the (v1, v2) likelihood map.
-# 3) BestFitSpectrum    - the best-fit composite of a given order, for residuals.
-#
-# The estimator itself (sufficient statistics, profiled amplitudes, CRLB) lives
-# in todcor.estimator; the forward model in todcor.simulate; the
-# grid/FFT/broadening primitives in unicor.dsp. This class handles the
-# SPARTA-object orchestration: log-lambda gridding, per-order preparation,
-# window combination, and reporting.
-#
-# Conventions: radial velocities in km/s, 'cz' (lambda_obs/lambda_rest = 1 + v/c)
-# unless velocity_convention='relativistic'; wavelengths in Angstrom; the fit is
-# performed on a log-lambda (velocity-even) grid.
-#
-# Dependencies: numpy, astropy, matplotlib, copy, functools.
-"""Two-dimensional (TODCOR) cross-correlation of an SB2 against two templates."""
+"""CCF2d: TODCOR fit of a double-lined (SB2) Spectrum against two Templates.
+
+The two-component counterpart of UNICOR's ``CCF1d``: both components are fitted
+simultaneously on a (v1, v2) grid -- TODCOR recast as a Gaussian profile
+likelihood in the Fourier domain. Each spectral order is one TODCOR window;
+the windows' sufficient statistics are pooled into one joint fit, a coarse map
+locates the peak and a fine local map measures the velocities, amplitudes and
+Cramer-Rao uncertainties. The estimator lives in ``todcor.estimator``, the
+forward model in ``todcor.simulate``, the grid/FFT/broadening primitives in
+``unicor.dsp``; this class handles the SPARTA-object orchestration.
+
+Conventions: velocities in km/s, 'cz' (lambda_obs/lambda_rest = 1 + v/c) unless
+``velocity_convention='relativistic'``; wavelengths in Angstrom; the fit runs on
+a log-lambda (velocity-even) grid.
+
+Reference: Zucker & Mazeh 1994, ApJ 420, 806.
+"""
 
 from copy import deepcopy
 from functools import lru_cache
@@ -39,7 +22,7 @@ import warnings
 
 import numpy as np
 import matplotlib.pyplot as plt
-from astropy import constants as consts, units as u
+from astropy import units as u
 
 from unicor import dsp
 from todcor.simulate import model_flux
@@ -55,8 +38,7 @@ class CCF2d:
     # =============================================================================
     def __init__(self):
         '''
-        No input required. Sets the speed of light ``self.c`` (km/s), the
-        default log-lambda grid step ``self.default_dv`` (0.1 km/s, matching
+        No input required. Sets the default log-lambda grid step ``self.default_dv`` (0.1 km/s, matching
         CCF1d), the default step of the trial-velocity map
         ``self.default_dvel`` (1 km/s), the peak-refinement geometry, and
         ``self.min_noise_dof`` (50): the fewest noise degrees of freedom an
@@ -81,7 +63,6 @@ class CCF2d:
         where the quartic term changes the curvature by only a few per cent and
         the peak location negligibly.
         '''
-        self.c = consts.c.to('km/s')                       # speed of light, km/s
         self.default_dv = 0.1 * u.kilometer / u.second     # log-lambda grid step
         self.default_dvel = 1.0                            # (v1, v2) map step, km/s
         self.refine_span = 2       # fine-map half-width, in coarse steps

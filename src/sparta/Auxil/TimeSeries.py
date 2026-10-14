@@ -1,28 +1,13 @@
-#                   ------------------------------
-#                     TimeSeries.py (SPARTA class)
-#                   ------------------------------
-# This file defines the "TimeSeries" class. An object of this class stores
-# measured time series data (spectrum or radial velocity values and their corresponding observation times).
-# It is meant to be used by an Observations class, alongside a PeriodicityDetector class
-# which runs GLS and Zucker PDC and USuRPer on the data (arxiv.org/pdf/1711.06075.pdf).
-#
-# Conventions: velocities in km/s, times in BJD (days).
-#
-# A TimeSeries class stores the following methods:
-# ---------------------------------------------
-# 1) calc_rv_against_template - This function calculates radial velocity for the entire spectrum time series,
-#                               using CCF against resting template
-# 2) calc_rv_against_two_templates - The double-lined (SB2) counterpart: TODCOR
-#    against two templates, one (v1, v2) fit per epoch.
-# 3) getBIS - Calculates the time series BIS, from the calculated CCFs.
-# 4) plot_velocities - plots the time series velocities.
-# 5) build_tiravel_template - Zucker & Mazeh 2006 TIRAVEL: builds a template out
-#    of the observations themselves, given a set of trial velocities.
+"""TimeSeries: observation times paired with values -- spectra or scalars.
 
-# ---------------------------------------------
-# Dependencies: os, tqdm, numpy and matplotlib.
-# Last update: Sahar Shahaf, 20220327.
+The values are either ``Spectrum`` objects (a spectroscopic time series, on
+which the RV engines run epoch by epoch: UNICOR ``CCF1d``, TODCOR ``CCF2d``,
+TIRAVEL) or scalars such as RVs (on which ``PeriodicityDetector`` runs GLS and
+PDC). ``Observations`` builds and drives one.
 
+Conventions: velocities in km/s, times in days. The methods are thin loops
+over the engines; see their modules for the methods and references.
+"""
 from sparta.UNICOR.CCF1d import CCF1d
 from sparta.TODCOR.CCF2d import CCF2d
 from sparta.TIRAVEL.TIRAVEL import TIRAVEL
@@ -75,7 +60,7 @@ class TimeSeries:
     # =============================================================================
     # =============================================================================
     def calc_rv_against_template(self, spec_list, template, dv=0.1, VelBound=150,
-                                 err_per_ord=False, combine_ccfs=True, fastccf=False):
+                                 err_per_ord=False, combine_ccfs=True):
         '''
         This function calculates radial velocity for the entire spectrum time series, using CCF against resting template.
         :param: spec_list - a list of Spectrum objects, with the observed data.
@@ -89,7 +74,6 @@ class TimeSeries:
         if is_numeric_scalar(spec_list[0]):
             raise ValueError('RV calculation is available for spectrum time-series only')
 
-        calculated_vrad_list = []
         sample_size = len(spec_list)
 
         ccfs = []
@@ -99,8 +83,7 @@ class TimeSeries:
                                                  spec_in=spec,
                                                  dv=dv,
                                                  VelBound=VelBound,
-                                                 err_per_ord=err_per_ord,
-                                                 fastccf=fastccf)
+                                                 err_per_ord=err_per_ord)
                 if combine_ccfs:
                     ccf.CombineCCFs()
 

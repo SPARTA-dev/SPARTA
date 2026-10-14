@@ -1,27 +1,19 @@
-#                   -----------------------------------------------
-#                     USuRPer_functions.py (SPARTA USuRPer file)
-#                   -----------------------------------------------
-# Functions for the Zucker phase-distance-correlation (PDC) periodogram and its
-# unit-sphere representation, USuRPER (arxiv.org/pdf/1711.06075.pdf). Called by
-# the PeriodicityDetector class.
-#
-# Distance-correlation core:
-#   inner_prod               - U-centered inner product, normalized by 1/(n(n-3)).
-#   norm_z                   - part of one U-centered matrix orthogonal to another.
-#   unbiased_u_centering     - unbiased U-centering of a distance matrix (zero diagonal).
-#   calc_PDC                 - biased PDC value at one frequency.
-#   calc_PDC_unbiased        - unbiased PDC value at one frequency.
-#   calc_pdc_distance_matrix - build and U-center the value/phase distance matrices.
-#
-# Spectrum helpers (USuRPER; single-order):
-#   _single_order_arrays, get_wv_grid, resample_spec_to_common_grid, _gram.
-#
-# Conventions: times in days, frequency in 1/day. U-centering uses 1/(n(n-3))
-# and /(n-2), /(n-1) factors -- singular for n <= 3. The pairwise distance
-# matrices are vectorized (broadcasting / a BLAS Gram product).
-#
-# Dependencies: numpy, unicor.dsp.
-# Last update: Sahar Shahaf, 20220915
+"""Distance-correlation kernels of the PDC, USuRPER and partial periodograms.
+
+The phase-distance-correlation (PDC) periodogram correlates the pairwise
+distances of the values (scalars, or spectra on the unit sphere for USuRPER)
+with the pairwise phase distances at each trial frequency. Called by
+``PeriodicityDetector``; the pairwise distance matrices are vectorized
+(broadcasting, or a BLAS Gram product for spectra).
+
+Conventions: times in days, frequency in 1/day, wavelengths in Angstrom,
+velocities in km/s. The unbiased U-centering uses 1/(n(n-3)) and /(n-2),
+/(n-1) factors -- singular or negative for n <= 3, which raise.
+
+References: Zucker 2018, MNRAS 474, L86 (PDC); Binnenfeld, Shahaf & Zucker
+2020, A&A 642, A146 (USuRPER); Binnenfeld, Shahaf & Zucker 2024 (error-aware
+distance, Eq. 3).
+"""
 
 import numpy as np
 from unicor import dsp
@@ -124,9 +116,7 @@ def calc_PDC_unbiased(periodicity_detector, f):
     mat_B_unbiased = unbiased_u_centering(b, periodicity_detector.time_series.size)
 
     if periodicity_detector.method.split('_')[0] == "shift" or periodicity_detector.method.split('_')[0] == "shape":
-        semi = True
-        if semi:
-            mat_B_unbiased = norm_z(mat_B_unbiased, periodicity_detector.pdc_mat_C_unbiased)
+        mat_B_unbiased = norm_z(mat_B_unbiased, periodicity_detector.pdc_mat_C_unbiased)
         num = inner_prod(periodicity_detector.pdc_mat_A_unbiased, mat_B_unbiased)
         den = np.sqrt(inner_prod(periodicity_detector.pdc_mat_A_unbiased, periodicity_detector.pdc_mat_A_unbiased))
         den = den * np.sqrt(inner_prod(mat_B_unbiased, mat_B_unbiased))

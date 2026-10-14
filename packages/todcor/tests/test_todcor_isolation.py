@@ -1,4 +1,4 @@
-"""Dependency isolation: `todcor` depends on numpy + scipy + unicor only.
+"""Dependency isolation: `todcor` depends on numpy + unicor only (scipy via unicor).
 
 The point of the standalone package is that it installs and imports without
 SPARTA's heavier stack. Two independent checks:

@@ -1,35 +1,22 @@
-#                   ----------------------------------
-#                      CCF1d.py (SPARTA UNICOR class)
-#                   ----------------------------------
-# This file defines the "CCF1d" class. An object of this class stores
-# a Spectrum object, saved in the self.spec field and a Template object
-# stored in the self.template field.
-#
-# ---------------------------------------------
-# A CCF1d class stores the following methods:
-# ---------------------------------------------
-# 1) CrossCorrelateSpec - multi-order cross-correlation of a spectrum vs a template.
-# 2) CombineCCFs        - combine the per-order CCFs (Zucker 2003 maximum likelihood).
-# 3) extract_RV         - radial velocity + uncertainty from the CCF peak.
-# 4) calcBIS            - bisector span (BIS) of the (single-peaked) CCF.
-# 5) subpixel_CCF       - parabolic sub-pixel estimate of the CCF peak / value.
-# 6) plotCCFs           - plot the per-order and combined CCFs.
-#
-# The array-level engine (CCF vs velocity, Zucker combination, sub-pixel peak,
-# ML uncertainty, bisector) is the standalone ``unicor`` package; this class
-# handles the Spectrum/Template orchestration and the astropy units at its
-# boundary.
-#
-# Conventions: radial velocities in km/s, in the 'cz' Doppler convention
-# (lambda_obs/lambda_rest = 1 + v/c) unless velocity_convention='relativistic';
-# the CCF is computed on a log-lambda (velocity-even) grid.
-#
-# Dependencies: numpy, astropy, matplotlib, copy, unicor.
-# Last update: 2026-10-14 (lag -> velocity by the Doppler convention).
+"""CCF1d: UNICOR cross-correlation RVs of a (multi-order) Spectrum against a Template.
 
+Each order is correlated with the template on a log-lambda (velocity-even)
+grid, the per-order CCFs are combined by maximum likelihood, and the RV and its
+uncertainty are read from the combined peak. The array-level engine (CCF vs
+velocity, order combination, sub-pixel peak, ML uncertainty, bisector) is the
+standalone ``unicor`` package; this class handles the Spectrum/Template
+orchestration and the astropy units at its boundary.
+
+Conventions: velocities in km/s, in the 'cz' Doppler convention
+(lambda_obs/lambda_rest = 1 + v/c) unless ``velocity_convention='relativistic'``;
+wavelengths in Angstrom.
+
+Reference: Zucker 2003, MNRAS 342, 1291 (ML combination of orders and the RV
+uncertainty).
+"""
 
 import numpy as np
-from astropy import constants as consts, units as u
+from astropy import units as u
 import matplotlib.pyplot as plt
 from copy import deepcopy
 import warnings
@@ -40,17 +27,16 @@ class CCF1d:
     # =============================================================================
     def __init__(self):
         '''
-        No input required. Sets the speed of light ``self.c`` (km/s) and the
-        default CCF velocity step ``self.default_dv`` (0.1 km/s), used when a
-        spectrum carries no log-lambda grid step of its own.
+        No input required. Sets the default CCF velocity step
+        ``self.default_dv`` (0.1 km/s), used when a spectrum carries no
+        log-lambda grid step of its own.
         '''
-        self.c = consts.c.to('km/s')  # speed of light, km/s
         self.default_dv = 0.1 * u.kilometer / u.second
 
     # =============================================================================
     # =============================================================================
     def CrossCorrelateSpec(self, spec_in, template_in,
-                           dv=None, VelBound=100, err_per_ord=False, fastccf=False,
+                           dv=None, VelBound=100, err_per_ord=False,
                            velocity_convention='cz'):
         '''
         All input is optional, and needs to be called along

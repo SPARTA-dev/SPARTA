@@ -3,8 +3,8 @@
 Standalone Python engine for **Fourier-domain two-component (TODCOR) radial
 velocities** of double-lined spectroscopic binaries — the array-level core of
 [SPARTA](https://github.com/SPARTA-dev/SPARTA)'s TODCOR. Its only dependencies are
-numpy, scipy and [`unicor`](../unicor) (for the shared log-λ grid and
-broadening primitives).
+numpy and [`unicor`](../unicor) (for the shared log-λ grid and broadening
+primitives; it brings in scipy).
 
 `todcor` fits the radial velocities *and* relative amplitudes of both
 components of an SB2 simultaneously. It is TODCOR (Zucker & Mazeh 1994, ApJ

@@ -1,9 +1,9 @@
 """TODCOR: two-dimensional correlation for double-lined (SB2) spectra.
 
-A standalone, numpy + scipy engine that fits the velocities *and* relative
-amplitudes of both components of an SB2 simultaneously on a 2-D ``(v1, v2)``
-grid -- Zucker & Mazeh (1994, ApJ 420, 806) recast as a Gaussian profile
-likelihood in the Fourier domain.
+A standalone numpy engine (on unicor's grid primitives) that fits the
+velocities *and* relative amplitudes of both components of an SB2
+simultaneously on a 2-D ``(v1, v2)`` grid -- Zucker & Mazeh (1994, ApJ 420,
+806) recast as a Gaussian profile likelihood in the Fourier domain.
 
 On a uniform log-lambda grid a Doppler shift is a translation, so in the Fourier
 domain it is a phase factor: the templates are transformed **once** and reused

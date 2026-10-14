@@ -1,5 +1,5 @@
 """NRES-BANZAI table loader on synthetic FITS (the e91 product is pinned on the bundled
-TOI677 files in test_readspec.py and test_golden_instruments.py)."""
+TOI677 files in test_bundled_data.py and test_golden_instruments.py)."""
 import numpy as np
 from astropy.io import fits
 

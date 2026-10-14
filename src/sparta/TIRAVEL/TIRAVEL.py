@@ -1,34 +1,20 @@
-#                   ------------------------------------
-#                     TIRAVEL.py (SPARTA TIRAVEL class)
-#                   ------------------------------------
-# This file defines the "TIRAVEL" class -- the template-independent arm of
-# SPARTA, alongside UNICOR (CCF1d, one template) and TODCOR (CCF2d, two
-# templates). Where those two *require* a template, TIRAVEL *builds* one: given
-# a set of trial radial velocities it shifts every observation to rest, measures
-# how well the set aligns, and co-adds the epochs with maximum-likelihood
-# weights into a template that the UNICOR/TODCOR engines can then use.
-#
-# ---------------------------------------------
-# A TIRAVEL class stores the following methods:
-# ---------------------------------------------
-# 1) BuildTemplate  - align, measure rho, and co-add into a Template object.
-# 2) plotWeights    - the per-epoch co-addition weights.
-# 3) plotTemplate   - the co-added template over the aligned epochs.
-#
-# The alignment measure and the co-addition live in sparta.TIRAVEL.tiravel_ops;
-# the resampling/normalization primitives in unicor.dsp.
-#
-# Scope: this is the *fixed-velocity* half of TIRAVEL. Zucker & Mazeh's full
-# method maximises rho over the K velocities; here the velocities are supplied
-# and rho is evaluated once. rho is exposed precisely so it can drive that
-# optimization later -- it is the objective function.
-#
-# Conventions: velocities in km/s, wavelengths in Angstrom.
-#
-# Reference: Zucker, S. & Mazeh, T. 2006, MNRAS 371, 1513 (astro-ph/0607293).
-#
-# Dependencies: numpy, matplotlib, copy.
-"""Template-independent template construction (TIRAVEL) on SPARTA objects."""
+"""TIRAVEL: build a template out of the observations themselves.
+
+The template-independent arm alongside UNICOR (``CCF1d``, one template) and
+TODCOR (``CCF2d``, two templates): given trial radial velocities, every epoch is
+shifted to rest and resampled onto a common grid, the alignment measure
+``rho = (lambda_max - 1)/(K - 1)`` is read from the epochs' correlation matrix,
+and its leading eigenvector weights the co-added template, returned as a
+``Template`` for UNICOR or TODCOR. This is the fixed-velocity half of the
+method: ``rho`` is evaluated at the supplied velocities, as the objective a
+velocity optimizer would maximise. The array-level measure is in
+``sparta.TIRAVEL.tiravel_ops``.
+
+Conventions: velocities in km/s (only their differences matter), wavelengths
+in Angstrom.
+
+Reference: Zucker & Mazeh 2006, MNRAS 371, 1513.
+"""
 
 from copy import deepcopy
 

@@ -1,38 +1,22 @@
-#                   ------------------------------------------
-#                     Observations.py (SPARTA Auxil class)
-#                   ------------------------------------------
-# This file defines the "Observations" class: an astronomical-observation time
-# series, built either by reading an entire observation directory or from an
-# existing TimeSeries object. It also drives GLS / Zucker PDC / USuRPER on the
-# data (arxiv.org/pdf/1711.06075.pdf) via a PeriodicityDetector.
-#
-# Per-instrument FITS reading lives in sparta.instruments (one module per
-# instrument; the survey key selects the loader). Conventions: wavelengths in
-# Angstrom, velocities in km/s, times in BJD (days), periodogram frequency in 1/day.
-#
-# Observations class stores the following methods:
-# ---------------------------------------------
-# 1) PreProccessSpectra - contains different pre-processing procedures applied on an observed spectrum.
-# 2) SelectOrders - enables the user to keep or discard orders from the observed data.
-# 3) calc_rv_against_template - calculates radial velocity for the entire spectrum time series,
-#                               using CCF against resting template.
-# 3b) calc_rv_against_two_templates - the double-lined (SB2) counterpart: TODCOR
-#                               against two templates, per epoch.
-# 3c) build_tiravel_template - the template-independent counterpart: TIRAVEL
-#                               builds a template out of the observations.
-# 4) retrieve_BIS - computes BIS from the calculated CCF
-# 5) initialize_periodicity_detector -
-#                    initiate the object's PeriodicityDetector instance before using it to create periodograms.
-# 6) convert_times_to_relative_float_values -
-#                            converts the observation dates to float values, marking the days past the first visit.
-# 7) clean_time_series - enables systematically removing observation data.
-#
-#
-# Dependencies: os, contextlib, tqdm and numpy.
-# Last update: Sahar Shahaf, 20220327.
+"""Observations: a spectroscopic time series and the analyses run on it.
 
+An ``Observations`` object is built from a directory of archive files (read by
+the per-instrument loaders in ``sparta.instruments``, selected by the survey
+key), from a ``sparta.instruments.Simulation``, or from an existing
+``TimeSeries``. It drives the RV engines -- UNICOR (``CCF1d``), TODCOR
+(``CCF2d``) and TIRAVEL -- epoch by epoch, and the periodograms (GLS, PDC,
+USuRPER) through a ``PeriodicityDetector``.
+
+Conventions: wavelengths in Angstrom, velocities in km/s, times in days (for
+files read from disk, ``time_list`` counts days from the integer day
+``first_time``), periodogram frequencies in 1/day.
+
+References: UNICOR -- Zucker 2003, MNRAS 342, 1291; TODCOR -- Zucker & Mazeh
+1994, ApJ 420, 806; TIRAVEL -- Zucker & Mazeh 2006, MNRAS 371, 1513; PDC --
+Zucker 2018, MNRAS 474, L86; USuRPER -- Binnenfeld, Shahaf & Zucker 2020,
+A&A 642, A146.
+"""
 import os
-import contextlib
 import warnings
 import numpy as np
 from sparta.UNICOR.Spectrum import Spectrum
@@ -117,7 +101,7 @@ class Observations:
         '''
         self.file_list = []
         count = 0
-        for root, dirs, files in os.walk(target_visits_lib):
+        for root, _, files in os.walk(target_visits_lib):
             for file in files:
                 if (file.endswith(".fits") or file.endswith(".fits.gz") or file.endswith(".fts.gz") or file.endswith(".fits.Z")) and not file.startswith('~'):
                     if count % sample_rate == 0:
@@ -212,22 +196,16 @@ class Observations:
 # =============================================================================
     def PreProccessSpectra(self, Ntrim=10, CleanMargins=True, RemoveNaNs=True,
                            delta=0.5, RemCosmicNum=3, FilterLC=3, FilterHC=0.15,
-                           alpha=0.3, verbose=True):
+                           alpha=0.3):
         '''
         This function conatains different pre-processing procedures applied on an observed spectrum.
         '''
-        # Optionally silence per-spectrum stdout via a context manager, so the
-        # real stdout is always restored (even on error) and no file handle
-        # leaks -- unlike the previous global sys.stdout reassignment.
-        with open(os.devnull, 'w') as devnull:
-            silence = contextlib.redirect_stdout(devnull) if not verbose \
-                else contextlib.nullcontext()
-            with silence, tqdm(total=self.sample_size) as pbar:
-                for s in self.spec_list:
-                    s.SpecPreProccess(Ntrim=Ntrim, CleanMargins=CleanMargins, RemoveNaNs=RemoveNaNs,
-                                      delta=delta, RemCosmicNum=RemCosmicNum, FilterLC=FilterLC,
-                                      FilterHC=FilterHC, alpha=alpha)
-                    pbar.update(1)
+        with tqdm(total=self.sample_size) as pbar:
+            for s in self.spec_list:
+                s.SpecPreProccess(Ntrim=Ntrim, CleanMargins=CleanMargins, RemoveNaNs=RemoveNaNs,
+                                  delta=delta, RemCosmicNum=RemCosmicNum, FilterLC=FilterLC,
+                                  FilterHC=FilterHC, alpha=alpha)
+                pbar.update(1)
 
         return self
 
@@ -250,7 +228,7 @@ class Observations:
 # =============================================================================
 # =============================================================================
     def calc_rv_against_template(self, template, dv=0.1, VelBound=150,
-                                 err_per_ord=False, combine_ccfs=True, fastccf=False):
+                                 err_per_ord=False, combine_ccfs=True):
         '''
         This function calculates radial velocity for the entire spectrum time series, using CCF against resting template.
         :param: spec_list - a list of Spectrum objects, with the observed data.
@@ -268,8 +246,7 @@ class Observations:
                                          dv=dv,
                                          VelBound=VelBound,
                                          err_per_ord=err_per_ord,
-                                         combine_ccfs=combine_ccfs,
-                                         fastccf=fastccf)
+                                         combine_ccfs=combine_ccfs)
                 )
 
         vels = np.zeros(self.sample_size)

@@ -33,7 +33,7 @@
 
 **USuRPER**—**U**nit **S**phere **R**epresentation **PER**iodogram—a phase-distance correlation (PDC) based periodogram, designed for very high-dimensional data like spectra ([ref](https://ui.adsabs.harvard.edu/abs/2018MNRAS.474L..86Z/abstract)).
 
-**TIRAVEL**—**T**emplate-**I**ndependent **RA**dial **VEL**ocity: builds a template out of the observations themselves. Given a set of trial velocities it aligns the epochs, measures how well they co-add (the alignment measure ρ), and returns the maximum-likelihood co-added template for use by UNICOR or TODCOR ([ref](https://ui.adsabs.harvard.edu/abs/2006MNRAS.371.1513Z/abstract)). Currently the fixed-velocity step; ρ is the objective for the velocity optimizer to come (see `KNOWN_TRAPS.md`).
+**TIRAVEL**—**T**emplate-**I**ndependent **RA**dial **VEL**ocity: builds a template out of the observations themselves. Given a set of trial velocities it aligns the epochs, measures how well they co-add (the alignment measure ρ), and returns the maximum-likelihood co-added template for use by UNICOR or TODCOR ([ref](https://ui.adsabs.harvard.edu/abs/2006MNRAS.371.1513Z/abstract)). Currently the fixed-velocity step: ρ is evaluated at the supplied velocities, and is the objective a velocity optimizer (not yet implemented) would maximise.
 
 ### Near-future extension plans:
 
