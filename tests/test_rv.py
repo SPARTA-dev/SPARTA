@@ -8,8 +8,11 @@ fewer pixels overlapped at larger lags and the peak was pulled toward v = 0.
 CrossCorrelateSpec now resamples the template onto the observed log-lambda grid
 extended by the scan half-width on each side, so every lag is a Pearson
 correlation over the same observed pixels. The golden master is physical:
-recovered RV must equal the injected RV, for both signs, with no pull to zero.
+recovered RV must equal the injected RV, for both signs, with no pull to zero,
+in either Doppler convention ('cz' by default, or 'relativistic').
 """
+import inspect
+
 import numpy as np
 import pytest
 from astropy import units as u
@@ -47,20 +50,21 @@ def test_rv_recovers_injected(template, inj):
 def test_ccf_vs_velocity_recovers_shift(inj):
     dv, n = 0.5, 2000
     x = np.arange(n) * dv
+    wave = 5500.0 * np.exp(x / C)
 
     def line(cv):
         return 1.0 - 0.6 * np.exp(-0.5 * ((x - n // 2 * dv - cv) / 3.0) ** 2)
 
     k = 80   # lags: +-40 km/s; the template's extension is pure continuum
     template = np.concatenate([np.ones(k), line(0.0), np.ones(k)])
-    v, ccf = so.ccf_vs_velocity(template, line(inj), dv)
+    v, ccf = so.ccf_vs_velocity(template, line(inj), wave)
     assert v[np.argmax(ccf)] == pytest.approx(inj, abs=dv)
     assert ccf.max() == pytest.approx(1.0, abs=1e-12)   # every lag: all n pixels
 
 
 def test_ccf_vs_velocity_rejects_a_template_on_the_observed_span_only():
     with pytest.raises(ValueError, match="2K"):
-        so.ccf_vs_velocity(np.ones(12), np.ones(12), 0.5)
+        so.ccf_vs_velocity(np.ones(12), np.ones(12), 5500.0 * np.exp(np.arange(12) * 0.5 / C))
 
 
 def test_rv_beyond_the_scan_is_nan_not_a_wrong_sign(template):
@@ -168,9 +172,9 @@ def _rotating_forest(vsini, seed, lam_lo=5000.0, lam_hi=5060.0, fine_dv=0.05):
 def test_rotating_star_rv_has_no_pull_toward_zero():
     # vsini 25 km/s, one 60 A order: the same-span CCF this replaced was
     # pulled toward v = 0 by 40-370 m/s on this forest. The shift is a whole
-    # number k0 of grid steps, so the expected peak is exactly k0 * dv (the
-    # parabola has no pixel-phase error there; the lag -> Doppler velocity
-    # mapping is a separate convention).
+    # number k0 of grid steps, so the expected peak is exactly the cz velocity
+    # of that lag, c (exp(k0 dln) - 1) (the parabola has no pixel-phase error
+    # there).
     dv = 0.75
     wave, _ = so.log_lambda_grid(5000.0, 5060.0, dv)
     dln = np.log(wave[-1] / wave[0]) / (wave.size - 1)
@@ -183,7 +187,7 @@ def test_rotating_star_rv_has_no_pull_toward_zero():
         flux = so.resample(t_wave, t_flux, wave * np.exp(-k0 * dln), kind="cubic")
         ccf = CCF1d().CrossCorrelateSpec(spec_in=_log_spectrum(wave, flux, dv),
                                          template_in=tmpl, VelBound=100)
-        errors.append((float(ccf.Corr["RV"][0, 0]) - k0 * dv) * 1e3)   # m/s
+        errors.append((float(ccf.Corr["RV"][0, 0]) - C * np.expm1(k0 * dln)) * 1e3)   # m/s
     errors = np.array(errors)
     np.testing.assert_array_less(np.abs(errors), 1.5)
     assert abs(np.mean(np.sign(v0s) * errors)) < 0.5
@@ -291,3 +295,114 @@ def test_ccf1d_refuses_native_steps_that_do_not_match_the_orders(forest_template
     obs.Info["NativeStep"] = [1.0, 1.0]
     with pytest.raises(ValueError, match="NativeStep"):
         CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=forest_template, VelBound=20)
+
+
+# --- Velocity conventions -----------------------------------------------------
+# Lag k multiplies lambda by exp(k dln), dln the grid's actual ln-step. Under
+# 'cz' (lambda_obs/lambda_rest = 1 + v/c; IAU 2000, IRAF fxcor) that is
+# v = c (exp(k dln) - 1); under 'relativistic' (sqrt((1+b)/(1-b))) v = c tanh(k dln).
+# The former k * dv reading was off by -v^2/2c from cz (-37.5 m/s at 150 km/s)
+# and, on an InterpolateSpectrum grid (dln = ln(1 + dv/c)), by a further
+# -v dv/2c (-0.25 m/s at 150 km/s for dv = 1 km/s).
+
+CONVENTIONS = ("cz", "relativistic")
+INJECT_V0 = (-150.0, -100.0, -50.0, -10.0, 10.0, 50.0, 100.0, 150.0)   # km/s
+
+
+def _factor(v_kms, convention):
+    """lambda_obs / lambda_rest, written out from the two definitions."""
+    b = v_kms / C
+    return 1.0 + b if convention == "cz" else np.sqrt((1.0 + b) / (1.0 - b))
+
+
+def _interpolated_log_grid(lam_lo, lam_hi, dv):
+    """A log-lambda grid as Spectrum.InterpolateSpectrum builds it: ln-step ln(1 + dv/c)."""
+    return np.exp(np.arange(np.log(lam_lo), np.log(lam_hi), np.log1p(dv / C)))
+
+
+def _interior_forest(lam_lo=5000.0, lam_hi=5060.0, n_lines=100, sigma_kms=4.0, seed=8):
+    """Rest-frame forest (Gaussians in velocity), as a function of lambda.
+
+    The lines keep 400 km/s clear of the order edges, so after a shift of up to
+    150 km/s both edges are continuum and the CCF is symmetric about a
+    whole-lag peak (the sub-pixel parabola then has no pixel-phase error).
+    """
+    rng = np.random.default_rng(seed)
+    centres = rng.uniform(400.0, C * np.log(lam_hi / lam_lo) - 400.0, n_lines)
+    depths = rng.uniform(0.05, 0.6, n_lines)
+
+    def flux(wave):
+        u_kms = C * np.log(np.asarray(wave, float) / lam_lo)
+        return np.prod(1.0 - depths * np.exp(
+            -0.5 * ((u_kms[:, None] - centres) / sigma_kms) ** 2), axis=1)
+    return flux
+
+
+def _whole_lag_case(v0, convention, dv=1.0, vel_bound=200.0):
+    """(observed spectrum, template, injected v): a forest shifted by the whole
+    number of lags nearest ``v0`` (km/s), on an InterpolateSpectrum-style grid.
+
+    The template is sampled on exactly the extended grid CCF1d resamples it
+    onto, so the resampling is the identity and only the mapping is tested.
+    """
+    wave = _interpolated_log_grid(5000.0, 5060.0, dv)
+    dln = np.log(wave[-1] / wave[0]) / (wave.size - 1)
+    x = round(np.log(_factor(v0, convention)) / dln) * dln
+    v_inj = C * np.expm1(x) if convention == "cz" else C * np.tanh(x)
+    forest = _interior_forest()
+    t_wave = so.extend_log_grid(wave, round(vel_bound / dv))
+    tmpl = Template(template=Spectrum(wv=[t_wave], sp=[forest(t_wave)], name="t"))
+    obs = _log_spectrum(wave, forest(wave / _factor(v_inj, convention)), dv)
+    return obs, tmpl, v_inj
+
+
+@pytest.mark.parametrize("conv", CONVENTIONS)
+@pytest.mark.parametrize("v0", INJECT_V0)
+def test_ccf1d_recovers_whole_lag_injections_in_either_convention(v0, conv):
+    obs, tmpl, v_inj = _whole_lag_case(v0, conv)
+    ccf = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=tmpl, VelBound=200,
+                                     velocity_convention=conv).CombineCCFs()
+    assert ccf.Corr["velocity_convention"] == conv
+    assert ccf.CorrCombined["velocity_convention"] == conv
+    assert abs(float(ccf.Corr["RV"][0, 0]) - v_inj) * 1e3 < 0.05       # m/s
+    assert abs(float(ccf.CorrCombined["RV"]) - v_inj) * 1e3 < 0.05
+
+
+@pytest.mark.parametrize("v0", [-150.0, 150.0])
+def test_ccf1d_cz_and_relativistic_differ_by_v2_over_2c(v0):
+    obs, tmpl, _ = _whole_lag_case(v0, "cz")
+    rv = {conv: float(CCF1d().CrossCorrelateSpec(
+        spec_in=obs, template_in=tmpl, VelBound=200,
+        velocity_convention=conv).Corr["RV"][0, 0]) for conv in CONVENTIONS}
+    assert rv["cz"] - rv["relativistic"] == pytest.approx(v0 ** 2 / (2 * C), rel=3e-3)
+
+
+def test_ccf1d_default_convention_is_cz(template):
+    sig = inspect.signature(CCF1d.CrossCorrelateSpec)
+    assert sig.parameters["velocity_convention"].default == "cz"
+    obs = Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0 * (1 + 40.0 / C))], name="o")
+    default = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=template, dv=0.5, VelBound=50)
+    cz = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=template, dv=0.5, VelBound=50,
+                                    velocity_convention="cz")
+    assert default.Corr["velocity_convention"] == "cz"
+    np.testing.assert_array_equal(default.Corr["vel"], cz.Corr["vel"])
+    np.testing.assert_array_equal(default.Corr["RV"], cz.Corr["RV"])
+
+
+@pytest.mark.parametrize("bad", ["classical", "Relativistic", None])
+def test_ccf1d_refuses_an_unknown_convention_instead_of_nan_orders(template, bad):
+    # Per-order failures become NaN + a warning; a bad convention must not.
+    obs = Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0)], name="o")
+    with pytest.raises(ValueError, match="convention"):
+        CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=template, dv=0.5, VelBound=50,
+                                   velocity_convention=bad)
+
+
+def test_ccf1d_refuses_orders_whose_ln_steps_differ(template):
+    # Both steps pass the GridDelta check (rtol 1e-3), but 100 lags apart the
+    # two orders' velocity axes would be misregistered by 0.04 lag.
+    waves = [so.log_lambda_grid(5480.0, 5520.0, step)[0] for step in (0.5, 0.5002)]
+    obs = Spectrum(wv=waves, sp=[np.ones_like(w) for w in waves], name="o")
+    obs.Info["GridType"], obs.Info["GridDelta"] = "log", 0.5 * u.km / u.s
+    with pytest.raises(ValueError, match="velocity axis"):
+        CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=template, VelBound=50)

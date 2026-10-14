@@ -7,6 +7,8 @@ it wraps is tested in ``packages/todcor/tests``.
 Self-contained: no external data.
 """
 
+import inspect
+
 import numpy as np
 import pytest
 from astropy import units as u
@@ -499,3 +501,106 @@ def test_ccf2d_explicit_per_order_sigma_is_reported_per_window():
                                      sigma=[0.01, 0.02])
     assert [w['sigma'] for w in ccf.windows] == [0.01, 0.02]
     assert not any(w['sigma_fallback'] for w in ccf.windows)
+
+
+
+# =============================================================================
+# Velocity conventions
+# =============================================================================
+# A component at v is shifted by c ln(D(v)) along the log-lambda axis, with
+# D = 1 + v/c ('cz', the default) or sqrt((1+b)/(1-b)) ('relativistic'), in
+# units of the order's ACTUAL ln-step: on an InterpolateSpectrum grid
+# (ln-step ln(1 + dv/c), GridDelta = dv) taking the step to be dv scaled every
+# velocity by 1 + dv/2c (0.25 m/s at 150 km/s for dv = 1 km/s).
+_CONVENTIONS = ('cz', 'relativistic')
+
+
+def _doppler(v, convention):
+    """lambda_obs / lambda_rest, written out from the two definitions."""
+    b = v / _C_KMS
+    return 1.0 + b if convention == 'cz' else np.sqrt((1.0 + b) / (1.0 - b))
+
+
+def _velocity_forest(seed, n_lines, sigma_kms, lam_lo=5000.0, lam_hi=5060.0):
+    """Rest-frame Gaussian-line forest (in velocity) as a function of lambda,
+    its lines 400 km/s clear of the order edges."""
+    rng = np.random.default_rng(seed)
+    centres = rng.uniform(400.0, _C_KMS * np.log(lam_hi / lam_lo) - 400.0, n_lines)
+    depths = rng.uniform(0.05, 0.6, n_lines)
+
+    def flux(wave):
+        x = _C_KMS * np.log(np.asarray(wave, float) / lam_lo)
+        return np.prod(1.0 - depths * np.exp(-0.5 * ((x[:, None] - centres) / sigma_kms) ** 2),
+                       axis=1)
+    return flux
+
+
+def _convention_case(v1, v2, convention, a1=0.7, a2=0.4, dv=1.0):
+    """Analytic noise-free SB2 on an InterpolateSpectrum-style log grid, with
+    templates sampled on that same grid (so their resampling is the identity)."""
+    wave = np.exp(np.arange(np.log(5000.0), np.log(5060.0), np.log1p(dv / _C_KMS)))
+    t1, t2 = _velocity_forest(21, 60, 4.0), _velocity_forest(22, 40, 6.0)
+    flux = (1.0 + a1 * (t1(wave / _doppler(v1, convention)) - 1.0)
+            + a2 * (t2(wave / _doppler(v2, convention)) - 1.0))
+    spec = Spectrum(wv=[wave], sp=[flux], name='SB2-conv')
+    spec.Info['GridType'], spec.Info['GridDelta'] = 'log', dv * u.km / u.s
+    return (spec, Template(wavelengths=wave, spectrum=t1(wave)),
+            Template(wavelengths=wave, spectrum=t2(wave)))
+
+
+def _fit_convention_case(v1, v2, fit_convention, inject_convention=None):
+    """CCF2d.Corr2d on a 0.01 km/s map around the truth (off its nodes), so
+    the fine map's step is 1 m/s and the refined peak is the mapping's."""
+    spec, tmpl1, tmpl2 = _convention_case(v1, v2, inject_convention or fit_convention)
+    grid = np.arange(-15, 16) * 0.01
+    return CCF2d().CrossCorrelateSpec(
+        spec, tmpl1, tmpl2, v1_grid=v1 + 0.0037 + grid, v2_grid=v2 - 0.0042 + grid,
+        sigma=0.01, alpha=0.0, continuum=1.0,
+        velocity_convention=fit_convention).Corr2d
+
+
+@pytest.mark.parametrize('conv', _CONVENTIONS)
+@pytest.mark.parametrize('v1, v2', [(150.0, -150.0), (-150.0, 150.0), (100.0, -100.0),
+                                    (-100.0, 100.0), (50.0, -50.0), (-50.0, 50.0),
+                                    (10.0, -10.0), (-10.0, 10.0)])
+def test_ccf2d_recovers_sb2_injections_in_either_convention(v1, v2, conv):
+    r = _fit_convention_case(v1, v2, conv)
+    assert r['velocity_convention'] == conv
+    assert abs(r['RV1'] - v1) * 1e3 < 0.05      # m/s
+    assert abs(r['RV2'] - v2) * 1e3 < 0.05
+    assert r['a1_best'] == pytest.approx(0.7, abs=1e-4)
+    assert r['a2_best'] == pytest.approx(0.4, abs=1e-4)
+
+
+def test_ccf2d_cz_and_relativistic_differ_by_v2_over_2c():
+    v1, v2 = 150.0, -100.0
+    cz = _fit_convention_case(v1, v2, 'cz')
+    rel = _fit_convention_case(v1, v2, 'relativistic', inject_convention='cz')
+    assert cz['RV1'] - rel['RV1'] == pytest.approx(v1 ** 2 / (2 * _C_KMS), rel=3e-3)
+    assert cz['RV2'] - rel['RV2'] == pytest.approx(v2 ** 2 / (2 * _C_KMS), rel=3e-3)
+
+
+def test_ccf2d_measures_each_orders_actual_step():
+    spec, tmpl1, tmpl2 = _convention_case(50.0, -50.0, 'cz')
+    ccf = CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, VelBound=80, dvel=4.0, sigma=0.01)
+    # np.arange quantises the ln-step to an ulp of ln(lambda): ~1e-10 relative.
+    assert ccf.windows[0]['dv'] == pytest.approx(_C_KMS * np.log1p(1.0 / _C_KMS), rel=1e-9)
+    assert 1.0 - ccf.windows[0]['dv'] == pytest.approx(1.0 / (2 * _C_KMS), rel=1e-3)
+
+
+def test_ccf2d_default_convention_is_cz():
+    sig = inspect.signature(CCF2d.CrossCorrelateSpec)
+    assert sig.parameters['velocity_convention'].default == 'cz'
+    spec, tmpl1, tmpl2 = _sparta_case()
+    ccf = CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, VelBound=120, dvel=4.0, sigma=0.01)
+    assert ccf.Corr2d['velocity_convention'] == 'cz'
+    # BestFitSpectrum models the composite in the convention of the fit.
+    wv, model, data = ccf.BestFitSpectrum(order=0)
+    assert np.all(np.isfinite(model))
+
+
+def test_ccf2d_refuses_an_unknown_convention():
+    spec, tmpl1, tmpl2 = _sparta_case()
+    with pytest.raises(ValueError, match='convention'):
+        CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, VelBound=120, dvel=4.0,
+                                   velocity_convention='classical')

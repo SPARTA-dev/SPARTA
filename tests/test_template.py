@@ -100,3 +100,35 @@ def test_integrate_spec_records_the_coarser_sampling():
     tmpl = Template(template=model)
     tmpl.integrate_spec(4)
     assert tmpl.model.native_steps() == pytest.approx([2.0], rel=1e-3)
+
+
+_C_KMS = 299792.458
+
+
+def test_doppler_defaults_to_cz_and_offers_the_relativistic_factor():
+    import numpy as np
+    from astropy import units as u
+    w = np.linspace(5000.0, 5100.0, 50)
+    t = Template(wavelengths=w, spectrum=np.ones_like(w))
+    b = 150.0 / _C_KMS
+    np.testing.assert_allclose(t.doppler(150.0), w[None, :] * (1 + b), rtol=1e-14)
+    np.testing.assert_allclose(t.doppler(150.0, velocity_convention="cz"),
+                               t.doppler(150.0), rtol=0)
+    np.testing.assert_allclose(t.doppler(150.0, velocity_convention="relativistic"),
+                               w[None, :] * np.sqrt((1 + b) / (1 - b)), rtol=1e-14)
+    np.testing.assert_allclose(t.doppler(150e3 * u.m / u.s, w), w * (1 + b), rtol=1e-14)
+    with pytest.raises(ValueError, match="convention"):
+        t.doppler(150.0, velocity_convention="optical")
+
+
+def test_barycentric_correction_stays_cz():
+    # The BERV composes as lambda * (1 + bcv/c), independent of the RV
+    # convention (see Spectrum.BarycentricCorrection).
+    import numpy as np
+    from astropy import units as u
+    from sparta.UNICOR.Spectrum import Spectrum
+    w = np.linspace(5000.0, 5100.0, 50)
+    spec = Spectrum(wv=[w.copy()], sp=[np.ones_like(w)], bcv=25.0)
+    spec.BarycentricCorrection()
+    np.testing.assert_allclose(spec.wv[0], w * (1 + 25.0 / _C_KMS), rtol=1e-14)
+    assert spec.bcv == 0.0 * u.km / u.s

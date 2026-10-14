@@ -20,11 +20,12 @@
 # handles the Spectrum/Template orchestration and the astropy units at its
 # boundary.
 #
-# Conventions: radial velocities in km/s; the CCF is computed on a log-lambda
-# (velocity-even) grid.
+# Conventions: radial velocities in km/s, in the 'cz' Doppler convention
+# (lambda_obs/lambda_rest = 1 + v/c) unless velocity_convention='relativistic';
+# the CCF is computed on a log-lambda (velocity-even) grid.
 #
 # Dependencies: numpy, astropy, matplotlib, copy, unicor.
-# Last update: 2026-10-14 (extended-template CCF: no pull of the RV toward zero).
+# Last update: 2026-10-14 (lag -> velocity by the Doppler convention).
 
 
 import numpy as np
@@ -49,7 +50,8 @@ class CCF1d:
     # =============================================================================
     # =============================================================================
     def CrossCorrelateSpec(self, spec_in, template_in,
-                           dv=None, VelBound=100, err_per_ord=False, fastccf=False):
+                           dv=None, VelBound=100, err_per_ord=False, fastccf=False,
+                           velocity_convention='cz'):
         '''
         All input is optional, and needs to be called along
         with its keyword. Below appears a list of the possible input
@@ -65,6 +67,16 @@ class CCF1d:
         :param: err_per_ord - Boolean. Indicates if the error should be
                          calculated (from maximum likelihood) to each
                          order.
+        :param: velocity_convention - 'cz' (default) or 'relativistic': how a
+                         lag maps to a radial velocity (see
+                         ``unicor.dsp.doppler_factor``). Lag k multiplies the
+                         wavelength by exp(k * Delta), Delta the actual
+                         ln(lambda) step of the grid, and is reported as
+                         c * expm1(k * Delta) ('cz', lambda_obs/lambda_rest =
+                         1 + v/c; IAU 2000, IRAF fxcor) or c * tanh(k * Delta)
+                         ('relativistic'). The two differ by ~v^2/2c (37.5 m/s
+                         at 150 km/s); reading the lag as k * dv was off from
+                         'cz' by -v^2/2c.
 
         The template is resampled onto each order's log-lambda grid continued
         by K = round(VelBound / dv) steps on each side, and every lag is the
@@ -99,7 +111,8 @@ class CCF1d:
 
         :return: self.Corr - a dictionary with the following fields:
                          'vel' - velocity vector at which correlation
-                                 was calculated.
+                                 was calculated (increasing, 0 at the
+                                 central lag; not exactly uniform).
                          'corr'- correlation matrix,
                                  (# orders X length of velocity vector)
                          'RV'  - Derived radial velocity
@@ -107,6 +120,8 @@ class CCF1d:
                          'peakCorr' - Corresponding CCF peak.
                          'n_eff' - effective number of independent spectral
                                    bins per order (dimensionless).
+                         'velocity_convention' - the convention of 'vel'
+                                   and 'RV'.
         '''
 
         # Initialize:
@@ -144,7 +159,26 @@ class CCF1d:
         if n_lags < 1:
             raise ValueError(f"VelBound ({vmax_kms:g} km/s) must be at least one "
                              f"velocity step ({dv_kms:g} km/s)")
-        V = np.arange(-n_lags, n_lags + 1) * dv_kms << (u.km / u.s)
+
+        # The lag axis is k * Delta in ln(lambda) only if every order really is
+        # velocity-even with the declared step (e.g. dropping pixels breaks it
+        # silently), and the orders' CCFs share one velocity axis only if they
+        # share Delta.
+        dln = np.array([dsp.log_grid_dln(w) for w in spec.wv])
+        for I, step in enumerate(dsp.C_KMS * dln):
+            if not np.isclose(step, dv_kms, rtol=1e-3):
+                raise ValueError(
+                    f"order {I}: the wavelength grid step is {step:.6g} km/s but "
+                    f"Info['GridDelta'] declares {dv_kms:.6g} km/s")
+        dln_common = float(np.median(dln))
+        # Tolerate a thousandth of a lag of misregistration at the scan edge.
+        if np.max(np.abs(dln / dln_common - 1)) * n_lags > 1e-3:
+            raise ValueError(
+                "the orders' ln(lambda) steps differ (relative spread "
+                f"{np.ptp(dln) / dln_common:.2g}), so their CCFs cannot share one "
+                "velocity axis; resample them with InterpolateSpectrum(InterpMethod='log')")
+        V = dsp.velocity_from_log_shift(np.arange(-n_lags, n_lags + 1) * dln_common,
+                                        velocity_convention) << (u.km / u.s)
 
         Nord = len(spec.wv)
         RV = np.full((Nord, 1), np.nan)
@@ -159,14 +193,6 @@ class CCF1d:
 
         for I, w in enumerate(spec.wv):
             s = np.asarray(spec.sp[I], float)
-
-            # The lag axis is k * dv only if this order really is velocity-even
-            # with the declared step (e.g. dropping pixels breaks it silently).
-            step = dsp.log_grid_step(w)
-            if not np.isclose(step, dv_kms, rtol=1e-3):
-                raise ValueError(
-                    f"order {I}: the wavelength grid step is {step:.6g} km/s but "
-                    f"Info['GridDelta'] declares {dv_kms:.6g} km/s")
 
             # A single-order template (e.g. a full-range library spectrum) is
             # reused for every order, as in CCF2d.
@@ -183,7 +209,8 @@ class CCF1d:
             try:
                 lo, hi = _template_covered_pixels(w_ext, t_wave, n_lags)
                 v_kms, C = unicor_ccf.ccf_vs_velocity(spT[lo: hi + 2 * n_lags],
-                                                      s[lo:hi], dv_kms)
+                                                      s[lo:hi], w[lo:hi],
+                                                      velocity_convention)
             except ValueError as err:
                 warnings.warn(f"order {I}: {err}; its CCF is set to NaN", stacklevel=2)
                 continue
@@ -211,7 +238,8 @@ class CCF1d:
             'eRV': eRV,
             'units': V.unit,
             'peakCorr': SpecCorr,
-            'n_eff': n_eff}
+            'n_eff': n_eff,
+            'velocity_convention': velocity_convention}
         self.n_ord = Nord
 
         return self
@@ -232,7 +260,7 @@ class CCF1d:
         :return: A 'CorrCombined' dictionary, with derived combined correlation,
                 derived velocity and uncertainty. The structure is similar
                 to the 'Corr' dictionary; 'n_eff' is the total number of
-                independent bins.
+                independent bins, 'velocity_convention' that of 'Corr'.
 
         NOTE: the number of lags is assumed to be identical for all orders
         '''
@@ -252,7 +280,8 @@ class CCF1d:
                 'eRV': eRV,
                 'units': vUnit,
                 'peakCorr': CorrPeak,
-                'n_eff': n_eff_total}
+                'n_eff': n_eff_total,
+                'velocity_convention': self.Corr['velocity_convention']}
 
         except (ValueError, np.linalg.LinAlgError):
             self.CorrCombined = {
@@ -262,7 +291,8 @@ class CCF1d:
                 'eRV': np.nan,
                 'units': '',
                 'peakCorr': np.nan,
-                'n_eff': n_eff_total}
+                'n_eff': n_eff_total,
+                'velocity_convention': self.Corr['velocity_convention']}
 
         return self
 

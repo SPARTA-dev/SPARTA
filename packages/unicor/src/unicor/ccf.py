@@ -9,12 +9,19 @@ Typical use, for one order already on a uniform log-lambda grid ``wave``::
 
     K = round(vmax / dv)                                  # lags on each side
     template_flux = resample(t_wave, t_flux, extend_log_grid(wave, K))
-    v, c = ccf_vs_velocity(template_flux, observed_flux, dv)
+    v, c = ccf_vs_velocity(template_flux, observed_flux, wave)
     rv, peak = subpixel_peak(v, c)
     erv = rv_uncertainty(v, c, rv, n_eff)
 
 The template must cover ``wave`` extended by K steps on each side, so that every
 lag correlates all the observed pixels (see :func:`ccf_vs_velocity`).
+
+Lag k shifts by ``k * Delta`` in ln(lambda), ``Delta`` the grid's actual
+ln-step, and its velocity follows the Doppler convention
+(``velocity_convention``, 'cz' by default; see :func:`unicor.dsp.doppler_factor`).
+The velocity axis is therefore not exactly uniform -- under 'cz' its step grows
+by ``Delta`` (relative) per lag -- and every function below takes it as given
+(none assumes equal spacing).
 
 For several orders sharing the velocity lags ``v``::
 
@@ -30,7 +37,7 @@ import numpy as np
 from scipy import interpolate
 from scipy.signal import correlate as _correlate
 
-from .dsp import log_grid_step
+from .dsp import log_grid_dln, velocity_from_log_shift
 
 
 def extend_log_grid(wave, n_lags):
@@ -63,21 +70,28 @@ def extend_log_grid(wave, n_lags):
     if int(n_lags) != n_lags or n_lags < 1:
         raise ValueError(f"n_lags must be a positive integer, got {n_lags}")
     wave = np.asarray(wave, float)
-    log_grid_step(wave)
+    dln = log_grid_dln(wave)
     n, k = wave.size, int(n_lags)
-    dln = np.log(wave[-1] / wave[0]) / (n - 1)
     return wave[0] * np.exp(dln * np.arange(-k, n + k))
 
 
-def ccf_vs_velocity(template, signal, dv):
+def ccf_vs_velocity(template, signal, wave, velocity_convention='cz'):
     """Pearson cross-correlation of ``signal`` against a template, vs velocity.
 
-    ``signal`` holds N pixels of a uniform log-lambda grid with velocity step
-    ``dv``; ``template`` holds N + 2K pixels of the same grid continued by K
-    steps on each side (:func:`extend_log_grid`). At lag k the N observed
-    pixels are correlated with the N-pixel template segment shifted by k, each
+    ``signal`` holds N pixels on the uniform log-lambda grid ``wave``;
+    ``template`` holds N + 2K pixels of the same grid continued by K steps on
+    each side (:func:`extend_log_grid`). At lag k the N observed pixels are
+    correlated with the N-pixel template segment shifted by k, each
     mean-subtracted and normalised by its own norm -- so every lag is a full
     Pearson correlation over the same N pixels.
+
+    Lag k multiplies wavelength by ``exp(k * Delta)``, ``Delta`` the actual
+    ln(lambda) step of ``wave``, so its velocity is
+    ``velocity_from_log_shift(k * Delta, velocity_convention)``:
+    ``c * expm1(k * Delta)`` under 'cz', ``c * tanh(k * Delta)`` under
+    'relativistic'. The step is measured from ``wave`` rather than taken from
+    a nominal ``dv``, because grids built as ``ln(1 + dv/c)`` and as ``dv/c``
+    differ by ``dv/2c`` relative.
 
     A template on the observed span alone (correlated in 'full' mode with one
     global norm) overlaps only N - |k| pixels at lag k: the CCF is tapered by
@@ -91,14 +105,17 @@ def ccf_vs_velocity(template, signal, dv):
     template : ndarray, shape (N + 2K,)
         Template flux on the observed grid extended by K >= 1 steps per side.
     signal : ndarray, shape (N,)
-        Observed flux on the uniform log-lambda grid.
-    dv : float
-        Velocity step of that grid (km/s).
+        Observed flux on ``wave``.
+    wave : ndarray, shape (N,)
+        The signal's wavelength grid (Angstrom), uniform in ln(lambda).
+    velocity_convention : {'cz', 'relativistic'}
+        Doppler convention mapping lags to velocities, see
+        :func:`unicor.dsp.doppler_factor`. Default 'cz'.
 
     Returns
     -------
     v : ndarray, shape (2K + 1,)
-        Symmetric velocity lags (km/s): ``arange(-K, K+1) * dv``.
+        Velocity of each lag k = -K..K (km/s), increasing, 0 at k = 0.
     ccf : ndarray, shape (2K + 1,)
         Pearson correlation in [-1, 1]. Peaks at the velocity by which
         ``signal`` is red-shifted relative to ``template``.
@@ -106,13 +123,12 @@ def ccf_vs_velocity(template, signal, dv):
     Raises
     ------
     ValueError
-        If ``dv`` is not positive; if ``len(template) - len(signal)`` is not a
-        positive even number 2K; if either array is not finite; or if
-        ``signal`` or the template segment of any lag is constant (the
+        If ``len(template) - len(signal)`` is not a positive even number 2K;
+        if ``wave`` is not an N-node grid uniform in ln(lambda); if
+        ``velocity_convention`` is unknown; if either flux array is not finite;
+        or if ``signal`` or the template segment of any lag is constant (the
         correlation is then 0/0 -- typically a template without lines there).
     """
-    if not dv > 0:
-        raise ValueError(f"dv must be positive, got {dv}")
     t = np.asarray(template, float)
     s = np.asarray(signal, float)
     if t.ndim != 1 or s.ndim != 1:
@@ -125,6 +141,10 @@ def ccf_vs_velocity(template, signal, dv):
             f"(length N + 2K); got {t.size} template vs {n} signal pixels. "
             "Resample the template onto extend_log_grid(wave, K).")
     k = excess // 2
+    wave = np.asarray(wave, float)
+    if wave.shape != s.shape:
+        raise ValueError(f"wave must be the signal's wavelength grid ({n} nodes), "
+                         f"got shape {wave.shape}")
     if not (np.all(np.isfinite(t)) and np.all(np.isfinite(s))):
         raise ValueError("template and signal must be finite (mask NaN pixels first)")
 
@@ -132,6 +152,8 @@ def ccf_vs_velocity(template, signal, dv):
     s_norm2 = (s ** 2).sum()
     if s_norm2 == 0:
         raise ValueError("signal is constant: there are no lines to correlate")
+    v = velocity_from_log_shift(np.arange(-k, k + 1) * log_grid_dln(wave),
+                                velocity_convention)
 
     # Subtracting the global mean leaves each segment's Pearson coefficient
     # unchanged and keeps the running sums small, so the segment variance
@@ -154,7 +176,7 @@ def ccf_vs_velocity(template, signal, dv):
             "velocity scan or use a template with lines across the order)")
     ccf = numer / np.sqrt(seg_var * s_norm2)
     # Segment m is the template shifted by K - m pixels: reverse to ascending lag.
-    return np.arange(-k, k + 1) * dv, ccf[::-1]
+    return v, ccf[::-1]
 
 
 def combine_ccfs(ccfs, n_eff=None):
@@ -210,7 +232,7 @@ def subpixel_peak(v, ccf, npts=5):
     Parameters
     ----------
     v : ndarray
-        Velocity lags (km/s).
+        Velocity lags (km/s), increasing; need not be uniform.
     ccf : ndarray
         CCF values at ``v``.
     npts : int
@@ -246,16 +268,19 @@ def subpixel_peak(v, ccf, npts=5):
     if x_n < half or x_n > len(ccf) - 1 - half:
         raise ValueError("CCF peak is at the edge of the velocity range; "
                          "widen the scan")
-    x = v[x_n - half: x_n + half + 1]
+    # Fit about the central node: in absolute velocity the columns 1, x, x^2
+    # are nearly collinear far from v = 0 (x ~ 38 km/s on 0.05 km/s steps lost
+    # ~0.2 m/s to round-off). Any spacing works, uniform or not.
+    x0 = v[x_n]
+    dx = v[x_n - half: x_n + half + 1] - x0
     y = ccf[x_n - half: x_n + half + 1]
 
-    design = np.array([[1, xi, xi ** 2] for xi in x])
-    cov = np.linalg.inv(design.T @ design)
-    pars = cov @ (design.T @ y)
+    design = np.column_stack([np.ones_like(dx), dx, dx ** 2])
+    pars, *_ = np.linalg.lstsq(design, y, rcond=None)
     if not pars[2] < 0:
         raise ValueError("CCF is not concave around its maximum")
     ccf_peak = pars[0] - pars[1] * pars[1] / (4 * pars[2])
-    v_peak = -pars[1] / (2 * pars[2])
+    v_peak = x0 - pars[1] / (2 * pars[2])
     return v_peak, ccf_peak
 
 

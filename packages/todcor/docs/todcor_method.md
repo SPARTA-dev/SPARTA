@@ -15,8 +15,9 @@ is what the example notebooks use. Note that `rotational_kernel` is a
 Fourier-space amplitude.
 
 Conventions: velocities and the log-λ shift `s` in km/s; ζ (Fourier conjugate)
-in s/km; spectra on a uniform log-λ (constant-velocity-step `dv`) grid; residual
-flux `g = flux − 1`; Fourier grid `np.fft.rfftfreq(N, d=dv)[1:]` (DC dropped,
+in s/km; spectra on a uniform log-λ (constant-velocity-step `dv`) grid, with
+`dv = c·Δ` for the grid's *actual* ln λ step `Δ`; residual flux
+`g = flux − 1`; Fourier grid `np.fft.rfftfreq(N, d=dv)[1:]` (DC dropped,
 positive frequencies only). The math below was independently re-derived and
 verified against the code (2026-07-07).
 
@@ -26,7 +27,7 @@ On a uniform log-λ grid a Doppler shift is a translation, so in the Fourier
 domain it is a phase factor (shift theorem). Unlike the hot-star SB2 work — where
 the modelled factor was the transform of a near-δ line — here the **template
 spectra themselves** are transformed once and reused. With shifts
-`s_i = c·ln(1 + v_i/c)`:
+`s_i = c·ln(λ_obs/λ_rest)`:
 
     g(u)   = a1·g1(u − s1) + a2·g2(u − s2)                       (velocity space)
     G̃(ζ)  = a1·G1(ζ)·exp(−2πiζ s1) + a2·G2(ζ)·exp(−2πiζ s2)     (Fourier space)
@@ -34,6 +35,21 @@ spectra themselves** are transformed once and reused. With shifts
 `G1, G2 = rfft` of the broadened, windowed residual templates; `D(ζ) = rfft` of
 the data residual. The amplitudes `(a1, a2)` are the linear light/dilution
 fractions of each component's lines.
+
+**Velocity convention.** What velocity a shift `s` is depends on the Doppler
+convention (`velocity_convention`, via `unicor.dsp.shift_kms`):
+
+| convention | `λ_obs/λ_rest` | `s(v)` | `v(s)` |
+| --- | --- | --- | --- |
+| `'cz'` (default; IAU 2000, IRAF fxcor) | `1 + v/c` | `c·ln(1 + v/c)` | `c·expm1(s/c)` |
+| `'relativistic'` | `√((1 + v/c)/(1 − v/c))` | `c·artanh(v/c)` | `c·tanh(s/c)` |
+
+`expm1(x) = eˣ − 1`, computed without cancellation for small `x`. For the same
+spectrum the `'cz'` velocity exceeds the `'relativistic'` one by `≈ v²/2c`
+(37.5 m/s at 150 km/s). `s` is measured in units of the grid's actual step:
+a grid built with `Δ = ln(1 + dv/c)` (SPARTA's `InterpolateSpectrum`) has
+`c·Δ = dv·(1 − dv/2c)`, so `CCF2d` passes each order's measured `c·Δ`
+(`unicor.dsp.log_grid_step`), not the nominal `dv`.
 
 ## 2. Fourier grid and Parseval weights
 
@@ -350,7 +366,8 @@ All of these except `CCF2d` are reachable from the `todcor` namespace; the
 | `log_lambda_grid`, `resample`, `tukey_window` | `unicor.dsp` | grid + apodisation (auxiliary) |
 | `rfft_positive`, `parseval_weights` | `unicor.dsp` | Fourier transform + Parseval weights (§2) |
 | `broaden_gaussian_residual`, `rotational_kernel`, `broaden_rotational_residual` | `unicor.dsp` | template broadening |
-| `shift_kms` | `unicor.dsp` | the log-λ shift `s = c·ln(1 + v/c)` |
+| `shift_kms`, `doppler_factor`, `velocity_from_log_shift` | `unicor.dsp` | the log-λ shift `s = c·ln(λ_obs/λ_rest)` and its inverse, per velocity convention (§1) |
+| `log_grid_step` | `unicor.dsp` | a log grid's actual step `c·Δ` (km/s), verified uniform |
 | `shift_template_flux`, `composite_flux` | `todcor.simulate` | forward model / simulate composites |
 | `window_stats` | `todcor.estimator` | the six sufficient statistics (+ noise dof `nu`) for one window (§3, §8) |
 | `resampled_noise_psd` | `todcor.estimator` | noise spectrum of resampled white native noise → `noise_psd` (§8) |

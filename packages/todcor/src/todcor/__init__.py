@@ -13,6 +13,9 @@ classic TODCOR correlation map.
 
 Everything takes plain floats / arrays: velocities and the log-lambda shift in
 km/s, ``zeta`` (the Fourier conjugate) in s/km, kernel widths as FWHM in km/s.
+Velocities follow the 'cz' Doppler convention (lambda_obs/lambda_rest = 1 + v/c)
+unless 'relativistic' is requested (``velocity_convention``; see
+:func:`unicor.dsp.doppler_factor`).
 SPARTA's ``CCF2d`` (Spectrum + two Templates) is a layer on top.
 
 Layout
@@ -25,9 +28,9 @@ re-exported here, so ``todcor`` is a complete namespace for the method.
 """
 
 from unicor.dsp import (
-    C_KMS, broaden_gaussian_residual, broaden_rotational_residual,
-    log_lambda_grid, parseval_weights, resample, rfft_positive,
-    rotational_kernel, shift_kms, tukey_window,
+    C_KMS, broaden_gaussian_residual, broaden_rotational_residual, doppler_factor,
+    log_grid_step, log_lambda_grid, parseval_weights, resample, rfft_positive,
+    rotational_kernel, shift_kms, tukey_window, velocity_from_log_shift,
 )
 
 from .estimator import (
@@ -42,7 +45,8 @@ __all__ = [
     'window_stats', 'combine_stats', 'chi2_from_stats', 'profile_from_stats',
     'crlb_from_map', 'todcor_map', 'resampled_noise_psd',
     'shift_template_flux', 'composite_flux', 'model_flux',
-    'C_KMS', 'log_lambda_grid', 'resample', 'tukey_window', 'shift_kms',
+    'C_KMS', 'log_lambda_grid', 'log_grid_step', 'resample', 'tukey_window',
+    'shift_kms', 'doppler_factor', 'velocity_from_log_shift',
     'rfft_positive', 'parseval_weights', 'rotational_kernel',
     'broaden_gaussian_residual', 'broaden_rotational_residual',
 ]

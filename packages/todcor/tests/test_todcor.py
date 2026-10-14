@@ -9,13 +9,15 @@ log-lambda primitives it re-exports from ``unicor``. The SPARTA-object adapter
 Self-contained: no external data, numpy only.
 """
 
+import inspect
+
 import numpy as np
 import pytest
 
 import todcor as ops
 from todcor import (
     chi2_from_stats, combine_stats, composite_flux, crlb_from_map, model_flux,
-    profile_from_stats, todcor_map, window_stats,
+    profile_from_stats, shift_template_flux, todcor_map, window_stats,
 )
 
 
@@ -459,3 +461,127 @@ def test_crlb_and_chi2_red_honest_on_an_oversampled_grid():
     assert 0.75 < np.std(r1) / cr0["sigma_v1"] < 1.3
     assert 0.75 < np.std(r2) / cr0["sigma_v2"] < 1.3
     assert np.mean(chi2_red) == pytest.approx(1.0, abs=0.04)
+
+
+# =============================================================================
+# Velocity conventions
+# =============================================================================
+# A component shifted by v moves by s = c ln(lambda_obs / lambda_rest) along the
+# log-lambda axis: c ln(1 + v/c) under 'cz' (IAU 2000; IRAF fxcor), c artanh(v/c)
+# under 'relativistic' (factor sqrt((1+b)/(1-b))). The fits below are noise-free
+# and analytic (no interpolation of the data), so the maps peak exactly at the
+# injected velocities of the matching convention.
+_C = 299792.458
+CONVENTIONS = ('cz', 'relativistic')
+SB2_PAIRS = [(150.0, -150.0), (-150.0, 150.0), (100.0, -100.0), (-100.0, 100.0),
+             (50.0, -50.0), (-50.0, 50.0), (10.0, -10.0), (-10.0, 10.0)]
+
+
+def _factor(v, convention):
+    """lambda_obs / lambda_rest, written out from the two definitions."""
+    b = np.asarray(v, float) / _C
+    return 1.0 + b if convention == 'cz' else np.sqrt((1.0 + b) / (1.0 - b))
+
+
+def _forest(seed, n_lines, sigma_kms, lam_lo=5000.0, lam_hi=5060.0):
+    """Rest-frame Gaussian-line forest (in velocity) as a function of lambda,
+    its lines 400 km/s clear of the window edges (no wrap-around)."""
+    rng = np.random.default_rng(seed)
+    centres = rng.uniform(400.0, _C * np.log(lam_hi / lam_lo) - 400.0, n_lines)
+    depths = rng.uniform(0.05, 0.6, n_lines)
+
+    def flux(wave):
+        u = _C * np.log(np.asarray(wave, float) / lam_lo)
+        return np.prod(1.0 - depths * np.exp(-0.5 * ((u[:, None] - centres) / sigma_kms) ** 2),
+                       axis=1)
+    return flux
+
+
+_T1, _T2 = _forest(11, 60, 4.0), _forest(12, 40, 6.0)
+
+
+def _sb2_window(v1, v2, convention, a1=0.7, a2=0.4, dv=1.0):
+    """Analytic noise-free composite residual and rest-frame template residuals."""
+    wave, _ = ops.log_lambda_grid(5000.0, 5060.0, dv)
+    data_g = (a1 * (_T1(wave / _factor(v1, convention)) - 1.0)
+              + a2 * (_T2(wave / _factor(v2, convention)) - 1.0))
+    return wave, data_g, _T1(wave) - 1.0, _T2(wave) - 1.0, dv
+
+
+def _refined_peak(v1, v2, fit_convention, inject_convention=None, half=20, step=0.005):
+    """Sub-grid TODCOR peak (km/s) on a fine map (``step`` km/s) around the truth.
+
+    The map nodes are deliberately offset from the truth, so the answer comes
+    from the quadratic refinement, not from a node that happens to sit on it.
+    """
+    wave, data_g, g1, g2, dv = _sb2_window(v1, v2, inject_convention or fit_convention)
+    f1 = v1 + 0.0013 + np.arange(-half, half + 1) * step
+    f2 = v2 - 0.0021 + np.arange(-half, half + 1) * step
+    res = todcor_map(data_g, g1, g2, dv, f1, f2, velocity_convention=fit_convention)
+    crlb = crlb_from_map(res['logL_profile'], f1, f2)
+    assert not crlb['on_edge']
+    return np.array(crlb['peak_refined']), res['best']
+
+
+@pytest.mark.parametrize('conv', CONVENTIONS)
+@pytest.mark.parametrize('v1, v2', SB2_PAIRS)
+def test_sb2_injection_is_recovered_to_the_cm_per_s(v1, v2, conv):
+    peak, best = _refined_peak(v1, v2, conv)
+    np.testing.assert_array_less(np.abs(peak - [v1, v2]) * 1e3, 0.05)   # m/s
+    assert best['a1'] == pytest.approx(0.7, abs=1e-3)
+    assert best['a2'] == pytest.approx(0.4, abs=1e-3)
+
+
+@pytest.mark.parametrize('v1, v2', [(150.0, -150.0), (50.0, -100.0)])
+def test_cz_and_relativistic_fits_differ_by_v2_over_2c(v1, v2):
+    # The same data fitted in both conventions: the shift s is the same, and
+    # c (expm1(s/c) - tanh(s/c)) ~ v^2 / 2c for either sign of v.
+    cz, _ = _refined_peak(v1, v2, 'cz', inject_convention='cz')
+    rel, _ = _refined_peak(v1, v2, 'relativistic', inject_convention='cz')
+    np.testing.assert_allclose(cz - rel, np.array([v1, v2]) ** 2 / (2 * _C), rtol=3e-3)
+
+
+@pytest.mark.parametrize('conv', CONVENTIONS)
+def test_forward_model_follows_the_convention(conv):
+    v1, v2, a1, a2 = 150.0, -100.0, 0.7, 0.4
+    wave, data_g, g1, g2, dv = _sb2_window(v1, v2, conv, a1, a2)
+    t_wave, _ = ops.log_lambda_grid(4990.0, 5070.0, 0.01)
+    t1, t2 = (t_wave, _T1(t_wave)), (t_wave, _T2(t_wave))
+    # Physical shift (resampling a finely sampled template) ...
+    np.testing.assert_allclose(
+        shift_template_flux(*t1, wave, v1, velocity_convention=conv),
+        _T1(wave / _factor(v1, conv)), atol=1e-5)
+    np.testing.assert_allclose(
+        composite_flux(wave, [t1, t2], [v1, v2], [a1, a2], velocity_convention=conv),
+        1.0 + data_g, atol=1e-5)
+    # ... and the Fourier phase shift the fit uses.
+    np.testing.assert_allclose(
+        model_flux(wave, dv, g1, g2, v1, v2, a1, a2, velocity_convention=conv),
+        1.0 + data_g, atol=1e-9)
+
+
+def test_the_default_convention_is_cz():
+    for fn in (window_stats, todcor_map, shift_template_flux, composite_flux, model_flux):
+        assert inspect.signature(fn).parameters['velocity_convention'].default == 'cz'
+    wave, data_g, g1, g2, dv = _sb2_window(50.0, -50.0, 'cz')
+    grid = np.array([49.0, 50.0, 51.0])
+    default = window_stats(data_g, g1, g2, dv, grid, -grid)
+    cz = window_stats(data_g, g1, g2, dv, grid, -grid, velocity_convention='cz')
+    for key in ('b1', 'b2', 'A12'):
+        np.testing.assert_array_equal(default[key], cz[key])
+
+
+@pytest.mark.parametrize('bad', ['classical', 'CZ', None])
+def test_an_unknown_convention_is_refused(bad):
+    wave, data_g, g1, g2, dv = _sb2_window(10.0, -10.0, 'cz')
+    t = (wave, _T1(wave))
+    calls = (lambda: window_stats(data_g, g1, g2, dv, [0.0], [0.0], velocity_convention=bad),
+             lambda: todcor_map(data_g, g1, g2, dv, [0.0], [0.0], velocity_convention=bad),
+             lambda: shift_template_flux(*t, wave, 10.0, velocity_convention=bad),
+             lambda: composite_flux(wave, [t, t], [10.0, -10.0], [0.5, 0.5],
+                                    velocity_convention=bad),
+             lambda: model_flux(wave, dv, g1, g2, 10.0, -10.0, 0.5, 0.5,
+                                velocity_convention=bad))
+    for call in calls:
+        with pytest.raises(ValueError, match='convention'):
+            call()

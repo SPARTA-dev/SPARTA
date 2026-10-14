@@ -302,12 +302,17 @@ class Template:
 
     # =============================================================================
     # =============================================================================
-    def doppler(self, vel, wv=[]):
+    def doppler(self, vel, wv=[], velocity_convention='cz'):
         '''
         This function shifts the template spectrum according to a given velocity (a Doppler shift).
-        :param: vel - the velocity in which to boost.
+        :param: vel - the radial velocity to shift by (km/s if unitless);
+                      positive red-shifts.
         :param: wv - If empty, the template will be boosted.
-        :return: Boosted wavelength array / template model.
+        :param: velocity_convention - 'cz' (default; lambda * (1 + v/c)) or
+                      'relativistic' (lambda * sqrt((1 + v/c) / (1 - v/c))),
+                      see ``unicor.dsp.doppler_factor``. Use the convention the
+                      RVs will be measured in.
+        :return: Boosted wavelength array / template model (Angstrom).
 
         Note: This only works for a single order template, so boost before you cut.
         '''
@@ -315,12 +320,8 @@ class Template:
         if type(vel) is not u.quantity.Quantity:
             vel = float(vel) << u.kilometer / u.second
 
-        beta = ((vel/self.model.c).decompose()).value
-
-        if len(wv) == 0:
-            return np.array(self.model.wv).astype("float64") * (1 + beta)
-        else:
-            return (wv * (1 + beta)).astype("float64")
+        target = np.array(self.model.wv) if len(wv) == 0 else wv
+        return dsp.doppler_shift_wave(target, vel.to_value(u.km / u.s), velocity_convention)
 
     # =============================================================================
     # =============================================================================

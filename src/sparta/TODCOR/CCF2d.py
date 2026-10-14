@@ -26,7 +26,8 @@
 # SPARTA-object orchestration: log-lambda gridding, per-order preparation,
 # window combination, and reporting.
 #
-# Conventions: radial velocities in km/s; wavelengths in Angstrom; the fit is
+# Conventions: radial velocities in km/s, 'cz' (lambda_obs/lambda_rest = 1 + v/c)
+# unless velocity_convention='relativistic'; wavelengths in Angstrom; the fit is
 # performed on a log-lambda (velocity-even) grid.
 #
 # Dependencies: numpy, astropy, matplotlib, copy, functools.
@@ -94,7 +95,7 @@ class CCF2d:
                            dv=None, VelBound=150, dvel=None,
                            v1_grid=None, v2_grid=None, sigma=None, alpha=0.1,
                            nonneg=True, zeta_max=None, continuum='median',
-                           orders=None, keep_windows=True):
+                           orders=None, keep_windows=True, velocity_convention='cz'):
         '''
         Fit both components of a double-lined spectrum simultaneously.
 
@@ -159,6 +160,16 @@ class CCF2d:
                             fitting a long time series: the arrays are the size
                             of the spectrum, so keeping them for every epoch is
                             what dominates memory.
+        :param: velocity_convention - 'cz' (default) or 'relativistic': the
+                            Doppler convention of the trial velocities and the
+                            RVs (see ``unicor.dsp.doppler_factor``). A component
+                            at v is shifted by c * ln(1 + v/c) ('cz';
+                            IAU 2000, IRAF fxcor) or c * artanh(v/c)
+                            ('relativistic') along the log-lambda axis, measured
+                            in each order's actual ln(lambda) step. For the
+                            same spectrum the 'cz' RVs exceed the
+                            'relativistic' ones by ~v^2/2c (37.5 m/s at
+                            150 km/s).
 
         :return: self, with the following fields:
                  self.Corr2d  - a dictionary with the coarse map: 'v1_grid',
@@ -180,7 +191,8 @@ class CCF2d:
                                 at the refined RVs at that noise: 'chi2_best'
                                 and 'chi2_red' (chi2_best per noise degree of
                                 freedom, see below; ~1 by construction under
-                                sigma=None). The maps ('logL_profile',
+                                sigma=None), and 'velocity_convention' (that of
+                                every velocity above). The maps ('logL_profile',
                                 'logL_marginal', 'chi2', and those under
                                 'fine') are on the same noise scale.
                  self.stats   - the *combined* coarse-map sufficient statistics,
@@ -189,7 +201,9 @@ class CCF2d:
                                 touching the spectrum again.
                  self.windows - per-order diagnostics: the order index, the
                                 window's own 'S11'/'S22'/'SD' (at the input
-                                sigma, unit noise under sigma=None),
+                                sigma, unit noise under sigma=None), 'dv' (its
+                                analysis step, c times the actual ln(lambda)
+                                step, km/s),
                                 'oversampling' (dv_native / dv, at least 1),
                                 'n_eff' (the independent-pixel count
                                 n_pix / oversampling), 'nu' (the expected chi2
@@ -264,8 +278,11 @@ class CCF2d:
                 "'GridDelta'; set Info['GridDelta'] to its velocity step "
                 "(km/s) or let InterpolateSpectrum build the grid.")
         dv_kms = u.Quantity(spec.Info['GridDelta']).to(u.km / u.s).value
-        for I, w in enumerate(spec.wv):
-            step = dsp.log_grid_step(w)
+        # The shift s = c ln(D(v)) is measured in each order's actual step:
+        # InterpolateSpectrum's ln(1 + dv/c) is dv/2c (relative) short of the
+        # nominal dv, which would scale every velocity by 1 + dv/2c.
+        steps = [dsp.log_grid_step(w) for w in spec.wv]
+        for I, step in enumerate(steps):
             if not np.isclose(step, dv_kms, rtol=1e-3):
                 raise ValueError(
                     f"order {I}: the wavelength grid step is {step:.6g} km/s but "
@@ -300,24 +317,26 @@ class CCF2d:
                 data_g, g1, g2 = data_g * taper, g1 * taper, g2 * taper
                 taper_power = float(np.mean(taper ** 2))
 
-            ratio = native[I] / dv_kms
+            step = steps[I]
+            ratio = native[I] / step
             oversampling = max(1.0, ratio)
             if resampled:
-                phases = None if native_wv is None else _native_phases(native_wv[I], w, dv_kms)
-                psd = _resampling_noise_psd(len(w), native[I], dv_kms, phases)
+                phases = None if native_wv is None else _native_phases(native_wv[I], w, step)
+                psd = _resampling_noise_psd(len(w), native[I], step, phases)
             else:
                 psd = np.ones(len(w) // 2)
             noise_psd = taper_power * psd
             kw = dict(sigma=sigma[I], zeta_max=zeta_max,
-                      oversampling=oversampling, noise_psd=noise_psd)
-            st = window_stats(data_g, g1, g2, dv_kms, v1_grid, v2_grid, **kw)
+                      oversampling=oversampling, noise_psd=noise_psd,
+                      velocity_convention=velocity_convention)
+            st = window_stats(data_g, g1, g2, step, v1_grid, v2_grid, **kw)
             stats.append(st)
-            prepared.append((data_g, g1, g2, kw))
+            prepared.append((data_g, g1, g2, step, kw))
 
             # Keep the scalar powers always -- they say which component each
             # order can constrain, and they cost nothing. The full arrays are
             # optional (see keep_windows).
-            win = {'order': I, 'dv': dv_kms,
+            win = {'order': I, 'dv': step,
                    'S11': st['S11'], 'S22': st['S22'], 'SD': st['SD'],
                    'oversampling': oversampling, 'n_eff': len(w) / oversampling,
                    'nu': st['nu'], 'sigma': float(sigma[I]), 'sigma_fallback': False}
@@ -343,14 +362,14 @@ class CCF2d:
         # centred on: the re-weighted pass reuses them if its coarse argmax
         # has not moved.
         fine_cache = {}
-        fit = self._joint_fit(stats, None, prepared, dv_kms, v1_grid, v2_grid,
+        fit = self._joint_fit(stats, None, prepared, v1_grid, v2_grid,
                               nonneg, fine_cache)
         noise = sigma_in
         if sigma_from_fit:
             noise, fallback = self._window_noise(fit, windows)
             for win, s_i, fb in zip(windows, noise, fallback):
                 win.update(sigma=float(s_i), sigma_fallback=bool(fb))
-            fit = self._joint_fit(stats, 1.0 / noise ** 2, prepared, dv_kms,
+            fit = self._joint_fit(stats, 1.0 / noise ** 2, prepared,
                                   v1_grid, v2_grid, nonneg, fine_cache)
 
         res, coarse, crlb, at_peak = fit['res'], fit['coarse'], fit['crlb'], fit['best']
@@ -371,7 +390,8 @@ class CCF2d:
                    peak=coarse['peak'],
                    a1_best=at_peak['a1'], a2_best=at_peak['a2'],
                    chi2_best=at_peak['chi2'], chi2_red=at_peak['chi2_red'],
-                   sigma=noise, sigma_from_fit=sigma_from_fit)
+                   sigma=noise, sigma_from_fit=sigma_from_fit,
+                   velocity_convention=velocity_convention)
 
         self.stats = fit['pooled']
         self.windows = windows
@@ -401,7 +421,8 @@ class CCF2d:
                 'CrossCorrelateSpec with keep_windows=True to inspect residuals')
         r = self.Corr2d
         model = model_flux(win['wv'], win['dv'], win['g1'], win['g2'],
-                           r['RV1'], r['RV2'], r['a1_best'], r['a2_best'])
+                           r['RV1'], r['RV2'], r['a1_best'], r['a2_best'],
+                           velocity_convention=r['velocity_convention'])
         return win['wv'], model, win['data_g'] + 1.0
 
     # =============================================================================
@@ -485,8 +506,7 @@ class CCF2d:
             v2_grid = grid
         return np.asarray(v1_grid, float), np.asarray(v2_grid, float)
 
-    def _joint_fit(self, stats, weights, prepared, dv_kms, v1_grid, v2_grid, nonneg,
-                   fine_cache):
+    def _joint_fit(self, stats, weights, prepared, v1_grid, v2_grid, nonneg, fine_cache):
         '''
         One pass of the joint fit: pool the per-window coarse statistics with
         the given weights, locate the peak on the coarse map, refine it on the
@@ -495,6 +515,7 @@ class CCF2d:
         :param: stats      - per-window coarse-map window_stats.
         :param: weights    - per-window factors on the statistics (1/sigma_i^2
                              for unit-noise windows), or None for all ones.
+        :param: prepared   - per-window (data_g, g1, g2, dv, window_stats kwargs).
         :param: fine_cache - dict of per-window fine-map statistics by coarse
                              node, filled here and reused across passes.
         :return: dict with 'pooled' (the weighted coarse statistics), 'res'
@@ -511,7 +532,7 @@ class CCF2d:
         coarse = crlb_from_map(res['logL_profile'], v1_grid, v2_grid,
                                half=self.crlb_half)
         res['fine'] = None if coarse['on_edge'] else self._refine(
-            prepared, dv_kms, res, nonneg, weights, fine_cache)
+            prepared, res, nonneg, weights, fine_cache)
         crlb = coarse if res['fine'] is None else crlb_from_map(
             res['fine']['logL_profile'], res['fine']['v1_grid'],
             res['fine']['v2_grid'], half=self.crlb_half)
@@ -519,14 +540,14 @@ class CCF2d:
         # Amplitudes and chi2 exactly at the refined velocities, so the
         # reported RVs and amplitudes belong to one point.
         p1, p2 = np.array([crlb['peak_refined'][0]]), np.array([crlb['peak_refined'][1]])
-        at_peak = [window_stats(d, g1, g2, dv_kms, p1, p2, **kw)
-                   for d, g1, g2, kw in prepared]
+        at_peak = [window_stats(d, g1, g2, dv, p1, p2, **kw)
+                   for d, g1, g2, dv, kw in prepared]
         best = profile_from_stats(combine_stats(at_peak, weights), p1, p2,
                                   nonneg=nonneg)['best']
         return dict(pooled=pooled, res=res, coarse=coarse, crlb=crlb,
                     at_peak=at_peak, best=best)
 
-    def _refine(self, prepared, dv_kms, res, nonneg, weights, fine_cache):
+    def _refine(self, prepared, res, nonneg, weights, fine_cache):
         '''
         Re-evaluate the statistics on a fine (v1, v2) grid around the coarse
         argmax and profile them -- the second, exact pass (see ``__init__``).
@@ -549,8 +570,8 @@ class CCF2d:
         f1, f2 = v1[i] + step1 * nodes, v2[j] + step2 * nodes
 
         if (i, j) not in fine_cache:
-            fine_cache[(i, j)] = [window_stats(d, g1, g2, dv_kms, f1, f2, **kw)
-                                  for d, g1, g2, kw in prepared]
+            fine_cache[(i, j)] = [window_stats(d, g1, g2, dv, f1, f2, **kw)
+                                  for d, g1, g2, dv, kw in prepared]
         fine = profile_from_stats(combine_stats(fine_cache[(i, j)], weights), f1, f2,
                                   nonneg=nonneg)
         fi, fj = np.unravel_index(np.argmax(fine['logL_profile']), fine['logL_profile'].shape)

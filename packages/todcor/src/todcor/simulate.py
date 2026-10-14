@@ -10,7 +10,8 @@
 # observation), while model_flux uses the Fourier phase shift (matching the fit
 # exactly).
 #
-# Conventions: wavelengths in Angstrom, velocities in km/s, normalized flux
+# Conventions: wavelengths in Angstrom, velocities in km/s ('cz' Doppler
+# convention unless velocity_convention='relativistic'), normalized flux
 # (continuum = 1).
 #
 # Dependencies: numpy, unicor.dsp.
@@ -18,17 +19,19 @@
 
 import numpy as np
 
-from unicor.dsp import C_KMS, resample, shift_kms
+from unicor.dsp import doppler_factor, resample, shift_kms
 
 
 # =============================================================================
 # =============================================================================
-def shift_template_flux(wave_t, flux_t, wave_grid, v, fill=1.0):
+def shift_template_flux(wave_t, flux_t, wave_grid, v, fill=1.0, velocity_convention='cz'):
     """Resample a template, Doppler-shifted by ``v`` (km/s), onto ``wave_grid``.
 
-    A line emitted at rest wavelength ``lam`` appears at ``lam * (1 + v/c)``, so
-    the shifted template sampled at ``wave_grid`` is the rest template evaluated
-    at ``wave_grid / (1 + v/c)``.
+    A line emitted at rest wavelength ``lam`` appears at ``lam * D(v)``, with
+    ``D`` the Doppler factor of ``velocity_convention``
+    (:func:`unicor.dsp.doppler_factor`; ``1 + v/c`` under 'cz'), so the shifted
+    template sampled at ``wave_grid`` is the rest template evaluated at
+    ``wave_grid / D(v)``.
 
     Parameters
     ----------
@@ -41,18 +44,22 @@ def shift_template_flux(wave_t, flux_t, wave_grid, v, fill=1.0):
     fill : float
         Value used where the shifted template does not cover ``wave_grid``
         (default 1.0, the continuum).
+    velocity_convention : {'cz', 'relativistic'}
+        Doppler convention of ``v``. Default 'cz'.
 
     Returns
     -------
     flux : ndarray
         The shifted template sampled on ``wave_grid``.
     """
-    return resample(wave_t, flux_t, wave_grid / (1.0 + v / C_KMS), fill=fill)
+    return resample(wave_t, flux_t,
+                    np.asarray(wave_grid, float) / doppler_factor(v, velocity_convention),
+                    fill=fill)
 
 
 # =============================================================================
 # =============================================================================
-def composite_flux(wave_grid, templates, velocities, amplitudes):
+def composite_flux(wave_grid, templates, velocities, amplitudes, velocity_convention='cz'):
     """Build a noiseless composite (continuum-normalised) by physical shifting.
 
     Parameters
@@ -65,6 +72,8 @@ def composite_flux(wave_grid, templates, velocities, amplitudes):
         Radial velocity of each component (km/s).
     amplitudes : sequence of float
         Linear scaling (light/dilution fraction) of each component's *lines*.
+    velocity_convention : {'cz', 'relativistic'}
+        Doppler convention of ``velocities``. Default 'cz'.
 
     Returns
     -------
@@ -73,13 +82,14 @@ def composite_flux(wave_grid, templates, velocities, amplitudes):
     """
     g = np.zeros_like(np.asarray(wave_grid, float))
     for (wave_t, flux_t), v, a in zip(templates, velocities, amplitudes):
-        g += a * (shift_template_flux(wave_t, flux_t, wave_grid, v) - 1.0)
+        g += a * (shift_template_flux(wave_t, flux_t, wave_grid, v,
+                                      velocity_convention=velocity_convention) - 1.0)
     return 1.0 + g
 
 
 # =============================================================================
 # =============================================================================
-def model_flux(wave_grid, dv, g1, g2, v1, v2, a1, a2):
+def model_flux(wave_grid, dv, g1, g2, v1, v2, a1, a2, velocity_convention='cz'):
     """Reconstruct the best-fit composite flux on the grid (for residual plots).
 
     Uses the same Fourier phase-shift model as the fit, so the returned flux is
@@ -91,13 +101,16 @@ def model_flux(wave_grid, dv, g1, g2, v1, v2, a1, a2):
     wave_grid : ndarray
         The uniform log-lambda grid (Angstrom); only its length is used.
     dv : float
-        Velocity step of the grid (km/s).
+        Velocity step of the grid (km/s), ``c`` times its actual ln(lambda)
+        step (as in :func:`todcor.estimator.window_stats`).
     g1, g2 : ndarray
         Template residuals on that grid (continuum 0).
     v1, v2 : float
         Component velocities (km/s).
     a1, a2 : float
         Component amplitudes (dimensionless).
+    velocity_convention : {'cz', 'relativistic'}
+        Doppler convention of ``v1``, ``v2``. Default 'cz'.
 
     Returns
     -------
@@ -108,7 +121,7 @@ def model_flux(wave_grid, dv, g1, g2, v1, v2, a1, a2):
     zeta = np.fft.rfftfreq(n, d=dv)
     G1 = np.fft.rfft(np.asarray(g1, float))
     G2 = np.fft.rfft(np.asarray(g2, float))
-    s1, s2 = shift_kms(v1), shift_kms(v2)
+    s1, s2 = shift_kms(v1, velocity_convention), shift_kms(v2, velocity_convention)
     M = (a1 * G1 * np.exp(-2j * np.pi * zeta * s1)
          + a2 * G2 * np.exp(-2j * np.pi * zeta * s2))
     return 1.0 + np.fft.irfft(M, n=n)

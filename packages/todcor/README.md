@@ -18,6 +18,11 @@ statistics, and the Cramér–Rao bound comes from the curvature of the map.
 
 Inputs and outputs are plain floats and arrays: velocities and the log-λ shift
 `s` in km/s, ζ (the Fourier conjugate) in s/km, kernel widths as FWHM in km/s.
+Velocities are in the `'cz'` Doppler convention (`λ_obs/λ_rest = 1 + v/c`; IAU
+2000, IRAF fxcor) unless you pass `velocity_convention='relativistic'`
+(`√((1 + v/c)/(1 − v/c))`) to `window_stats` / `todcor_map` and the forward
+model; the two differ by ≈ v²/2c (37.5 m/s at 150 km/s). `dv` must be the
+grid's actual step, `c` times its ln λ step (`todcor.log_grid_step(wave)`).
 
 ## Install
 

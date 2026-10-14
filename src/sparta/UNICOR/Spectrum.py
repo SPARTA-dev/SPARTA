@@ -481,13 +481,14 @@ class Spectrum:
         is set to be 0.0 km/s.
         '''
 
-        # Set Barycentric velocity
-        betavel = ((self.bcv/self.c).decompose()).value
-        wvBC = []
-        # Preform barycentric correction
-        for I, w in enumerate(self.wv):
-            # wvBC.append(np.reshape(w*(1+betavel), (1, -1)))
-            wvBC.append(np.squeeze(w*(1+betavel)))
+        # The BERV is composed multiplicatively as lambda * (1 + bcv/c) -- the
+        # cz convention -- whatever velocity_convention the RVs are later read
+        # in: pipeline BERVs are defined to compose this way (1 + z_obs =
+        # (1 + z_star)(1 + bcv/c)), so the factor is fixed by how bcv was
+        # computed, not chosen here. Do not route it through the RV convention.
+        bcv_kms = u.Quantity(self.bcv, u.km / u.s).to_value(u.km / u.s)
+        wvBC = [np.squeeze(dsp.doppler_shift_wave(w, bcv_kms, convention='cz'))
+                for w in self.wv]
 
         # Update the BCV to be zero, so that another activation
         # of the function wont mess up the results.

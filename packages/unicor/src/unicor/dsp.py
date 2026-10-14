@@ -9,6 +9,8 @@ USuRPER engines.
 Conventions
 -----------
 - Velocities and velocity steps in km/s; wavelengths in Angstrom.
+- Radial velocities follow one of two Doppler conventions (``convention`` /
+  ``velocity_convention``; see :func:`doppler_factor`), 'cz' by default.
 - Broadening operates on normalized flux (continuum = 1) via the residual
   ``flux - 1``, so the continuum is preserved and the edges zero-pad naturally.
 - The Fourier conjugate of a log-lambda (velocity) axis, ``zeta``, is in s/km.
@@ -38,12 +40,16 @@ def dv_from_wave(wave):
 
 
 
-def log_grid_step(wave, rtol=1e-3):
-    """Velocity step (km/s) of a uniform log-lambda grid, after verifying it.
+def log_grid_dln(wave, rtol=1e-3):
+    """The ln(lambda) step of a uniform log-lambda grid, after verifying it.
 
     The CCF and the Fourier shift model are only valid on a velocity-even grid;
     a grid that merely *claims* to be one (e.g. after pixels were dropped) must
     be caught before correlating, not after.
+
+    A velocity read off a lag must use this *actual* step: a grid built with
+    ``ln(1 + dv/c)`` (``Spectrum.InterpolateSpectrum``) and one built with
+    ``dv/c`` (:func:`log_lambda_grid`) differ by ``dv/2c`` relative.
 
     Parameters
     ----------
@@ -55,14 +61,17 @@ def log_grid_step(wave, rtol=1e-3):
     Returns
     -------
     float
-        ``c * median(diff(ln wave))`` (km/s).
+        ``ln(wave[-1] / wave[0]) / (N - 1)`` (dimensionless): the mean step,
+        which -- unlike a single difference -- carries no round-off from the
+        logarithms of neighbouring nodes.
 
     Raises
     ------
     ValueError
         If ``wave`` is not strictly increasing or not uniform in ln(lambda).
     """
-    dln = np.diff(np.log(np.asarray(wave, float)))
+    wave = np.asarray(wave, float)
+    dln = np.diff(np.log(wave))
     if dln.size == 0 or np.any(dln <= 0):
         raise ValueError("wavelength grid must be strictly increasing")
     step = np.median(dln)
@@ -71,7 +80,31 @@ def log_grid_step(wave, rtol=1e-3):
             f"wavelength grid is not uniform in ln(lambda): step varies by "
             f"{np.ptp(dln) / step:.2g} (relative), tolerance {rtol:g}. "
             "Resample it onto a log-lambda grid first.")
-    return C_KMS * step
+    return float(np.log(wave[-1] / wave[0]) / dln.size)
+
+
+def log_grid_step(wave, rtol=1e-3):
+    """Velocity step (km/s) of a uniform log-lambda grid, after verifying it.
+
+    Parameters
+    ----------
+    wave : ndarray
+        Wavelength grid (Angstrom).
+    rtol : float
+        Allowed relative spread of the ln(lambda) step.
+
+    Returns
+    -------
+    float
+        ``c * log_grid_dln(wave)`` (km/s), see :func:`log_grid_dln`.
+
+    Raises
+    ------
+    ValueError
+        If ``wave`` is not strictly increasing or not uniform in ln(lambda).
+    """
+    return C_KMS * log_grid_dln(wave, rtol)
+
 
 def log_lambda_grid(lam_lo, lam_hi, dv):
     """Uniform log-lambda (constant-velocity-step) wavelength grid.
@@ -116,14 +149,136 @@ def tukey_window(n, alpha=0.1):
     return _tukey(n, alpha)
 
 
-def shift_kms(v):
-    """Log-lambda shift ``s = c * ln(1 + v/c)`` (km/s) for radial velocity ``v``.
+# ln(lambda_obs / lambda_rest) as a function of beta = v/c, and its inverse,
+# per convention. Every Doppler shift in unicor and todcor goes through this
+# table (via shift_kms / doppler_factor / velocity_from_log_shift).
+_LOG_DOPPLER = {
+    'cz': (np.log1p, np.expm1),               # 1 + beta
+    'relativistic': (np.arctanh, np.tanh),    # sqrt((1 + beta) / (1 - beta))
+}
 
-    The relativistically consistent translation distance along the log-lambda
-    axis: a line at rest wavelength ``lam`` moves to ``lam * (1 + v/c)``, i.e.
-    by ``s`` in the velocity coordinate ``u = c * ln(lam / lam_0)``.
+
+def _log_doppler(convention):
+    """The (beta -> ln factor, ln factor -> beta) pair of ``convention``."""
+    try:
+        return _LOG_DOPPLER[convention]
+    except (KeyError, TypeError):
+        raise ValueError(f"velocity convention must be one of {tuple(_LOG_DOPPLER)}, "
+                         f"got {convention!r}") from None
+
+
+def shift_kms(v, convention='cz'):
+    """Log-lambda shift ``s = c * ln(lambda_obs / lambda_rest)`` (km/s) for velocity ``v``.
+
+    The translation distance along the velocity coordinate
+    ``u = c * ln(lambda / lambda_0)`` of a uniform log-lambda grid: a line at
+    rest wavelength ``lambda`` moves to ``lambda * doppler_factor(v)``, i.e. by
+    ``s`` in ``u``. ``s = c * ln(1 + v/c)`` under 'cz' and ``c * artanh(v/c)``
+    (the rapidity) under 'relativistic'; computed with ``log1p`` /
+    ``arctanh``, so it keeps full precision for small ``v``.
+
+    Parameters
+    ----------
+    v : float or ndarray
+        Radial velocity (km/s); positive red-shifts.
+    convention : {'cz', 'relativistic'}
+        Doppler convention, see :func:`doppler_factor`.
+
+    Returns
+    -------
+    float or ndarray
+        The shift ``s`` (km/s), same shape as ``v``.
+
+    Raises
+    ------
+    ValueError
+        If ``convention`` is unknown, or ``v`` has no Doppler factor under it
+        (``v <= -c`` for 'cz', ``|v| >= c`` for 'relativistic').
     """
-    return C_KMS * np.log1p(np.asarray(v, float) / C_KMS)
+    forward, _ = _log_doppler(convention)
+    beta = np.asarray(v, float) / C_KMS
+    with np.errstate(divide='ignore', invalid='ignore'):
+        s = C_KMS * forward(beta)
+    # A NaN velocity (e.g. a failed RV) propagates as NaN, as numpy would.
+    if np.any(np.isfinite(beta) & ~np.isfinite(s)):
+        raise ValueError(
+            f"velocity at or beyond the speed of light has no {convention!r} Doppler "
+            f"factor: need {'v > -c' if convention == 'cz' else '|v| < c'} (km/s)")
+    return s
+
+
+def doppler_factor(v, convention='cz'):
+    """Wavelength ratio ``lambda_obs / lambda_rest`` for radial velocity ``v``.
+
+    Two conventions are supported:
+
+    'cz' (the default)
+        ``lambda_obs / lambda_rest = 1 + v/c``, i.e. ``v = c z``. The
+        radial-velocity measure of the IAU (2000) resolution (Lindegren &
+        Dravins 2003, A&A 401, 1185) and the velocity of IRAF ``fxcor``: the
+        measured shift expressed as a velocity, with no attempt to separate
+        the transverse-Doppler, gravitational or convective contributions.
+    'relativistic'
+        ``lambda_obs / lambda_rest = sqrt((1 + v/c) / (1 - v/c))``: the special-
+        relativistic Doppler factor of a source receding along the line of
+        sight at speed ``v``.
+
+    The two agree to first order; for the same spectrum the 'cz' velocity
+    exceeds the 'relativistic' one by ``~v**2 / 2c`` (37.5 m/s at 150 km/s).
+
+    Parameters
+    ----------
+    v : float or ndarray
+        Radial velocity (km/s); positive red-shifts.
+    convention : {'cz', 'relativistic'}
+        Doppler convention.
+
+    Returns
+    -------
+    float or ndarray
+        The (dimensionless) factor, same shape as ``v``.
+
+    Raises
+    ------
+    ValueError
+        As :func:`shift_kms`.
+    """
+    return np.exp(shift_kms(v, convention) / C_KMS)
+
+
+def velocity_from_log_shift(dln, convention='cz'):
+    """Radial velocity (km/s) of a shift ``dln = ln(lambda_obs / lambda_rest)``.
+
+    The inverse of :func:`shift_kms` (``dln = s / c``). On a uniform
+    log-lambda grid of step ``Delta``, a shift of ``k`` pixels is
+    ``dln = k * Delta``, and its velocity is
+
+    - 'cz': ``c * expm1(dln)``, where ``expm1(x) = exp(x) - 1`` computed
+      without the cancellation that ruins ``exp(x) - 1`` for tiny ``x``;
+    - 'relativistic': ``c * tanh(dln)``.
+
+    Reading the shift as ``c * dln`` instead (i.e. as ``k * dv``) is off by
+    ``-v**2 / 2c`` from 'cz' and by ``+v**3 / 3c**2`` from 'relativistic'.
+
+    Parameters
+    ----------
+    dln : float or ndarray
+        Natural-log wavelength shift (dimensionless).
+    convention : {'cz', 'relativistic'}
+        Doppler convention, see :func:`doppler_factor`.
+
+    Returns
+    -------
+    float or ndarray
+        Radial velocity (km/s), same shape as ``dln``.
+
+    Raises
+    ------
+    ValueError
+        If ``convention`` is unknown.
+    """
+    _, inverse = _log_doppler(convention)
+    return C_KMS * inverse(np.asarray(dln, float))
 
 
 def rfft_positive(g, dv):
@@ -239,12 +394,25 @@ def broaden_gaussian(flux, dv, fwhm_kms):
         np.asarray(flux, float) - 1.0, dv, fwhm_kms)
 
 
-def doppler_shift_wave(wave, v):
-    """Doppler-shift a wavelength array by velocity ``v`` (km/s), classical.
+def doppler_shift_wave(wave, v, convention='cz'):
+    """Doppler-shift a wavelength array by radial velocity ``v``.
 
-    Returns ``wave * (1 + v/c)``; positive ``v`` red-shifts (increases lambda).
+    Parameters
+    ----------
+    wave : ndarray
+        Rest-frame wavelengths (Angstrom).
+    v : float
+        Radial velocity (km/s); positive red-shifts (increases lambda).
+    convention : {'cz', 'relativistic'}
+        Doppler convention, see :func:`doppler_factor`; under 'cz' this is
+        ``wave * (1 + v/c)``.
+
+    Returns
+    -------
+    ndarray
+        Observed-frame wavelengths (Angstrom).
     """
-    return np.asarray(wave, float) * (1.0 + v / C_KMS)
+    return np.asarray(wave, float) * doppler_factor(v, convention)
 
 
 def resample(wave, flux, wave_grid, fill=None, kind='linear'):

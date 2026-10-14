@@ -8,7 +8,8 @@
 #
 # Conventions: velocities and the log-lambda shift s in km/s; zeta (the Fourier
 # conjugate) in s/km; spectra on a uniform log-lambda grid of step dv (km/s);
-# residual flux g = flux - continuum.
+# residual flux g = flux - continuum. Velocities are 'cz' (lambda_obs/lambda_rest
+# = 1 + v/c) unless velocity_convention='relativistic' (unicor.dsp.doppler_factor).
 #
 # Reference: Zucker, S. & Mazeh, T. 1994, ApJ 420, 806 -- "Study of
 # spectroscopic binaries with TODCOR. I. A new two-dimensional correlation
@@ -26,7 +27,9 @@ Doppler-shifted, scaled template spectra::
     g(u) = a1 * g1(u - s1) + a2 * g2(u - s2)
 
 where ``u`` is a velocity coordinate (km/s) on a uniform log-lambda grid and
-``s_i = c * ln(1 + v_i / c)`` is the shift of component *i*.  On the log-lambda
+``s_i = c * ln(lambda_obs / lambda_rest)`` is the shift of component *i*:
+``c * ln(1 + v_i / c)`` in the default 'cz' convention, ``c * artanh(v_i / c)``
+in the 'relativistic' one (:func:`unicor.dsp.shift_kms`).  On the log-lambda
 grid a Doppler shift is a translation, so in the Fourier domain it becomes a
 phase factor (the shift theorem) and the *templates themselves* are transformed
 once and reused at every trial velocity::
@@ -44,8 +47,7 @@ Sufficient statistics
 For one spectral window the weighted (Parseval) chi^2 at any trial
 ``(v1, v2, a1, a2)`` is a fixed quadratic form in just **six** numbers -- the
 window's *sufficient statistics*.  With per-mode weight ``w_k`` (see
-:func:`unicor.dsp.parseval_weights`) and shifts
-``s_i = c*ln(1 + v_i/c)``::
+:func:`unicor.dsp.parseval_weights`) and shifts ``s_i`` (above)::
 
     S11 = sum_k w_k |G1_k|^2                                   (scalar)
     S22 = sum_k w_k |G2_k|^2                                   (scalar)
@@ -139,7 +141,7 @@ from unicor.dsp import parseval_weights, rfft_positive, shift_kms
 # =============================================================================
 # =============================================================================
 def window_stats(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None,
-                 oversampling=1.0, noise_psd=None):
+                 oversampling=1.0, noise_psd=None, velocity_convention='cz'):
     """Weighted least-squares sufficient statistics for one spectral window.
 
     The 2x2 amplitude problem at every ``(v1, v2)`` node is fully described by
@@ -159,7 +161,10 @@ def window_stats(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None,
         The two template residuals, already broadened, apodised, and resampled
         onto the *same* grid as ``data_g``.
     dv : float
-        Velocity step of the grid (km/s).
+        Velocity step of the grid (km/s): ``c`` times its *actual* ln(lambda)
+        step (:func:`unicor.dsp.log_grid_step`), which is what a shift ``s``
+        is measured in -- a nominal ``dv`` for a grid built as
+        ``ln(1 + dv/c)`` is off by ``dv/2c`` relative.
     v1_grid, v2_grid : ndarray
         Trial radial velocities of each component (km/s).
     sigma : float
@@ -179,6 +184,9 @@ def window_stats(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None,
         :func:`unicor.dsp.rfft_positive` (length ``n // 2``; see
         :func:`resampled_noise_psd`). Used only for the noise budget ``nu``.
         Default None: white noise on the analysis grid (all ones).
+    velocity_convention : {'cz', 'relativistic'}
+        Doppler convention of ``v1_grid``/``v2_grid``
+        (:func:`unicor.dsp.doppler_factor`). Default 'cz'.
 
     Returns
     -------
@@ -226,8 +234,8 @@ def window_stats(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None,
     # Nyquist, above zeta_max) never enter chi^2 and so carry no dof.
     nu = float(np.sum(w * n * sigma ** 2 * noise_psd))
 
-    s1 = shift_kms(np.asarray(v1_grid, float))  # (n1,)
-    s2 = shift_kms(np.asarray(v2_grid, float))  # (n2,)
+    s1 = shift_kms(np.asarray(v1_grid, float), velocity_convention)  # (n1,)
+    s2 = shift_kms(np.asarray(v2_grid, float), velocity_convention)  # (n2,)
 
     S11 = np.sum(w * np.abs(G1) ** 2)
     S22 = np.sum(w * np.abs(G2) ** 2)
@@ -616,7 +624,7 @@ def crlb_from_map(logL, v1_grid, v2_grid, half=3):
 # =============================================================================
 # =============================================================================
 def todcor_map(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None,
-               nonneg=False, oversampling=1.0, noise_psd=None):
+               nonneg=False, oversampling=1.0, noise_psd=None, velocity_convention='cz'):
     """Single-window TODCOR log-likelihood map (convenience wrapper).
 
     Equivalent to ``profile_from_stats(window_stats(...), v1_grid, v2_grid)``.
@@ -627,5 +635,6 @@ def todcor_map(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None,
     stats = window_stats(
         data_g, g1, g2, dv, v1_grid, v2_grid, sigma=sigma, zeta_max=zeta_max,
         oversampling=oversampling, noise_psd=noise_psd,
+        velocity_convention=velocity_convention,
     )
     return profile_from_stats(stats, v1_grid, v2_grid, nonneg=nonneg)
