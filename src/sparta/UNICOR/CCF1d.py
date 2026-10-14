@@ -99,7 +99,10 @@ class CCF1d:
         ``n_pix_i * min(1, dv / native_step_i)`` bins -- ``n_pix_i`` the
         pixels actually correlated (see template coverage) -- with the native step
         from ``spec_in.native_steps()`` (km/s; the coarsest sampling the
-        spectrum has had).
+        spectrum has had). For an archive-resampled product, Observations
+        seeds it with the detector step (e.g. HARPS ADP: ~0.609 km/s, where
+        the 0.01 A archive grid is ~0.60 km/s at 5000 A but ~0.44 km/s at
+        6800 A), so the archive's oversampling is not counted as information.
 
         That count assumes white noise on the native pixels. Filtering and
         per-order normalisation (``FilterSpectrum`` / ``SpecPreProccess``)

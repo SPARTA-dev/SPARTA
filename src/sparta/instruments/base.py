@@ -6,6 +6,7 @@ registry (``sparta.instruments.REGISTRY``) is keyed by `Product.survey`.
 
 Conventions: wavelengths in Angstrom, velocities in km/s, times in days.
 """
+import dataclasses
 import functools
 import math
 import warnings
@@ -94,8 +95,10 @@ class LoadedSpectrum:
     vrad : float or None
         Radial velocity (km/s) recorded in the file, if any.
     native_step_kms : list of float or None
-        Per-order native sampling (km/s per pixel) when ``wave`` is a
-        resampled grid; None when ``wave`` is the native grid or it is unknown.
+        Per-order native (detector) sampling (km/s per pixel) when ``wave`` is
+        a resampled grid -- for an archive product, the instrument's
+        ``native_step_kms`` (see `Product`); None when ``wave`` is the native
+        grid, or the native sampling is unknown.
     survey : str
         Registry key of the product that produced this record.
     path : str or None
@@ -132,7 +135,10 @@ class Product:
     description : str
         What the files are (pipeline, file type, layout).
     resampled : bool
-        True if the archive grid is not the detector pixel grid.
+        True if the archive grid is not the detector pixel grid. Then, if the
+        instrument declares ``native_step_kms``, ``load`` reports it per order
+        in ``LoadedSpectrum.native_step_kms`` (unless the loader already set
+        it), so the error estimates count native pixels, not archive ones.
     grid : str
         The wavelength grid of the product, in words.
     wavelength_frame : str or None
@@ -172,8 +178,21 @@ class Product:
                              f"not in {WAVELENGTH_FRAMES}")
         if self.specsys not in SPECSYS_VALUES:
             raise ValueError(f"{self.survey}: specsys {self.specsys!r} not in {SPECSYS_VALUES}")
+        if self.resampled and self.instrument.native_step_kms is not None:
+            object.__setattr__(self, "load",
+                               _seed_native_step(self.instrument.native_step_kms, self.load))
         if not self.verified:
             object.__setattr__(self, "load", _warn_unverified(self.survey, self.load))
+
+
+def _seed_native_step(native_step_kms, load):
+    @functools.wraps(load)
+    def wrapped(*args, **kwargs):
+        record = load(*args, **kwargs)
+        if record.native_step_kms is not None:
+            return record
+        return dataclasses.replace(record, native_step_kms=[native_step_kms] * len(record.wave))
+    return wrapped
 
 
 def _warn_unverified(survey, load):

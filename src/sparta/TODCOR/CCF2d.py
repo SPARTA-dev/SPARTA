@@ -243,7 +243,13 @@ class CCF2d:
         pixels), so chi2_red ~ 1 for honest noise on any analysis step, finer
         or coarser than native. The phases are measured when CCF2d does the
         resampling itself (native positions known); for a spectrum resampled
-        beforehand they are taken as uniformly spread.
+        beforehand they are taken as uniformly spread. That includes an
+        archive product whose native step Observations seeded from the
+        instrument (e.g. HARPS ADP, 0.01 A bins over ~0.609 km/s detector
+        pixels): it is modelled as the native pixels resampled once, by the
+        spline, onto the analysis grid. The archive pipeline's own rebinning
+        kernel is unknown, so for such products nu and the noise budget are
+        approximate.
 
         That calibration -- nu, chi2_red, the sigma=None estimate, and the
         native-pixel count behind the CRLB -- assumes white noise on the

@@ -37,6 +37,7 @@ import warnings
 import numpy as np
 from sparta.UNICOR.Spectrum import Spectrum
 from sparta import instruments
+from unicor import dsp
 from sparta.Auxil.TimeSeries import TimeSeries
 from sparta.Auxil.PeriodicityDetector import PeriodicityDetector
 from tqdm import tqdm
@@ -112,6 +113,17 @@ class Observations:
         after ``first_time``), bcv (km/s), snr, air_mass, vrad_list and
         time_series.
 
+        A record of a resampled product carries its native (detector) step,
+        ``native_step_kms``; it becomes the spectrum's ``Info['NativeStep']``
+        (km/s), so UNICOR / TODCOR count native pixels rather than archive
+        ones. Per order it is ``max(native, archive step)`` -- the rule of
+        ``Spectrum.InterpolateSpectrum``, since an archive grid coarser than
+        the detector (e.g. HARPS's 0.01 A bins blueward of ~4900 A) leaves
+        fewer independent pixels than the detector had. This is approximate:
+        the pipeline's own rebinning kernel is unknown, so the noise is
+        modelled as white on the native pixels and resampled once, from
+        uniformly spread sub-pixel phases (see CCF2d.CrossCorrelateSpec).
+
         :param records: iterable of sparta.instruments.LoadedSpectrum.
         :param min_snr: float, drop records with snr < min_snr; -1 disables
                         the cut, and a record of unknown (NaN) snr is kept.
@@ -136,6 +148,13 @@ class Observations:
             if not (snr_ok and flux_ok):
                 continue
             sp = Spectrum(wv=rec.wave, sp=rec.flux, bjd=rec.time, bcv=rec.bcv, name=rec.survey)
+            if rec.native_step_kms is not None:
+                if len(rec.native_step_kms) != len(rec.wave):
+                    raise ValueError(f"{rec.path or rec.survey}: native_step_kms has "
+                                     f"{len(rec.native_step_kms)} values for "
+                                     f"{len(rec.wave)} orders")
+                sp.Info['NativeStep'] = [max(float(native), dsp.dv_from_wave(w))
+                                         for native, w in zip(rec.native_step_kms, rec.wave)]
             sp.BarycentricCorrection()
 
             self.spec_list.append(sp)

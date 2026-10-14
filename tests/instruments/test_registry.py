@@ -9,7 +9,7 @@ import pytest
 from astropy import constants
 
 import sparta.instruments as instruments
-from sparta.instruments.base import SPECSYS_VALUES, WAVELENGTH_FRAMES, Product
+from sparta.instruments.base import SPECSYS_VALUES, WAVELENGTH_FRAMES, LoadedSpectrum, Product
 from unicor.dsp import dv_from_wave
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -74,6 +74,36 @@ def test_invalid_frames_are_refused_at_definition():
         Product(**{**fields, "wavelength_frame": "vac"})
     with pytest.raises(ValueError, match="specsys"):
         Product(**{**fields, "specsys": "LSRK"})
+
+
+def test_every_resampled_verified_product_declares_a_native_step():
+    # Without it the archive pixels would count as independent in eRV / CRLB.
+    for p in instruments.REGISTRY.values():
+        if p.verified and p.resampled:
+            assert p.instrument.native_step_kms is not None, p.survey
+
+
+@pytest.mark.parametrize("product", instruments.REGISTRY.values(), ids=lambda p: p.survey)
+def test_load_seeds_the_native_step_only_for_resampled_products(product):
+    def fake_load(path, *, min_wv, max_wv):
+        return LoadedSpectrum(wave=[np.arange(5000.0, 5010.0, 0.01)] * 2, flux=[np.ones(1000)] * 2,
+                              time=0.0, time_system="BJD-TDB", bcv=0.0, specsys=None,
+                              wavelength_frame=None)
+
+    fields = {f: getattr(product, f) for f in Product.__dataclass_fields__}
+    seeded = Product(**{**fields, "load": fake_load, "verified": True})
+    native = product.instrument.native_step_kms
+    expected = [native, native] if product.resampled and native is not None else None
+    assert seeded.load("x", min_wv=0.0, max_wv=1.0).native_step_kms == expected
+
+
+def test_a_loader_reported_native_step_is_kept():
+    fields = {f: getattr(instruments.get("HARPS"), f) for f in Product.__dataclass_fields__}
+    record = LoadedSpectrum(wave=[np.arange(5000.0, 5010.0, 0.01)], flux=[np.ones(1000)], time=0.0,
+                            time_system="BJD-TDB", bcv=0.0, specsys=None, wavelength_frame=None,
+                            native_step_kms=[0.5])
+    product = Product(**{**fields, "load": lambda path, **kw: record})
+    assert product.load("x", min_wv=0.0, max_wv=1.0).native_step_kms == [0.5]
 
 
 def test_every_verified_product_has_real_files():

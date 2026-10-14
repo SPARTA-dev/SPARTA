@@ -137,3 +137,41 @@ def test_ingest_cuts_on_snr_keeps_unknown_snr_and_skips_missing_vrad():
     assert obs.vrad_list == [3.0]
     assert (obs.time_system, obs.wavelength_frame) == ("BJD-TDB", "air")
     np.testing.assert_allclose(obs.spec_list[0].wv[0], wave * (1 + 1.0 / 299792.458), rtol=1e-15)
+
+
+def _record(wave, native_step_kms=None):
+    from sparta.instruments import LoadedSpectrum
+    return LoadedSpectrum(wave=[wave], flux=[np.ones(wave.size)], time=2458000.0,
+                          time_system="BJD-TDB", bcv=1.0, specsys="TOPOCENT",
+                          wavelength_frame="air", native_step_kms=native_step_kms, survey="TEST")
+
+
+def test_ingest_seeds_the_native_step_of_a_resampled_record():
+    # 0.01 A bins at 6800 A are ~0.44 km/s: finer than the 0.609 km/s detector
+    # pixels, which therefore set the noise scale.
+    wave = np.arange(6800.0, 6810.0, 0.01)
+    obs = _observations()
+    obs._ingest([_record(wave, native_step_kms=[0.609])])
+    assert obs.spec_list[0].Info["NativeStep"] == [0.609]
+    assert obs.spec_list[0].native_steps() == [0.609]
+
+
+def test_ingest_keeps_an_archive_grid_coarser_than_native():
+    # 0.01 A bins at 3800 A are ~0.79 km/s: coarser than the detector, so they
+    # (not the detector pixels) bound the independent samples.
+    wave = np.arange(3800.0, 3810.0, 0.01)
+    obs = _observations()
+    obs._ingest([_record(wave, native_step_kms=[0.609])])
+    assert obs.spec_list[0].native_steps() == [pytest.approx(0.01 / 3805.0 * 299792.458, rel=2e-3)]
+
+
+def test_ingest_without_a_native_step_leaves_the_grid_native():
+    obs = _observations()
+    obs._ingest([_record(np.linspace(5000.0, 5010.0, 50))])
+    assert "NativeStep" not in obs.spec_list[0].Info
+
+
+def test_ingest_refuses_a_native_step_per_order_mismatch():
+    obs = _observations()
+    with pytest.raises(ValueError, match="2 values for 1 orders"):
+        obs._ingest([_record(np.linspace(5000.0, 5010.0, 50), native_step_kms=[0.6, 0.6])])
