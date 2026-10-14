@@ -1,0 +1,1026 @@
+{
+ "datasets": {
+  "HARPS": {
+   "directory": "TOI193",
+   "window_A": {
+    "max_wv": 5090.0,
+    "min_wv": 4990.0
+   }
+  },
+  "NRES": {
+   "directory": "TOI677",
+   "window_A": {
+    "max_wv": 5300.0,
+    "min_wv": 5150.0
+   }
+  }
+ },
+ "loaders": {
+  "HARPS": {
+   "ADP.2018-11-08T01_14_11.387.fits": {
+    "air_mass": 1.0465,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "9938a575f2929685541c5326e63d22b699860807874eabdb1e60e174b6917dc9",
+    "snr": 58.25,
+    "specsys": "BARYCENT",
+    "time": 2458429.51803961,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-11-09T01_16_55.531.fits": {
+    "air_mass": 1.0194999999999999,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "981ec711ce2993da0cc313d5b1c7321f093d2edca56f46f22e8210e2c5853140",
+    "snr": 92.95,
+    "specsys": "BARYCENT",
+    "time": 2458430.54021988,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-11-09T01_16_55.541.fits": {
+    "air_mass": 1.025,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "06aa8b6d833ec776e49611160567a8aec19c0b52641a4e5f787ff53ddb468970",
+    "snr": 84.8,
+    "specsys": "BARYCENT",
+    "time": 2458430.59552822,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "d2809e5a6a7a65408667b976ef143e88bf08ae043296baa8a5ad9a36bb4004aa",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-11-09T01_16_55.555.fits": {
+    "air_mass": 1.225,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "98cc82354fbf7e7a2a0162fc493bb1b1fb8947c7f75a7ae27148f1170698cc38",
+    "snr": 67.15,
+    "specsys": "BARYCENT",
+    "time": 2458430.67910988,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "bbd224b5b4585143c4d7ac4af2ff75ad8a78218891026ed41599811e9d073b0f",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-11-09T01_16_55.567.fits": {
+    "air_mass": 1.928,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "638f6b2edf3c6201256489011965f3022d19a09239458ae45bec8868e128b469",
+    "snr": 51.55,
+    "specsys": "BARYCENT",
+    "time": 2458430.76200871,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-11-10T01_08_51.561.fits": {
+    "air_mass": 1.0485,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "541e3574c486eb5578c25eb6b1200255374a8d1d8fe6f3b77ae8564c28ac8ad7",
+    "snr": 86.2,
+    "specsys": "BARYCENT",
+    "time": 2458431.51067887,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "bbd224b5b4585143c4d7ac4af2ff75ad8a78218891026ed41599811e9d073b0f",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-11-10T01_08_51.567.fits": {
+    "air_mass": 1.113,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "d5ab145a8086160401b11edcb71a7e08a6cd61a3c94cc74e7ee7b7db61502bbf",
+    "snr": 68.95,
+    "specsys": "BARYCENT",
+    "time": 2458431.64345813,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "d2809e5a6a7a65408667b976ef143e88bf08ae043296baa8a5ad9a36bb4004aa",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-11-10T01_08_51.575.fits": {
+    "air_mass": 1.297,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "3174d9ef93476dc0208f3324555f4ff02544b7a8a8149e530b200a5d8acae0ab",
+    "snr": 61.5,
+    "specsys": "BARYCENT",
+    "time": 2458431.69129015,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "14d1cf04e96d7ed763b47f10b69a27bd0fd946b0ca32bb44450dec98a6968227",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-11-10T01_08_51.583.fits": {
+    "air_mass": 1.5905,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "9cc33dcfbc3d8636f99c0d830518f79b614ae894f81ca152bae26f56df71a6d6",
+    "snr": 64.3,
+    "specsys": "BARYCENT",
+    "time": 2458431.73216667,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "d2809e5a6a7a65408667b976ef143e88bf08ae043296baa8a5ad9a36bb4004aa",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-11-11T01_11_32.991.fits": {
+    "air_mass": 1.046,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "8c5236c6a02e428fa091e7d597095e3c168c5edd2d4f4c47ec357d178fd82eb8",
+    "snr": 81.95,
+    "specsys": "BARYCENT",
+    "time": 2458432.50941057,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-11-11T01_11_33.019.fits": {
+    "air_mass": 1.1625,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "7254e92f371c7dbfca16c9b9cccffb2ef103f0f31a5b8963af9b65b5370b84f3",
+    "snr": 62.6,
+    "specsys": "BARYCENT",
+    "time": 2458432.6568877,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-11-11T01_11_33.025.fits": {
+    "air_mass": 1.3535,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "a9df2c5882e66532d03404c9d5e3005965a22f58800635e479edf82b9fe9f145",
+    "snr": 51.35,
+    "specsys": "BARYCENT",
+    "time": 2458432.69804195,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-11-11T01_11_33.031.fits": {
+    "air_mass": 1.5905,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "a50b877ee560f36628c3a86393c652904be188465475a9f780aacea3000771fb",
+    "snr": 19.0,
+    "specsys": "BARYCENT",
+    "time": 2458432.72572501,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-12-13T01_02_11.407.fits": {
+    "air_mass": 1.0815000000000001,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "d9ae49c4c4d8e0161eb305f178e194c2ae3dfd7a54f389a04228ba638705bd37",
+    "snr": 56.35,
+    "specsys": "BARYCENT",
+    "time": 2458464.53817104,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "d2809e5a6a7a65408667b976ef143e88bf08ae043296baa8a5ad9a36bb4004aa",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-12-13T01_02_11.417.fits": {
+    "air_mass": 1.6139999999999999,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "60989dc00cefcdf36164308a578d490525002cff93c3715e66a89bdb1b3b84bb",
+    "snr": 40.8,
+    "specsys": "BARYCENT",
+    "time": 2458464.64153049,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "20fbbcf289855acf9ea71e55ef73573d78e5c6a2a7e3841aba41014d2a4e95da",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-12-13T01_02_11.425.fits": {
+    "air_mass": 2.2895,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "940919c379cca755c8556cef19c697699295d97ab20dee1a3fae317d7b273014",
+    "snr": 39.15,
+    "specsys": "BARYCENT",
+    "time": 2458464.6861564,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "20fbbcf289855acf9ea71e55ef73573d78e5c6a2a7e3841aba41014d2a4e95da",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-12-14T01_14_30.311.fits": {
+    "air_mass": 1.0715,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "f7f0506c5135b3e91dd471578ad8b8690d9244458106b1ceeab6a6797c6b57da",
+    "snr": 75.45,
+    "specsys": "BARYCENT",
+    "time": 2458465.53024131,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "d2809e5a6a7a65408667b976ef143e88bf08ae043296baa8a5ad9a36bb4004aa",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-12-14T01_14_30.323.fits": {
+    "air_mass": 1.2854999999999999,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "beb84af3124005d6ed136e4da7539fd1b17b40d28c6253106cd7a34e085349bf",
+    "snr": 54.9,
+    "specsys": "BARYCENT",
+    "time": 2458465.59314118,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "d2809e5a6a7a65408667b976ef143e88bf08ae043296baa8a5ad9a36bb4004aa",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-12-14T01_14_30.333.fits": {
+    "air_mass": 1.6725,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "1c0c123a7f50dd1d1cc9058a274ab7e6e318fa039b5b29583a538d5eaf23fa34",
+    "snr": 53.2,
+    "specsys": "BARYCENT",
+    "time": 2458465.64410917,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "20fbbcf289855acf9ea71e55ef73573d78e5c6a2a7e3841aba41014d2a4e95da",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-12-14T01_14_30.339.fits": {
+    "air_mass": 2.2439999999999998,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "1c348fdbc4945063262c6b1eb81873421064049c58b21235de178741c644e679",
+    "snr": 45.5,
+    "specsys": "BARYCENT",
+    "time": 2458465.68103897,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "20fbbcf289855acf9ea71e55ef73573d78e5c6a2a7e3841aba41014d2a4e95da",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-12-15T01_19_16.224.fits": {
+    "air_mass": 1.0579999999999998,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "11d3f0acd2779d61a25afb1a0d6a207ca808d3dd88b9159670b1fe8bfaff3f8e",
+    "snr": 61.45,
+    "specsys": "BARYCENT",
+    "time": 2458466.52021707,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "dc7d283caeb7b7c25f133d7ffaeffd7f2ff056e2a0fe7191fa27e4c70dfeec24",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-12-15T01_19_16.236.fits": {
+    "air_mass": 1.2435,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "0469d7e5562aa5a1f5f7afd9f1306bcad1dc556cae3140e3654423f2c206fcf8",
+    "snr": 59.85,
+    "specsys": "BARYCENT",
+    "time": 2458466.58231841,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "ce237546c94bc27803926cae8b7fcb8574dd019adcca82d8c7c52d705bb7ca61",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-12-15T01_19_16.246.fits": {
+    "air_mass": 1.573,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "32f32f1d78473215c0cccabd9bdbd487525ebfde5ea9be6252eb560d2c290750",
+    "snr": 54.8,
+    "specsys": "BARYCENT",
+    "time": 2458466.63157359,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "dc7d283caeb7b7c25f133d7ffaeffd7f2ff056e2a0fe7191fa27e4c70dfeec24",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-12-15T01_19_16.252.fits": {
+    "air_mass": 2.056,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "bcc3a33990732aeb48969102f6fbc1da8e2efecebcbd9f4689aacbd22c8215bf",
+    "snr": 45.6,
+    "specsys": "BARYCENT",
+    "time": 2458466.66865386,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "ce237546c94bc27803926cae8b7fcb8574dd019adcca82d8c7c52d705bb7ca61",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-12-30T01_11_43.437.fits": {
+    "air_mass": 1.211,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "eb94acb146eb157eff27d5f91889db845e8f6657b89332c74bd3fcc6d0078e1f",
+    "snr": 64.0,
+    "specsys": "BARYCENT",
+    "time": 2458481.53213034,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "d2809e5a6a7a65408667b976ef143e88bf08ae043296baa8a5ad9a36bb4004aa",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-12-30T01_11_43.445.fits": {
+    "air_mass": 1.4745,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "dd6b6181581221b0708be01683148e5123fe6cde4b331b52f34e259e063b3e02",
+    "snr": 62.8,
+    "specsys": "BARYCENT",
+    "time": 2458481.57805277,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-12-31T01_09_38.879.fits": {
+    "air_mass": 1.241,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "4560912deef5e11985f59754ac228c54b1374c296c0a810239d5bb50d9ee2be2",
+    "snr": 67.55,
+    "specsys": "BARYCENT",
+    "time": 2458482.53642914,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-12-31T01_09_38.885.fits": {
+    "air_mass": 1.4555,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "7f30b01afd95667340164fd5f61654f9bbc9064a142cbc6d46d9fd716c9422f2",
+    "snr": 62.85,
+    "specsys": "BARYCENT",
+    "time": 2458482.57254909,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "d2809e5a6a7a65408667b976ef143e88bf08ae043296baa8a5ad9a36bb4004aa",
+    "wavelength_frame": "air"
+   },
+   "ADP.2018-12-31T01_09_38.889.fits": {
+    "air_mass": 1.7294999999999998,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "2daeaacab7d98d7a8e7cd28fc96e0e1de2656e190f3e4378b0661237e7106e8a",
+    "snr": 55.7,
+    "specsys": "BARYCENT",
+    "time": 2458482.60140108,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831",
+    "wavelength_frame": "air"
+   },
+   "ADP.2019-01-01T01_06_10.127.fits": {
+    "air_mass": 1.211,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "647e8bdc3d09b89af513e892a6906a7d35b43c3534058d71f2227b9ab879c670",
+    "snr": 65.1,
+    "specsys": "BARYCENT",
+    "time": 2458483.52686388,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831",
+    "wavelength_frame": "air"
+   },
+   "ADP.2019-01-01T01_06_10.137.fits": {
+    "air_mass": 1.6725,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "ac9600aaa2112cf305a971f9e22399516fd8e1becb38214831836d2c873b2acf",
+    "snr": 48.0,
+    "specsys": "BARYCENT",
+    "time": 2458483.5933751,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831",
+    "wavelength_frame": "air"
+   },
+   "ADP.2019-01-01T01_06_10.141.fits": {
+    "air_mass": 1.965,
+    "bcv": 0.0,
+    "n_orders": 1,
+    "s_sha256": "2ce470cd5d0178d635a2bb272320e565d5d49475e788123f8e647123872ac5a6",
+    "snr": 48.35,
+    "specsys": "BARYCENT",
+    "time": 2458483.61557251,
+    "time_system": "BJD (HARPS DRS; scale unverified)",
+    "vrad": null,
+    "w_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831",
+    "wavelength_frame": "air"
+   }
+  },
+  "NRES": {
+   "lscnrs01-fa09-20190520-0043-e91.fits": {
+    "air_mass": null,
+    "bcv": -13.705027708229139,
+    "n_orders": 67,
+    "s_sha256": "457991ab0b6e98315435c44220d849082c5add04ee65c8cf8f0d0d3ba608e3a1",
+    "snr": null,
+    "specsys": "TOPOCENT",
+    "time": 2458624.56476,
+    "time_system": "BJD-TDB",
+    "vrad": null,
+    "w_sha256": "e5bc93f5ce607f0474b9c1cd56c2a6ecc00532d80a68b1f34da923a903998265",
+    "wavelength_frame": null
+   },
+   "lscnrs01-fa09-20190521-0040-e91.fits": {
+    "air_mass": null,
+    "bcv": -13.785471606326814,
+    "n_orders": 67,
+    "s_sha256": "43bcd37ec545333c0c8c2bde4d3e65c560eac38dafd65e9be79c4c34d8dd9cf1",
+    "snr": null,
+    "specsys": "TOPOCENT",
+    "time": 2458625.53383,
+    "time_system": "BJD-TDB",
+    "vrad": null,
+    "w_sha256": "9ffd43637db691e4b23a09651c2dc34228bac5b4780b0d8d4c5d4b87b5e15d1a",
+    "wavelength_frame": null
+   },
+   "lscnrs01-fa09-20190522-0037-e91.fits": {
+    "air_mass": null,
+    "bcv": -13.903380718844787,
+    "n_orders": 67,
+    "s_sha256": "f4f85a13a4dbb0b3189527283a23ef55d7788ab258ab4b3f838ecab814a702a9",
+    "snr": null,
+    "specsys": "TOPOCENT",
+    "time": 2458626.53716,
+    "time_system": "BJD-TDB",
+    "vrad": null,
+    "w_sha256": "f5a36dc2198b5348ad93a1c0f9588e25bcb890f15b824df55df77f67834b493f",
+    "wavelength_frame": null
+   },
+   "lscnrs01-fa09-20190523-0036-e91.fits": {
+    "air_mass": null,
+    "bcv": -13.990315068172405,
+    "n_orders": 67,
+    "s_sha256": "3044d56d8c748ec1d255960e892efb990208a0dc937511735013640b2f8e3f1e",
+    "snr": null,
+    "specsys": "TOPOCENT",
+    "time": 2458627.51966,
+    "time_system": "BJD-TDB",
+    "vrad": null,
+    "w_sha256": "f541f09443661c7bc44bc42af64b3ec5fbe27cc2c4ca9ab6284401cca1323c0b",
+    "wavelength_frame": null
+   },
+   "lscnrs01-fa09-20190607-0037-e91.fits": {
+    "air_mass": null,
+    "bcv": -15.14485317739641,
+    "n_orders": 67,
+    "s_sha256": "0b5d7ce2a6447ff7cfdb46eb1e61ef399ff6f9ac9f8fcd25f0cee1f0294071a4",
+    "snr": null,
+    "specsys": "TOPOCENT",
+    "time": 2458642.52371,
+    "time_system": "BJD-TDB",
+    "vrad": null,
+    "w_sha256": "3f5c4a8ec33bd47cc4066d1708efa9dc17d065d5112b883678808b3d667c96b2",
+    "wavelength_frame": null
+   },
+   "lscnrs01-fa09-20190608-0037-e91.fits": {
+    "air_mass": null,
+    "bcv": -15.185603021129888,
+    "n_orders": 67,
+    "s_sha256": "50aba3d555a40c8bed3458e627beff34b4cee2b4d6b214fea67cbb4e4e26fc0b",
+    "snr": null,
+    "specsys": "TOPOCENT",
+    "time": 2458643.52369,
+    "time_system": "BJD-TDB",
+    "vrad": null,
+    "w_sha256": "4b10bb1a08930f8f845cec4d83a86c25d362b73ea0b2bbeeef2a6c6dc427238a",
+    "wavelength_frame": null
+   },
+   "lscnrs01-fa09-20190609-0035-e91.fits": {
+    "air_mass": null,
+    "bcv": -15.212141514888927,
+    "n_orders": 67,
+    "s_sha256": "d9d26ac37c6ed6e84d77bee391c772697d5b1f7eadf59ebea8e89ca379622609",
+    "snr": null,
+    "specsys": "TOPOCENT",
+    "time": 2458644.51301,
+    "time_system": "BJD-TDB",
+    "vrad": null,
+    "w_sha256": "ad2d4226878d3c1cb268917c3401e0ab985c4ed26257d15a4906965d51f2ffc2",
+    "wavelength_frame": null
+   },
+   "lscnrs01-fa09-20190610-0034-e91.fits": {
+    "air_mass": null,
+    "bcv": -15.23571258526618,
+    "n_orders": 67,
+    "s_sha256": "eca28e91f3a9a31019462d1e5b254d870a6ba2627e2b184867eb726a2ec5124e",
+    "snr": null,
+    "specsys": "TOPOCENT",
+    "time": 2458645.50414,
+    "time_system": "BJD-TDB",
+    "vrad": null,
+    "w_sha256": "5c81adc20f34144a0b24127cb3c3a3e1d7e765728a6dfe9e92c523dc65659cab",
+    "wavelength_frame": null
+   },
+   "lscnrs01-fa09-20190616-0018-e91.fits": {
+    "air_mass": null,
+    "bcv": -15.33497690584155,
+    "n_orders": 67,
+    "s_sha256": "92f2de046b6b58c4e96487e12d5395dbc8a4436cea5a49a8dff2dd1e463f16e3",
+    "snr": null,
+    "specsys": "TOPOCENT",
+    "time": 2458651.49412,
+    "time_system": "BJD-TDB",
+    "vrad": null,
+    "w_sha256": "2c9283862b0e94813410fe7913895734fb48bbc4cbc229e1e52a690a9e9c0818",
+    "wavelength_frame": null
+   },
+   "lscnrs01-fa09-20190618-0031-e91.fits": {
+    "air_mass": null,
+    "bcv": -15.297715227156573,
+    "n_orders": 67,
+    "s_sha256": "4efa767a58d05f2b1f9f14cfc34188f23d4faff20b6c064c801fec69806dffeb",
+    "snr": null,
+    "specsys": "TOPOCENT",
+    "time": 2458653.4557,
+    "time_system": "BJD-TDB",
+    "vrad": null,
+    "w_sha256": "8fdb02eae182bc2d004a4e5f882f434230f34cf35ee96ea2cdbad8c5bd15a987",
+    "wavelength_frame": null
+   },
+   "lscnrs01-fa09-20190619-0033-e91.fits": {
+    "air_mass": null,
+    "bcv": -15.335423577016918,
+    "n_orders": 67,
+    "s_sha256": "966a0e25d75d32b04b1a8bc3906a71eedb7439d8f8a060d1b5a288359441531d",
+    "snr": null,
+    "specsys": "TOPOCENT",
+    "time": 2458654.49532,
+    "time_system": "BJD-TDB",
+    "vrad": null,
+    "w_sha256": "f1a4b7ef1fd5b480e56751893a5f574751323890e3b64c2b976f8ad56596c566",
+    "wavelength_frame": null
+   },
+   "lscnrs01-fa09-20190620-0017-e91.fits": {
+    "air_mass": null,
+    "bcv": -15.308888982168021,
+    "n_orders": 67,
+    "s_sha256": "1e0133c1f0ebd9431aee2fe9462601f77112ca615d300d4c28bfeac993cbd659",
+    "snr": null,
+    "specsys": "TOPOCENT",
+    "time": 2458655.47588,
+    "time_system": "BJD-TDB",
+    "vrad": null,
+    "w_sha256": "4b651a2fecd0edca1bcf05ffadf1a209cd0fa5814c9ad68658474155ebb69c33",
+    "wavelength_frame": null
+   }
+  }
+ },
+ "observations": {
+  "HARPS": {
+   "epochs": {
+    "ADP.2018-11-08T01_14_11.387.fits": {
+     "air_mass": 1.0465,
+     "bcv": 0.0,
+     "snr": 58.25,
+     "sp_sha256": "9938a575f2929685541c5326e63d22b699860807874eabdb1e60e174b6917dc9",
+     "spec_bcv_kms": 0.0,
+     "time": 0.5180396097712219,
+     "wv_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831"
+    },
+    "ADP.2018-11-09T01_16_55.531.fits": {
+     "air_mass": 1.0194999999999999,
+     "bcv": 0.0,
+     "snr": 92.95,
+     "sp_sha256": "981ec711ce2993da0cc313d5b1c7321f093d2edca56f46f22e8210e2c5853140",
+     "spec_bcv_kms": 0.0,
+     "time": 1.5402198801748455,
+     "wv_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831"
+    },
+    "ADP.2018-11-09T01_16_55.541.fits": {
+     "air_mass": 1.025,
+     "bcv": 0.0,
+     "snr": 84.8,
+     "sp_sha256": "06aa8b6d833ec776e49611160567a8aec19c0b52641a4e5f787ff53ddb468970",
+     "spec_bcv_kms": 0.0,
+     "time": 1.5955282198265195,
+     "wv_sha256": "d2809e5a6a7a65408667b976ef143e88bf08ae043296baa8a5ad9a36bb4004aa"
+    },
+    "ADP.2018-11-09T01_16_55.555.fits": {
+     "air_mass": 1.225,
+     "bcv": 0.0,
+     "snr": 67.15,
+     "sp_sha256": "98cc82354fbf7e7a2a0162fc493bb1b1fb8947c7f75a7ae27148f1170698cc38",
+     "spec_bcv_kms": 0.0,
+     "time": 1.6791098797693849,
+     "wv_sha256": "bbd224b5b4585143c4d7ac4af2ff75ad8a78218891026ed41599811e9d073b0f"
+    },
+    "ADP.2018-11-09T01_16_55.567.fits": {
+     "air_mass": 1.928,
+     "bcv": 0.0,
+     "snr": 51.55,
+     "sp_sha256": "638f6b2edf3c6201256489011965f3022d19a09239458ae45bec8868e128b469",
+     "spec_bcv_kms": 0.0,
+     "time": 1.762008709833026,
+     "wv_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831"
+    },
+    "ADP.2018-11-10T01_08_51.561.fits": {
+     "air_mass": 1.0485,
+     "bcv": 0.0,
+     "snr": 86.2,
+     "sp_sha256": "541e3574c486eb5578c25eb6b1200255374a8d1d8fe6f3b77ae8564c28ac8ad7",
+     "spec_bcv_kms": 0.0,
+     "time": 2.510678870137781,
+     "wv_sha256": "bbd224b5b4585143c4d7ac4af2ff75ad8a78218891026ed41599811e9d073b0f"
+    },
+    "ADP.2018-11-10T01_08_51.567.fits": {
+     "air_mass": 1.113,
+     "bcv": 0.0,
+     "snr": 68.95,
+     "sp_sha256": "d5ab145a8086160401b11edcb71a7e08a6cd61a3c94cc74e7ee7b7db61502bbf",
+     "spec_bcv_kms": 0.0,
+     "time": 2.643458129838109,
+     "wv_sha256": "d2809e5a6a7a65408667b976ef143e88bf08ae043296baa8a5ad9a36bb4004aa"
+    },
+    "ADP.2018-11-10T01_08_51.575.fits": {
+     "air_mass": 1.297,
+     "bcv": 0.0,
+     "snr": 61.5,
+     "sp_sha256": "3174d9ef93476dc0208f3324555f4ff02544b7a8a8149e530b200a5d8acae0ab",
+     "spec_bcv_kms": 0.0,
+     "time": 2.6912901499308646,
+     "wv_sha256": "14d1cf04e96d7ed763b47f10b69a27bd0fd946b0ca32bb44450dec98a6968227"
+    },
+    "ADP.2018-11-10T01_08_51.583.fits": {
+     "air_mass": 1.5905,
+     "bcv": 0.0,
+     "snr": 64.3,
+     "sp_sha256": "9cc33dcfbc3d8636f99c0d830518f79b614ae894f81ca152bae26f56df71a6d6",
+     "spec_bcv_kms": 0.0,
+     "time": 2.7321666697971523,
+     "wv_sha256": "d2809e5a6a7a65408667b976ef143e88bf08ae043296baa8a5ad9a36bb4004aa"
+    },
+    "ADP.2018-11-11T01_11_32.991.fits": {
+     "air_mass": 1.046,
+     "bcv": 0.0,
+     "snr": 81.95,
+     "sp_sha256": "8c5236c6a02e428fa091e7d597095e3c168c5edd2d4f4c47ec357d178fd82eb8",
+     "spec_bcv_kms": 0.0,
+     "time": 3.50941056990996,
+     "wv_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831"
+    },
+    "ADP.2018-11-11T01_11_33.019.fits": {
+     "air_mass": 1.1625,
+     "bcv": 0.0,
+     "snr": 62.6,
+     "sp_sha256": "7254e92f371c7dbfca16c9b9cccffb2ef103f0f31a5b8963af9b65b5370b84f3",
+     "spec_bcv_kms": 0.0,
+     "time": 3.6568876998499036,
+     "wv_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831"
+    },
+    "ADP.2018-11-11T01_11_33.025.fits": {
+     "air_mass": 1.3535,
+     "bcv": 0.0,
+     "snr": 51.35,
+     "sp_sha256": "a9df2c5882e66532d03404c9d5e3005965a22f58800635e479edf82b9fe9f145",
+     "spec_bcv_kms": 0.0,
+     "time": 3.6980419498868287,
+     "wv_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831"
+    },
+    "ADP.2018-11-11T01_11_33.031.fits": {
+     "air_mass": 1.5905,
+     "bcv": 0.0,
+     "snr": 19.0,
+     "sp_sha256": "a50b877ee560f36628c3a86393c652904be188465475a9f780aacea3000771fb",
+     "spec_bcv_kms": 0.0,
+     "time": 3.725725010037422,
+     "wv_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831"
+    },
+    "ADP.2018-12-13T01_02_11.407.fits": {
+     "air_mass": 1.0815000000000001,
+     "bcv": 0.0,
+     "snr": 56.35,
+     "sp_sha256": "d9ae49c4c4d8e0161eb305f178e194c2ae3dfd7a54f389a04228ba638705bd37",
+     "spec_bcv_kms": 0.0,
+     "time": 35.53817103989422,
+     "wv_sha256": "d2809e5a6a7a65408667b976ef143e88bf08ae043296baa8a5ad9a36bb4004aa"
+    },
+    "ADP.2018-12-13T01_02_11.417.fits": {
+     "air_mass": 1.6139999999999999,
+     "bcv": 0.0,
+     "snr": 40.8,
+     "sp_sha256": "60989dc00cefcdf36164308a578d490525002cff93c3715e66a89bdb1b3b84bb",
+     "spec_bcv_kms": 0.0,
+     "time": 35.6415304900147,
+     "wv_sha256": "20fbbcf289855acf9ea71e55ef73573d78e5c6a2a7e3841aba41014d2a4e95da"
+    },
+    "ADP.2018-12-13T01_02_11.425.fits": {
+     "air_mass": 2.2895,
+     "bcv": 0.0,
+     "snr": 39.15,
+     "sp_sha256": "940919c379cca755c8556cef19c697699295d97ab20dee1a3fae317d7b273014",
+     "spec_bcv_kms": 0.0,
+     "time": 35.686156400013715,
+     "wv_sha256": "20fbbcf289855acf9ea71e55ef73573d78e5c6a2a7e3841aba41014d2a4e95da"
+    },
+    "ADP.2018-12-14T01_14_30.311.fits": {
+     "air_mass": 1.0715,
+     "bcv": 0.0,
+     "snr": 75.45,
+     "sp_sha256": "f7f0506c5135b3e91dd471578ad8b8690d9244458106b1ceeab6a6797c6b57da",
+     "spec_bcv_kms": 0.0,
+     "time": 36.530241310130805,
+     "wv_sha256": "d2809e5a6a7a65408667b976ef143e88bf08ae043296baa8a5ad9a36bb4004aa"
+    },
+    "ADP.2018-12-14T01_14_30.323.fits": {
+     "air_mass": 1.2854999999999999,
+     "bcv": 0.0,
+     "snr": 54.9,
+     "sp_sha256": "beb84af3124005d6ed136e4da7539fd1b17b40d28c6253106cd7a34e085349bf",
+     "spec_bcv_kms": 0.0,
+     "time": 36.593141179997474,
+     "wv_sha256": "d2809e5a6a7a65408667b976ef143e88bf08ae043296baa8a5ad9a36bb4004aa"
+    },
+    "ADP.2018-12-14T01_14_30.333.fits": {
+     "air_mass": 1.6725,
+     "bcv": 0.0,
+     "snr": 53.2,
+     "sp_sha256": "1c0c123a7f50dd1d1cc9058a274ab7e6e318fa039b5b29583a538d5eaf23fa34",
+     "spec_bcv_kms": 0.0,
+     "time": 36.64410916995257,
+     "wv_sha256": "20fbbcf289855acf9ea71e55ef73573d78e5c6a2a7e3841aba41014d2a4e95da"
+    },
+    "ADP.2018-12-14T01_14_30.339.fits": {
+     "air_mass": 2.2439999999999998,
+     "bcv": 0.0,
+     "snr": 45.5,
+     "sp_sha256": "1c348fdbc4945063262c6b1eb81873421064049c58b21235de178741c644e679",
+     "spec_bcv_kms": 0.0,
+     "time": 36.6810389701277,
+     "wv_sha256": "20fbbcf289855acf9ea71e55ef73573d78e5c6a2a7e3841aba41014d2a4e95da"
+    },
+    "ADP.2018-12-15T01_19_16.224.fits": {
+     "air_mass": 1.0579999999999998,
+     "bcv": 0.0,
+     "snr": 61.45,
+     "sp_sha256": "11d3f0acd2779d61a25afb1a0d6a207ca808d3dd88b9159670b1fe8bfaff3f8e",
+     "spec_bcv_kms": 0.0,
+     "time": 37.52021706989035,
+     "wv_sha256": "dc7d283caeb7b7c25f133d7ffaeffd7f2ff056e2a0fe7191fa27e4c70dfeec24"
+    },
+    "ADP.2018-12-15T01_19_16.236.fits": {
+     "air_mass": 1.2435,
+     "bcv": 0.0,
+     "snr": 59.85,
+     "sp_sha256": "0469d7e5562aa5a1f5f7afd9f1306bcad1dc556cae3140e3654423f2c206fcf8",
+     "spec_bcv_kms": 0.0,
+     "time": 37.582318409811705,
+     "wv_sha256": "ce237546c94bc27803926cae8b7fcb8574dd019adcca82d8c7c52d705bb7ca61"
+    },
+    "ADP.2018-12-15T01_19_16.246.fits": {
+     "air_mass": 1.573,
+     "bcv": 0.0,
+     "snr": 54.8,
+     "sp_sha256": "32f32f1d78473215c0cccabd9bdbd487525ebfde5ea9be6252eb560d2c290750",
+     "spec_bcv_kms": 0.0,
+     "time": 37.63157358998433,
+     "wv_sha256": "dc7d283caeb7b7c25f133d7ffaeffd7f2ff056e2a0fe7191fa27e4c70dfeec24"
+    },
+    "ADP.2018-12-15T01_19_16.252.fits": {
+     "air_mass": 2.056,
+     "bcv": 0.0,
+     "snr": 45.6,
+     "sp_sha256": "bcc3a33990732aeb48969102f6fbc1da8e2efecebcbd9f4689aacbd22c8215bf",
+     "spec_bcv_kms": 0.0,
+     "time": 37.66865386022255,
+     "wv_sha256": "ce237546c94bc27803926cae8b7fcb8574dd019adcca82d8c7c52d705bb7ca61"
+    },
+    "ADP.2018-12-30T01_11_43.437.fits": {
+     "air_mass": 1.211,
+     "bcv": 0.0,
+     "snr": 64.0,
+     "sp_sha256": "eb94acb146eb157eff27d5f91889db845e8f6657b89332c74bd3fcc6d0078e1f",
+     "spec_bcv_kms": 0.0,
+     "time": 52.532130340114236,
+     "wv_sha256": "d2809e5a6a7a65408667b976ef143e88bf08ae043296baa8a5ad9a36bb4004aa"
+    },
+    "ADP.2018-12-30T01_11_43.445.fits": {
+     "air_mass": 1.4745,
+     "bcv": 0.0,
+     "snr": 62.8,
+     "sp_sha256": "dd6b6181581221b0708be01683148e5123fe6cde4b331b52f34e259e063b3e02",
+     "spec_bcv_kms": 0.0,
+     "time": 52.57805276988074,
+     "wv_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831"
+    },
+    "ADP.2018-12-31T01_09_38.879.fits": {
+     "air_mass": 1.241,
+     "bcv": 0.0,
+     "snr": 67.55,
+     "sp_sha256": "4560912deef5e11985f59754ac228c54b1374c296c0a810239d5bb50d9ee2be2",
+     "spec_bcv_kms": 0.0,
+     "time": 53.53642913978547,
+     "wv_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831"
+    },
+    "ADP.2018-12-31T01_09_38.885.fits": {
+     "air_mass": 1.4555,
+     "bcv": 0.0,
+     "snr": 62.85,
+     "sp_sha256": "7f30b01afd95667340164fd5f61654f9bbc9064a142cbc6d46d9fd716c9422f2",
+     "spec_bcv_kms": 0.0,
+     "time": 53.57254908978939,
+     "wv_sha256": "d2809e5a6a7a65408667b976ef143e88bf08ae043296baa8a5ad9a36bb4004aa"
+    },
+    "ADP.2018-12-31T01_09_38.889.fits": {
+     "air_mass": 1.7294999999999998,
+     "bcv": 0.0,
+     "snr": 55.7,
+     "sp_sha256": "2daeaacab7d98d7a8e7cd28fc96e0e1de2656e190f3e4378b0661237e7106e8a",
+     "spec_bcv_kms": 0.0,
+     "time": 53.60140107991174,
+     "wv_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831"
+    },
+    "ADP.2019-01-01T01_06_10.127.fits": {
+     "air_mass": 1.211,
+     "bcv": 0.0,
+     "snr": 65.1,
+     "sp_sha256": "647e8bdc3d09b89af513e892a6906a7d35b43c3534058d71f2227b9ab879c670",
+     "spec_bcv_kms": 0.0,
+     "time": 54.52686387998983,
+     "wv_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831"
+    },
+    "ADP.2019-01-01T01_06_10.137.fits": {
+     "air_mass": 1.6725,
+     "bcv": 0.0,
+     "snr": 48.0,
+     "sp_sha256": "ac9600aaa2112cf305a971f9e22399516fd8e1becb38214831836d2c873b2acf",
+     "spec_bcv_kms": 0.0,
+     "time": 54.59337509982288,
+     "wv_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831"
+    },
+    "ADP.2019-01-01T01_06_10.141.fits": {
+     "air_mass": 1.965,
+     "bcv": 0.0,
+     "snr": 48.35,
+     "sp_sha256": "2ce470cd5d0178d635a2bb272320e565d5d49475e788123f8e647123872ac5a6",
+     "spec_bcv_kms": 0.0,
+     "time": 54.615572509821504,
+     "wv_sha256": "4d033355473cac2e628c3028227ca72b62ae6e88e838c2d62c7a1cb213fe4831"
+    }
+   },
+   "first_time": 2458429,
+   "n_vrad": 0,
+   "sample_size": 32,
+   "time_system": "BJD (HARPS DRS; scale unverified)",
+   "wavelength_frame": "air"
+  },
+  "NRES": {
+   "epochs": {
+    "lscnrs01-fa09-20190520-0043-e91.fits": {
+     "air_mass": null,
+     "bcv": -13.705027708229139,
+     "snr": null,
+     "sp_sha256": "457991ab0b6e98315435c44220d849082c5add04ee65c8cf8f0d0d3ba608e3a1",
+     "spec_bcv_kms": 0.0,
+     "time": 0.5647599999792874,
+     "wv_sha256": "e4b7d62789b3359ceb5824da5ff68e8feb8e8218460b5c40eb8a5bf5df58b995"
+    },
+    "lscnrs01-fa09-20190521-0040-e91.fits": {
+     "air_mass": null,
+     "bcv": -13.785471606326814,
+     "snr": null,
+     "sp_sha256": "43bcd37ec545333c0c8c2bde4d3e65c560eac38dafd65e9be79c4c34d8dd9cf1",
+     "spec_bcv_kms": 0.0,
+     "time": 1.5338300000876188,
+     "wv_sha256": "48cad23ad07cf05fbe18f470c90cb8c5757ba50183d23440327b94d9d7008f65"
+    },
+    "lscnrs01-fa09-20190522-0037-e91.fits": {
+     "air_mass": null,
+     "bcv": -13.903380718844787,
+     "snr": null,
+     "sp_sha256": "f4f85a13a4dbb0b3189527283a23ef55d7788ab258ab4b3f838ecab814a702a9",
+     "spec_bcv_kms": 0.0,
+     "time": 2.537159999832511,
+     "wv_sha256": "0fd9d2a54c73b1cc49ccd94cca519542e51f4234409dc8f90ecd957e8ea5c3ee"
+    },
+    "lscnrs01-fa09-20190523-0036-e91.fits": {
+     "air_mass": null,
+     "bcv": -13.990315068172405,
+     "snr": null,
+     "sp_sha256": "3044d56d8c748ec1d255960e892efb990208a0dc937511735013640b2f8e3f1e",
+     "spec_bcv_kms": 0.0,
+     "time": 3.5196600002236664,
+     "wv_sha256": "48ed09ff7d1226323ef4b01b7f797caf2d7942602a8303e32c60fe5732aeb80c"
+    },
+    "lscnrs01-fa09-20190607-0037-e91.fits": {
+     "air_mass": null,
+     "bcv": -15.14485317739641,
+     "snr": null,
+     "sp_sha256": "0b5d7ce2a6447ff7cfdb46eb1e61ef399ff6f9ac9f8fcd25f0cee1f0294071a4",
+     "spec_bcv_kms": 0.0,
+     "time": 18.52370999986306,
+     "wv_sha256": "d95797a2a26980b7cab06c464b2c8df0f0176208ce78e94ecd66b61b92c2414a"
+    },
+    "lscnrs01-fa09-20190608-0037-e91.fits": {
+     "air_mass": null,
+     "bcv": -15.185603021129888,
+     "snr": null,
+     "sp_sha256": "50aba3d555a40c8bed3458e627beff34b4cee2b4d6b214fea67cbb4e4e26fc0b",
+     "spec_bcv_kms": 0.0,
+     "time": 19.52369000017643,
+     "wv_sha256": "dd7ae254d84555a018b5ae808dc31037a691c8929a10b92b19f69489de9270d8"
+    },
+    "lscnrs01-fa09-20190609-0035-e91.fits": {
+     "air_mass": null,
+     "bcv": -15.212141514888927,
+     "snr": null,
+     "sp_sha256": "d9d26ac37c6ed6e84d77bee391c772697d5b1f7eadf59ebea8e89ca379622609",
+     "spec_bcv_kms": 0.0,
+     "time": 20.513009999878705,
+     "wv_sha256": "627ad0885115a580e137f760297821f12c57ad539d4fb415afc36dbab6fee867"
+    },
+    "lscnrs01-fa09-20190610-0034-e91.fits": {
+     "air_mass": null,
+     "bcv": -15.23571258526618,
+     "snr": null,
+     "sp_sha256": "eca28e91f3a9a31019462d1e5b254d870a6ba2627e2b184867eb726a2ec5124e",
+     "spec_bcv_kms": 0.0,
+     "time": 21.504139999859035,
+     "wv_sha256": "6245f93cec90b6cdced7219e2f885e0abed809c7c74b3f435de7f946b7ae44c6"
+    },
+    "lscnrs01-fa09-20190616-0018-e91.fits": {
+     "air_mass": null,
+     "bcv": -15.33497690584155,
+     "snr": null,
+     "sp_sha256": "92f2de046b6b58c4e96487e12d5395dbc8a4436cea5a49a8dff2dd1e463f16e3",
+     "spec_bcv_kms": 0.0,
+     "time": 27.494119999930263,
+     "wv_sha256": "127ef859401df941fcb5fd38bd1dddea419d7b99b38fe5004ccdd9ebafcba8fe"
+    },
+    "lscnrs01-fa09-20190618-0031-e91.fits": {
+     "air_mass": null,
+     "bcv": -15.297715227156573,
+     "snr": null,
+     "sp_sha256": "4efa767a58d05f2b1f9f14cfc34188f23d4faff20b6c064c801fec69806dffeb",
+     "spec_bcv_kms": 0.0,
+     "time": 29.455699999816716,
+     "wv_sha256": "49ea9c009ccc1445d6b0913021e0404d8deed3891156fba004fad6b6c30b5d15"
+    },
+    "lscnrs01-fa09-20190619-0033-e91.fits": {
+     "air_mass": null,
+     "bcv": -15.335423577016918,
+     "snr": null,
+     "sp_sha256": "966a0e25d75d32b04b1a8bc3906a71eedb7439d8f8a060d1b5a288359441531d",
+     "spec_bcv_kms": 0.0,
+     "time": 30.49532000022009,
+     "wv_sha256": "3d1c89fa9a82481607cbca23c39fbf794b80820ae0ca9f37115f89714587e0a8"
+    },
+    "lscnrs01-fa09-20190620-0017-e91.fits": {
+     "air_mass": null,
+     "bcv": -15.308888982168021,
+     "snr": null,
+     "sp_sha256": "1e0133c1f0ebd9431aee2fe9462601f77112ca615d300d4c28bfeac993cbd659",
+     "spec_bcv_kms": 0.0,
+     "time": 31.475879999808967,
+     "wv_sha256": "de2ad27f84814823689cfc3606146869382cef557f4915517bbfda27e6fc4d0d"
+    }
+   },
+   "first_time": 2458624,
+   "n_vrad": 0,
+   "sample_size": 12,
+   "time_system": "BJD-TDB",
+   "wavelength_frame": null
+  }
+ },
+ "scheme": "sha256 over each order's int64 length + little-endian float64 values; null = unknown (legacy snr -1, air_mass/vrad [])",
+ "source": "sparta.Auxil.ReadSpec at commit 0a5eb9c",
+ "unicor": {
+  "NRES": {
+   "lscnrs01-fa09-20190522-0037-e91.fits": {
+    "erv": 0.023068749882959844,
+    "rv": 38.17340808970765
+   },
+   "lscnrs01-fa09-20190616-0018-e91.fits": {
+    "erv": 0.02921001754152762,
+    "rv": 38.027462651383445
+   }
+  }
+ }
+}
