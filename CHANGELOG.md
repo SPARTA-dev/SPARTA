@@ -347,6 +347,13 @@ Keys of `results_frequency` / `results_power`:
 
 ### Documentation
 
+- The tutorials `examples/00`–`08` are rewritten the open way: every step is
+  a visible atom call on plain arrays, and the objects appear only in a final
+  cell that checks they give the same numbers (bit for bit wherever the code
+  paths coincide) and points to the matching quickstart. Notebook 02 rebuilds
+  the TOI-677 (NRES) RVs, and 03 a two-order TODCOR fit, from atoms alone.
+  The quickstarts keep the objects. Gaps the rewrite met in the atom surface
+  are listed in `docs/roadmap.md`.
 - A new README: what SPARTA does (PDC, error-aware PDC, USuRPER and the
   partial periodograms are now described; the unimplemented "detection of
   systematic shifts" claim for UNICOR is gone), an offline quickstart on

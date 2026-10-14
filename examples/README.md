@@ -22,15 +22,22 @@ explains the why.
 
 ## The series
 
+The series is *open*: every step is a visible call to an atom — plain arrays
+in, arrays or a small result out — from `sparta` (preprocessing, PDC,
+TIRAVEL), `unicor` or `todcor`; [`docs/open_api.md`](../docs/open_api.md)
+lists them with their units. The objects appear only in each notebook's last
+cell, which checks that they give the same numbers and points to the matching
+quickstart.
+
 | Notebook | What it covers |
 |---|---|
-| [`00_getting_started`](00_getting_started.ipynb) | What SPARTA does; loading the bundled NRES and HARPS data with `Observations`; what a `Spectrum` holds; what `sparta.instruments` records per spectrograph; units. |
-| [`01_spectra_and_log_lambda`](01_spectra_and_log_lambda.ipynb) | Why a Doppler shift is a translation on a log-λ grid; `unicor.log_lambda_grid` and `Spectrum.interpolate`; native vs resampled pixels (`native_steps`); air vs vacuum. |
-| [`02_radial_velocity_unicor`](02_radial_velocity_unicor.ipynb) | The CCF by hand and with `unicor`; RV and its uncertainty; combining orders (Zucker 2003); error bars checked on a simulated star; RVs of TOI-677 (NRES) with a PHOENIX template; `velocity_convention`. |
-| [`03_double_lined_todcor`](03_double_lined_todcor.ipynb) | TODCOR (`CCF2d`) on a simulated double-lined binary: the (v1, v2) map, amplitudes, errors, a whole orbit, and the window/taper/continuum choices. |
-| [`04_template_from_data_tiravel`](04_template_from_data_tiravel.ipynb) | TIRAVEL: a template built from the observations; the alignment measure ρ; simulated data, then HARPS spectra of TOI-193. |
-| [`05_finding_periods`](05_finding_periods.ipynb) | GLS, PDC (with and without error bars), USuRPER and the partial (shift/shape) periodograms; local p-values. |
-| [`06_end_to_end`](06_end_to_end.ipynb) | A simulated season of HARPS-like spectra → RVs → periodogram → orbit fit, with the 1-day alias. |
+| [`00_getting_started`](00_getting_started.ipynb) | What SPARTA does; the bundled NRES and HARPS data loaded as arrays with the `sparta.instruments` loaders; what one epoch holds (orders, time, barycentric correction, native step); units. |
+| [`01_spectra_and_log_lambda`](01_spectra_and_log_lambda.ipynb) | Why a Doppler shift is a translation on a log-λ grid; `unicor.log_lambda_grid` / `log_grid_step` and `resample_to_log_grid`; native vs resampled pixels (`coarsest_native_step`, `effective_bins`); air vs vacuum with `phoenix_spectrum`. |
+| [`02_radial_velocity_unicor`](02_radial_velocity_unicor.ipynb) | The CCF by hand, then `unicor.ccf_order` / `measure_rv`; RV and its uncertainty; combining orders (Zucker 2003) and the log-likelihood; error bars checked on a simulated star; the RVs of TOI-677 (NRES) rebuilt from atoms only, equal to `Observations`; `velocity_convention`. |
+| [`03_double_lined_todcor`](03_double_lined_todcor.ipynb) | TODCOR from the `todcor` atoms (`prepare_window`, `window_stats`, `joint_fit`, `window_noise`) on a simulated two-order double-lined binary: the R and ln L maps, amplitudes, Cramér–Rao errors, pooling orders, a whole orbit, and the window/taper/continuum choices; equal to `CCF2d` / `Observations`. |
+| [`04_template_from_data_tiravel`](04_template_from_data_tiravel.ipynb) | TIRAVEL step by step (`common_grid`, `align_spectra`, `normalize_rows`, `correlation_matrix`, `alignment`, `coadd`, then `build_tiravel`): the alignment measure ρ on simulated data, then the HARPS spectra of TOI-193 with an air-frame PHOENIX template. |
+| [`05_finding_periods`](05_finding_periods.ipynb) | GLS, PDC (with and without error bars), USuRPER and the partial (shift/shape) periodograms from the `sparta.pdc` atoms; local p-values with `pdc_pvalue` / `pdc_power_level`. |
+| [`06_end_to_end`](06_end_to_end.ipynb) | A simulated season of HARPS-like spectra → RVs (`ccf_order`) → periodogram → orbit fit, with the 1-day alias. |
 | [`07_usurper_concept`](07_usurper_concept.ipynb) | USuRPER without RVs or a template: spectra as points on a unit sphere; a moving star, a temperature change with no motion, and an unresolved twin binary found at half its period. |
 | [`08_partial_pdc_concept`](08_partial_pdc_concept.ipynb) | Partial distance correlation: separating Doppler shifts from shape changes; a toy on three variables; a planet around an active star split by the shift and shape periodograms; their limits and local p-values. |
 

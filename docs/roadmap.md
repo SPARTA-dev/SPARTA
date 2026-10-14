@@ -53,6 +53,32 @@
   dict.
 - **A user cache for PHOENIX downloads** outside the package directory.
 
+## The open surface
+
+Gaps met while writing the open tutorials (each notebook works around them
+with a few lines of its own):
+
+- **Velocity-even broadening as an atom** — `broaden_on_log_grid(wave, flux,
+  kernel)` (today the private `sparta.template._broaden_velocity_even`), for
+  a model on a linear-λ grid such as raw PHOENIX.
+- **One RV per single-order epoch** matching `Observations` bit for bit
+  (`lag_axis` → `ccf_order` → `combine_ccfs` → `measure_rv`); the tutorials
+  repeat a short loop.
+- **The partial periodograms' shift and shape distances** as an atom; the
+  composition (shift to rest by λ(1 − v/c), then the chord distance) lives only
+  in `PeriodicityDetector.calc_partial_periodogram`.
+- **The cut of `Template.cut_multiorder_like`** (the template range around
+  each order, with a velocity margin) as an atom.
+- **TODCOR's per-window noise setup** (`sigma`, `zeta_max`, `oversampling`,
+  the tapered `resampling_noise_psd`) and the two-pass fit with
+  `window_noise` as one atom; today that knowledge lives inside `CCF2d`.
+- **The whole per-order preprocessing chain** on arrays, with its
+  native-step bookkeeping, which is easy to get wrong by hand.
+- **The simulator's array functions** (`simulate`, `component_spectra`,
+  `upper_envelope` in `sparta.instruments.simulated`) on the open surface.
+- Small: `Product.load` could default `min_wv`/`max_wv` for products that
+  ignore them; `unbiased_u_centering(a, n)` takes `n` although it is `len(a)`.
+
 ## Packaging and infrastructure
 
 - **Release the engines on PyPI** as `sparta-unicor` and `sparta-todcor`, and
