@@ -44,6 +44,22 @@ def _per_order(like, orders):
 
 
 class Template:
+    '''
+    A reference spectrum for UNICOR (``CCF1d``), TODCOR (``CCF2d``) and the
+    simulator.
+
+    The engines take the template at rest. A single-order model (e.g. a
+    library spectrum covering the whole observed range) is reused for every
+    observed order; a multi-order one (``cut_multiorder_like``) is matched
+    order by order. State the template's wavelength frame (air or vacuum) to
+    match the observation's.
+
+    Attributes
+    ----------
+    model : Spectrum
+        The template's wavelengths (Angstrom) and fluxes; the methods modify
+        it in place.
+    '''
 
     # =============================================================================
     # =============================================================================
@@ -51,11 +67,19 @@ class Template:
         '''
         Wrap a ready-for-use spectrum as a template, as-is (no copy).
 
-        :param: model - Spectrum, the template's (multi-order) wavelengths
-                        (Angstrom) and fluxes; stored as ``self.model``.
-
         See ``from_arrays``, ``from_phoenix`` and ``from_mask`` for the other
         ways to build one.
+
+        Parameters
+        ----------
+        model : Spectrum
+            The template's (multi-order) wavelengths (Angstrom) and fluxes;
+            stored as ``self.model``.
+
+        Raises
+        ------
+        TypeError
+            If ``model`` is not a Spectrum.
         '''
         if not isinstance(model, Spectrum):
             raise TypeError(f"model must be a Spectrum, not {type(model).__name__}; "
@@ -69,11 +93,22 @@ class Template:
         '''
         A single-order template from one wavelength and one flux array.
 
-        :param: wave - 1-D wavelength array (Angstrom), increasing.
-        :param: flux - 1-D flux array matching ``wave``.
-        :return: Template whose model holds one order, as (1, n_pixels)
-                 arrays.
-        :raises ValueError: if the arrays are not 1-D or differ in length.
+        Parameters
+        ----------
+        wave : array_like
+            1-D increasing wavelengths (Angstrom).
+        flux : array_like
+            1-D flux matching ``wave``.
+
+        Returns
+        -------
+        Template
+            One order, held as (1, n_pixels) arrays.
+
+        Raises
+        ------
+        ValueError
+            If the arrays are not 1-D or differ in length.
         '''
         wave, flux = np.asarray(wave), np.asarray(flux)
         if wave.ndim != 1 or wave.shape != flux.shape:
@@ -90,22 +125,50 @@ class Template:
         A single-order PHOENIX-ACES-AGSS-COND-2011 HiRes model (Husser et al.
         2013) over a wavelength range.
 
-        :param: teff  - effective temperature (K), a grid value.
-        :param: logg  - log surface gravity (cgs), a grid value.
-        :param: feh   - metallicity [Fe/H] (dex), a grid value.
-        :param: alpha - alpha enhancement [alpha/Fe] (dex), a grid value.
-        :param: wave_range - (lo, hi) wavelengths (Angstrom); the model keeps
-                        the grid points from the first above ``lo`` up to,
-                        not including, the first above ``hi``.
-        :param: air   - bool, convert the (vacuum) PHOENIX wavelengths to air
-                        (Morton 2000) before the range is applied.
-        :param: allow_download - bool, default False. Fetch files missing from
-                        the local cache (TEMPLATE_FILES_PATH) over HTTPS; when
-                        False a missing file raises FileNotFoundError.
-        :return: Template with one order: wavelengths (Angstrom) and the
-                 PHOENIX flux density divided by 1e13.
-        :raises FileNotFoundError: for a missing file with downloads disabled.
-        :raises ValueError: if ``wave_range`` is not inside the model grid.
+        The model is read from the local cache, TEMPLATE_FILES_PATH (the
+        package's ``template_files/``). SPARTA ships three models there --
+        (teff, logg, feh) = (4900, 4.5, 0.0), (5500, 4.5, 0.0) and
+        (5800, 3.5, +0.5) -- and the wavelength grid. Any other model needs
+        ``allow_download=True`` once.
+
+        The flux is not continuum-normalized, and the model is not broadened:
+        see ``broaden_rotational`` and ``broaden_instrumental``.
+
+        Parameters
+        ----------
+        teff : float
+            Effective temperature (K), a grid value.
+        logg : float
+            Log surface gravity (cgs), a grid value.
+        feh : float
+            Metallicity [Fe/H] (dex), a grid value.
+        alpha : float
+            Alpha enhancement [alpha/Fe] (dex), a grid value.
+        wave_range : (float, float)
+            (lo, hi) wavelengths (Angstrom, in the frame chosen by ``air``);
+            the model keeps the grid points from the first above ``lo`` up
+            to, not including, the first above ``hi``.
+        air : bool
+            PHOENIX wavelengths are in vacuum. True converts them to air
+            (Morton 2000, ApJS 130, 403) before ``wave_range`` is applied;
+            use it for an observation in air (see the product's
+            ``wavelength_frame`` in docs/instruments.md).
+        allow_download : bool
+            Fetch files missing from the cache from the Goettingen server over
+            HTTPS. Default False: a missing file raises.
+
+        Returns
+        -------
+        Template
+            One order: wavelengths (Angstrom) and the PHOENIX flux density
+            (erg/s/cm^2/cm) divided by 1e13.
+
+        Raises
+        ------
+        FileNotFoundError
+            For a file missing from the cache with downloads disabled.
+        ValueError
+            If ``wave_range`` is not inside the model grid.
         '''
         wave_path = _cached_phoenix_file(_PHOENIX_WAVE_SUB_PATH, PHOENIX_WAVE_FILE,
                                          allow_download)
@@ -137,17 +200,31 @@ class Template:
         wavelength grid.
 
         The flux is 0 except inside each mask window, where it is the negative
-        of the line's weight, so lines read as absorption.
+        of the line's weight, so lines read as absorption. The windows are
+        placed on the vacuum grid as given; no air/vacuum conversion is made.
 
-        :param: path       - text file of three columns: window start and end
-                             (Angstrom) and weight; '#' starts a comment.
-                             Where windows overlap, the later line wins.
-        :param: wave_range - (lo, hi) wavelengths (Angstrom), applied as in
-                             ``from_phoenix``.
-        :param: allow_download - bool, see ``from_phoenix`` (only the PHOENIX
-                             wavelength grid is needed).
-        :return: Template with one order on the PHOENIX (vacuum) grid.
-        :raises ValueError: if ``wave_range`` is not inside the grid.
+        Parameters
+        ----------
+        path : str or path-like
+            Text file of three columns: window start and end (Angstrom) and
+            weight; '#' starts a comment. Where windows overlap, the later
+            line wins.
+        wave_range : (float, float)
+            (lo, hi) wavelengths (Angstrom), applied as in ``from_phoenix``.
+        allow_download : bool
+            See ``from_phoenix``; only the PHOENIX wavelength grid is needed.
+
+        Returns
+        -------
+        Template
+            One order on the PHOENIX (vacuum) grid.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the PHOENIX grid is not cached and downloads are disabled.
+        ValueError
+            If ``wave_range`` is not inside the grid.
         '''
         wave_path = _cached_phoenix_file(_PHOENIX_WAVE_SUB_PATH, PHOENIX_WAVE_FILE,
                                          allow_download)
@@ -169,11 +246,26 @@ class Template:
     # =============================================================================
     def broaden_instrumental(self, resolution):
         '''
-        Broaden every order with a Gaussian instrumental profile.
+        Broaden every order with a Gaussian instrumental profile, in place.
 
-        :param: resolution - float, the resolving power R; the kernel FWHM is
-                             c / R (km/s).
-        :return: self, with the model's flux broadened.
+        The kernel acts on flux - 1, with continuum 1 beyond the order's ends;
+        for flux that is not continuum-normalized (e.g. PHOENIX) only the
+        pixels within a kernel width of the ends are affected by that padding.
+        Each order's velocity step is its median c * d(lambda)/lambda
+        (``unicor.dv_from_wave``): exact for a log-lambda grid, but on a wide
+        linear-wavelength order the kernel is then too wide at the blue end
+        and too narrow at the red end, so resample such a model to log-lambda
+        first.
+
+        Parameters
+        ----------
+        resolution : float
+            Resolving power R; the kernel FWHM is c / R (km/s).
+
+        Returns
+        -------
+        Template
+            self.
         '''
         self.model.sp = _per_order(self.model.sp,
                                    [dsp.broaden_gaussian(s, dsp.dv_from_wave(w), dsp.C_KMS / resolution)
@@ -184,11 +276,22 @@ class Template:
     # =============================================================================
     def broaden_rotational(self, vsini, epsilon):
         '''
-        Broaden every order with a rotational profile (Gray 2005).
+        Broaden every order with a rotational profile (Gray 2005), in place.
 
-        :param: vsini   - float, projected rotational velocity [km/s]
-        :param: epsilon - float, linear limb-darkening coefficient (0-1)
-        :return: self, with the model's flux broadened.
+        As ``broaden_instrumental``: the kernel acts on flux - 1, and the
+        order's velocity step is its median one.
+
+        Parameters
+        ----------
+        vsini : float
+            Projected rotational velocity (km/s).
+        epsilon : float
+            Linear limb-darkening coefficient (0-1).
+
+        Returns
+        -------
+        Template
+            self.
         '''
         self.model.sp = _per_order(self.model.sp,
                                    [dsp.broaden_rotational(s, dsp.dv_from_wave(w), vsini, epsilon)
@@ -199,17 +302,29 @@ class Template:
     # =============================================================================
     def doppler(self, vel, wv=None, velocity_convention='cz'):
         '''
-        This function shifts the template spectrum according to a given velocity (a Doppler shift).
-        :param: vel - the radial velocity to shift by (km/s if unitless);
-                      positive red-shifts.
-        :param: wv - wavelengths (Angstrom) to shift; if None, the template's own.
-        :param: velocity_convention - 'cz' (default; lambda * (1 + v/c)) or
-                      'relativistic' (lambda * sqrt((1 + v/c) / (1 - v/c))),
-                      see ``unicor.dsp.doppler_factor``. Use the convention the
-                      RVs will be measured in.
-        :return: Boosted wavelength array / template model (Angstrom).
+        Doppler-shifted wavelengths of the template (or of given wavelengths).
 
-        Note: This only works for a single order template, so boost before you cut.
+        The model is not modified: pair the returned wavelengths with
+        ``self.model.sp`` to get the shifted template. With ``wv=None`` the
+        model must have a single order (or orders of equal length), so shift
+        before ``cut_multiorder``.
+
+        Parameters
+        ----------
+        vel : float or astropy.units.Quantity
+            Radial velocity (km/s if a plain number); positive red-shifts.
+        wv : array_like, optional
+            Wavelengths (Angstrom) to shift; default the model's own.
+        velocity_convention : {'cz', 'relativistic'}
+            lambda * (1 + v/c) ('cz', default) or
+            lambda * sqrt((1 + v/c) / (1 - v/c)), see
+            ``unicor.dsp.doppler_factor``. Use the convention the RVs will be
+            measured in.
+
+        Returns
+        -------
+        ndarray
+            The shifted wavelengths (Angstrom), shaped like the input.
         '''
 
         if type(vel) is not u.quantity.Quantity:
@@ -220,24 +335,38 @@ class Template:
 
     # =============================================================================
     # =============================================================================
-    def integrate_spec(self, integration_ratio, wv=[], sp=[]):
+    def integrate_spec(self, integration_ratio, wv=None, sp=None):
         '''
-        Sum-up consecutive pixels in the given Template model.
-        This can be used to lower the resolution for computational needs.
+        Bin the model by summing groups of consecutive pixels, in place.
 
-        :param: integration_ration - integer. Reduce the the resolution
-                                     by this factor.
+        Lowers the sampling (and the cost of a CCF) by ``integration_ratio``.
+        Only the first order is used, and it yields
+        ``n_pixels // integration_ratio - 1`` bins: the trailing pixels that
+        fill no complete group, and the last complete group, are dropped. Each
+        bin's wavelength is its group's mean and its flux the group's sum. A
+        native step recorded for the model (``Spectrum.native_steps``) is
+        coarsened to the bins' step if that is larger; explicit ``wv`` / ``sp``
+        replace the model, so its record is dropped.
 
-        Only the first order is kept. A native step recorded for the model
-        (Spectrum.native_steps) is coarsened to the summed pixels' step if
-        that is larger; explicit ``wv``/``sp`` replace the model, so its
-        record is dropped.
+        Parameters
+        ----------
+        integration_ratio : int
+            Pixels per bin.
+        wv, sp : list of array_like, optional
+            Wavelengths (Angstrom) and fluxes to bin instead of the model's;
+            only their first order is used.
+
+        Returns
+        -------
+        (ndarray, ndarray)
+            The binned wavelengths (Angstrom) and fluxes, (1, n_bins) each;
+            they also replace the model.
         '''
         new_sp = []
         new_wv = []
 
         native = None
-        if len(wv) == 0:
+        if wv is None:
             wv = self.model.wv
             sp = self.model.sp
             if 'NativeStep' in self.model.Info:
@@ -268,12 +397,19 @@ class Template:
 
         Each order is stored under its own keys -- ``wv_0``, ``sp_0``,
         ``wv_1``, ... -- so orders of different lengths round-trip exactly.
-        (The former CSV export wrote numpy's truncated text form of each
-        array, which could not be read back.)
 
-        :param: title - str, output file name (without extension).
-        :param: path  - str, directory in which the file is written.
-        :return: the path of the written file.
+        Parameters
+        ----------
+        title : str
+            Output file name, without the extension.
+        path : str
+            Existing directory to write into; a relative path is relative to
+            the current working directory (not the package's template cache).
+
+        Returns
+        -------
+        str
+            The path of the written file.
         '''
         arrays = {}
         for I, (w, s) in enumerate(zip(self.model.wv, self.model.sp)):
@@ -287,13 +423,21 @@ class Template:
     # =============================================================================
     def cut_multiorder(self, wv_bounds):
         '''
-        This function cuts the template according to a given wavelength bound.
-        :param: wv_bounds - an NordX2 numpy array with the upper and lower
-                            limit of each order.
-        :return: The template model, trimmed to the provided shapes.
+        Cut the model into orders by wavelength bounds, in place.
 
         Every new order is cut from order 0 of the model, so a recorded native
-        step (Spectrum.native_steps) is that of order 0 for each of them.
+        step (``Spectrum.native_steps``) is that of order 0 for each of them.
+
+        Parameters
+        ----------
+        wv_bounds : array_like
+            (n_orders, 2) lower and upper wavelength (Angstrom) of each order,
+            both inclusive.
+
+        Returns
+        -------
+        Template
+            self.
         '''
         native = (self.model.native_steps()[0]
                   if 'NativeStep' in self.model.Info else None)
@@ -317,11 +461,24 @@ class Template:
     # =============================================================================
     def cut_multiorder_like(self, spectrum, margins=150):
         '''
-        This function cuts the template to the shape of a given Spectrum object.
-        :param: spectrum - a Spectrum object, according to which the template
-                      will be sliced.
-        :param: margins - the boundaries around the limits, in km/s.
-        :return: The template model, trimmed to the provided shapes.
+        Cut the model into the orders of an observed spectrum, in place.
+
+        Order i spans min(w_i) (1 - m/c) to max(w_i) (1 + m/c), w_i the
+        observed wavelengths and m the margin, so a CCF scan of +-m km/s
+        finds template at every lag (see ``cut_multiorder``).
+
+        Parameters
+        ----------
+        spectrum : Spectrum
+            The observation whose orders define the cut.
+        margins : float
+            Margin m beyond each order's ends (km/s). The default, 150 km/s,
+            equals the default ``vel_bound`` of the RV engines.
+
+        Returns
+        -------
+        Template
+            self.
         '''
 
         wv_bounds = np.zeros((len(spectrum.wv), 2))
@@ -344,8 +501,15 @@ def _phoenix_filename(teff, logg, feh, alpha):
     PHOENIX names carry the metallicity sign explicitly ("Z-1.0", "Z+0.5"),
     so its magnitude is formatted; the effective temperature is an integer.
 
-    :param: teff, logg, feh, alpha - see ``Template.from_phoenix``.
-    :return: (sub_path, filename), str.
+    Parameters
+    ----------
+    teff, logg, feh, alpha : float
+        See ``Template.from_phoenix``.
+
+    Returns
+    -------
+    (str, str)
+        The server sub-path and the file name.
     '''
     teff = int(teff)
     if feh > 0:
@@ -365,7 +529,7 @@ def _phoenix_filename(teff, logg, feh, alpha):
 
 
 def _phoenix_url(sub_path, filename):
-    '''The HTTPS URL of a PHOENIX file (see ``_phoenix_filename``).'''
+    '''The HTTPS URL (str) of a PHOENIX file, from ``_phoenix_filename``'s output.'''
     return PHOENIX_URL + sub_path.strip('/') + '/' + filename
 
 
@@ -373,11 +537,22 @@ def _cached_phoenix_file(sub_path, filename, allow_download):
     '''
     Local path of a PHOENIX file, downloading it only if allowed.
 
-    :param: sub_path, filename - see ``_phoenix_filename``.
-    :param: allow_download - bool; when False a file missing from
-                             TEMPLATE_FILES_PATH raises.
-    :return: str, the path in TEMPLATE_FILES_PATH.
-    :raises FileNotFoundError: if the file is missing and downloads are off.
+    Parameters
+    ----------
+    sub_path, filename : str
+        See ``_phoenix_filename``.
+    allow_download : bool
+        When False, a file missing from TEMPLATE_FILES_PATH raises.
+
+    Returns
+    -------
+    str
+        The path in TEMPLATE_FILES_PATH.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the file is missing and downloads are disabled.
     '''
     path = os.path.join(TEMPLATE_FILES_PATH, filename)
     if os.path.exists(path):
@@ -400,10 +575,19 @@ def _download_phoenix_file(sub_path, filename, timeout=120):
     handle, and no partial file left behind on failure. Any download error
     propagates to the caller.
 
-    :param: sub_path - str, server sub-path (see ``_phoenix_filename``).
-    :param: filename - str, file name to fetch.
-    :param: timeout  - float, per-request timeout in seconds.
-    :return: str, the local path of the downloaded file.
+    Parameters
+    ----------
+    sub_path : str
+        Server sub-path (see ``_phoenix_filename``).
+    filename : str
+        File name to fetch.
+    timeout : float
+        Per-request timeout (s).
+
+    Returns
+    -------
+    str
+        The local path of the downloaded file.
     '''
     os.makedirs(TEMPLATE_FILES_PATH, exist_ok=True)
     target = os.path.join(TEMPLATE_FILES_PATH, filename)
@@ -424,10 +608,21 @@ def _wave_slice(wave, wave_range):
     Index range of a PHOENIX grid: from the first point above ``lo`` up to,
     not including, the first point above ``hi``.
 
-    :param: wave       - increasing wavelength grid (Angstrom).
-    :param: wave_range - (lo, hi), Angstrom.
-    :return: slice.
-    :raises ValueError: unless lo < hi < wave[-1].
+    Parameters
+    ----------
+    wave : ndarray
+        Increasing wavelength grid (Angstrom).
+    wave_range : (float, float)
+        (lo, hi), Angstrom.
+
+    Returns
+    -------
+    slice
+
+    Raises
+    ------
+    ValueError
+        Unless lo < hi < wave[-1].
     '''
     lo, hi = wave_range
     if not lo < hi < wave[-1]:

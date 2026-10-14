@@ -33,7 +33,18 @@ _FWHM_TO_SIGMA = 1.0 / (2.0 * np.sqrt(2.0 * np.log(2.0)))
 def dv_from_wave(wave):
     """Velocity step (km/s) of a wavelength grid, from the median d(lambda)/lambda.
 
-    Exact for a log-lambda grid; a close approximation over a narrow linear grid.
+    Exact for a log-lambda grid; for a linear grid, whose velocity step falls
+    from the blue end to the red end, it is the mid-grid value.
+
+    Parameters
+    ----------
+    wave : array_like
+        Increasing wavelength grid (Angstrom), at least two points.
+
+    Returns
+    -------
+    float
+        ``c * median(diff(wave) / wave[:-1])`` (km/s).
     """
     wave = np.asarray(wave, float)
     return C_KMS * np.median(np.diff(wave) / wave[:-1])
@@ -145,6 +156,18 @@ def tukey_window(n, alpha=0.1):
     Note the taper makes the per-pixel noise heteroscedastic
     (``sigma_n = w_n * sigma``), which the white-noise weighting downstream
     does not model -- only the overall scale is recoverable, from reduced-chi2.
+
+    Parameters
+    ----------
+    n : int
+        Window length (pixels).
+    alpha : float
+        Tapered fraction of the window (0 = rectangular, 1 = Hann).
+
+    Returns
+    -------
+    ndarray
+        (n,) window, 1 in the flat part and 0 at the ends.
     """
     return _tukey(n, alpha)
 
@@ -314,10 +337,18 @@ def parseval_weights(n, sigma=1.0):
 
         sum_k w_k |R_k|**2  ==  sum_n r_n**2 / sigma**2
 
+    Parameters
+    ----------
+    n : int
+        Length of the real signal (pixels).
+    sigma : float
+        Per-pixel noise (flux units).
+
     Returns
     -------
     w : ndarray
-        Weights aligned with :func:`rfft_positive` output, i.e. DC dropped.
+        Weights (1 / flux units^2) aligned with :func:`rfft_positive`
+        output, i.e. DC dropped.
     """
     w = np.full(len(np.fft.rfftfreq(n, d=1.0)), 2.0 / n)
     w[0] = 1.0 / n                       # DC (dropped below)
@@ -359,6 +390,22 @@ def broaden_rotational_residual(residual, dv, vsini, epsilon=0.6):
     what actually happens; the continuum is untouched by construction and the
     edges zero-pad naturally. UNICOR works in normalized flux and calls
     :func:`broaden_rotational`; TODCOR works in residuals and calls this.
+
+    Parameters
+    ----------
+    residual : array_like
+        Flux minus continuum, on a uniform velocity (log-lambda) grid.
+    dv : float
+        Velocity step of the grid (km/s).
+    vsini : float
+        Projected rotational velocity (km/s); <= 0 returns the input.
+    epsilon : float
+        Linear limb-darkening coefficient (0-1).
+
+    Returns
+    -------
+    ndarray
+        The broadened residual, same length (``numpy.convolve`` 'same').
     """
     if vsini <= 0:
         return np.asarray(residual, float)
@@ -371,6 +418,20 @@ def broaden_gaussian_residual(residual, dv, fwhm_kms):
 
     For resolving power ``R``, use ``fwhm_kms = c / R``. See
     :func:`broaden_rotational_residual` on the residual vs flux forms.
+
+    Parameters
+    ----------
+    residual : array_like
+        Flux minus continuum, on a uniform velocity (log-lambda) grid.
+    dv : float
+        Velocity step of the grid (km/s).
+    fwhm_kms : float
+        Kernel FWHM (km/s); <= 0 returns the input.
+
+    Returns
+    -------
+    ndarray
+        The broadened residual, zero-padded beyond the ends.
     """
     if fwhm_kms <= 0:
         return np.asarray(residual, float)
@@ -380,7 +441,27 @@ def broaden_gaussian_residual(residual, dv, fwhm_kms):
 
 
 def broaden_rotational(flux, dv, vsini, epsilon=0.6):
-    """Rotationally broaden normalized flux (continuum = 1) by ``vsini`` km/s."""
+    """Rotationally broaden normalized flux (continuum = 1) by ``vsini`` km/s.
+
+    ``1 + broaden_rotational_residual(flux - 1, ...)``: continuum 1 is
+    assumed beyond the ends.
+
+    Parameters
+    ----------
+    flux : array_like
+        Normalized flux on a uniform velocity (log-lambda) grid.
+    dv : float
+        Velocity step of the grid (km/s).
+    vsini : float
+        Projected rotational velocity (km/s).
+    epsilon : float
+        Linear limb-darkening coefficient (0-1).
+
+    Returns
+    -------
+    ndarray
+        The broadened flux.
+    """
     return 1.0 + broaden_rotational_residual(
         np.asarray(flux, float) - 1.0, dv, vsini, epsilon)
 
@@ -388,7 +469,22 @@ def broaden_rotational(flux, dv, vsini, epsilon=0.6):
 def broaden_gaussian(flux, dv, fwhm_kms):
     """Gaussian-broaden normalized flux by ``fwhm_kms`` km/s (instrumental).
 
-    For resolving power ``R``, use ``fwhm_kms = c / R``.
+    ``1 + broaden_gaussian_residual(flux - 1, ...)``: continuum 1 is assumed
+    beyond the ends. For resolving power ``R``, use ``fwhm_kms = c / R``.
+
+    Parameters
+    ----------
+    flux : array_like
+        Normalized flux on a uniform velocity (log-lambda) grid.
+    dv : float
+        Velocity step of the grid (km/s).
+    fwhm_kms : float
+        Kernel FWHM (km/s).
+
+    Returns
+    -------
+    ndarray
+        The broadened flux.
     """
     return 1.0 + broaden_gaussian_residual(
         np.asarray(flux, float) - 1.0, dv, fwhm_kms)
@@ -434,6 +530,16 @@ def resample(wave, flux, wave_grid, fill=None, kind='linear'):
         the grids are heavily oversampled. ``'cubic'`` uses a (not-a-knot)
         cubic spline; prefer it when a spectrum is shifted by many pixels and the
         interpolation error would otherwise show up as lost correlation.
+
+    Returns
+    -------
+    ndarray
+        The flux at ``wave_grid``.
+
+    Raises
+    ------
+    ValueError
+        If ``wave`` is not strictly increasing, or ``kind`` is unknown.
     """
     wave = np.asarray(wave, float)
     flux = np.asarray(flux, float)
@@ -460,7 +566,19 @@ def resample(wave, flux, wave_grid, fill=None, kind='linear'):
 
 
 def normalize(flux):
-    """Mean-subtract and L2-normalize a flux vector (zero vector -> unchanged)."""
+    """Mean-subtract and L2-normalize a flux vector.
+
+    Parameters
+    ----------
+    flux : array_like
+        1-D flux.
+
+    Returns
+    -------
+    ndarray
+        ``(flux - mean) / ||flux - mean||``; just mean-subtracted if that
+        norm is zero.
+    """
     f = np.asarray(flux, float)
     f = f - f.mean()
     norm = np.sqrt((f ** 2).sum())
@@ -472,6 +590,16 @@ def zero_lag_correlation(a, b):
 
     On L2-normalized inputs this is the cosine similarity used by USuRPER; no
     Fourier transform or velocity scan is involved.
+
+    Parameters
+    ----------
+    a, b : array_like
+        Vectors of equal length.
+
+    Returns
+    -------
+    float
+        ``sum(a * b)``.
     """
     return float(np.sum(np.asarray(a, float) * np.asarray(b, float)))
 

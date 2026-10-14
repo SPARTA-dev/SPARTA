@@ -628,9 +628,27 @@ def todcor_map(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None,
     """Single-window TODCOR log-likelihood map (convenience wrapper).
 
     Equivalent to ``profile_from_stats(window_stats(...), v1_grid, v2_grid)``.
-    See :func:`window_stats` and :func:`profile_from_stats`.  For several
-    line/order/instrument windows of *one epoch*, accumulate with
+    For several line/order/instrument windows of *one epoch*, accumulate with
     :func:`combine_stats` before profiling (never across epochs).
+
+    Parameters
+    ----------
+    data_g, g1, g2, dv, v1_grid, v2_grid, sigma, zeta_max, oversampling, noise_psd, velocity_convention
+        As :func:`window_stats`: residual data and templates on one uniform
+        log-lambda grid of actual step ``dv`` (km/s), trial velocities
+        (km/s), native per-pixel noise (flux units), Fourier cutoff (s/km),
+        oversampling factor, noise spectrum and Doppler convention.
+    nonneg : bool
+        As :func:`profile_from_stats`: constrain both amplitudes to be
+        non-negative.
+
+    Returns
+    -------
+    dict
+        The :func:`profile_from_stats` result: the (n1, n2) maps
+        'logL_profile', 'logL_marginal', 'a1', 'a2', 'chi2'; 'v1_grid',
+        'v2_grid'; and 'best' (v1, v2, a1, a2, chi2, chi2_red at the profile
+        argmax).
     """
     stats = window_stats(
         data_g, g1, g2, dv, v1_grid, v2_grid, sigma=sigma, zeta_max=zeta_max,

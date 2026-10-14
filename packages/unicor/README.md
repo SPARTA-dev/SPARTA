@@ -15,7 +15,8 @@ UNICOR. It needs only numpy and scipy.
   `'relativistic'` one (`√((1 + v/c)/(1 − v/c))`), using the grid's actual
   ln λ step.
 - Reads the RV off a sub-pixel parabola fit, with the ML uncertainty from the
-  CCF curvature, and computes the bisector span.
+  CCF curvature. (`bisector_span` is also provided, but its formula is known
+  to be incorrect and is under review; do not use it scientifically yet.)
 - Ships the shared log-λ DSP layer: grid construction, resampling, apodisation,
   Doppler shifts, rotational (Gray 2005) and Gaussian broadening.
 
@@ -41,12 +42,18 @@ pip install "sparta-unicor @ git+https://github.com/SPARTA-dev/SPARTA#subdirecto
 import numpy as np
 import unicor
 
-# One order on a log-lambda grid with step dv = 0.5 km/s, red-shifted by 12.3 km/s.
+rng = np.random.default_rng(0)
+
+# A template with a few absorption lines (continuum 1) on a fine log-lambda grid
+# wider than the observation, and one observed order with step dv = 0.5 km/s,
+# red-shifted by 12.3 km/s, with white noise of 0.01 per pixel.
 dv, vmax = 0.5, 50.0
+t_wave, _ = unicor.log_lambda_grid(4990.0, 5110.0, 0.1)
+centres = np.linspace(5010.0, 5090.0, 9)
+t_flux = 1 - np.sum(0.5 * np.exp(-0.5 * ((t_wave - centres[:, None]) / 0.1) ** 2), axis=0)
 wave, _ = unicor.log_lambda_grid(5000.0, 5100.0, dv)
-t_wave, _ = unicor.log_lambda_grid(4990.0, 5110.0, 0.1)        # wider template
-t_flux = 1 - 0.5 * np.exp(-0.5 * ((t_wave - 5050.0) / 0.1) ** 2)
 observed = unicor.resample(t_wave, t_flux, wave / unicor.doppler_factor(12.3))
+observed += rng.normal(0.0, 0.01, wave.size)
 
 # The template goes on the observed grid continued by K = vmax/dv steps on
 # each side: lag k then correlates all observed pixels with the template
@@ -59,18 +66,34 @@ template = unicor.resample(t_wave, t_flux, unicor.extend_log_grid(wave, K))
 # c * tanh(k * Delta) with velocity_convention='relativistic'. The axis is
 # therefore very slightly non-uniform; nothing downstream assumes otherwise.
 v, c = unicor.ccf_vs_velocity(template, observed, wave)
-rv, peak = unicor.subpixel_peak(v, c)                 # ~12.3 km/s
+rv, peak = unicor.subpixel_peak(v, c)
 # n_eff: independent spectral bins -- native (detector) pixels, not the
 # pixels of a finer resampled grid. Here the grid is the native sampling.
-erv = unicor.rv_uncertainty(v, c, rv, n_eff=wave.size)  # km/s
+erv = unicor.rv_uncertainty(v, c, rv, n_eff=wave.size)
+print(f"one order:  RV = {rv:.3f} +- {erv:.3f} km/s (CCF peak {peak:.3f})")
 
 # Several orders on the same lag axis -> one ML-combined CCF, each order
-# weighted by its bins; its error uses the total.
+# weighted by its bins; its error uses the total. Here the second "order" is
+# the same lines with independent noise.
+observed2 = unicor.resample(t_wave, t_flux, wave / unicor.doppler_factor(12.3))
+observed2 += rng.normal(0.0, 0.01, wave.size)
+_, c2 = unicor.ccf_vs_velocity(template, observed2, wave)
 n_eff = np.array([wave.size, wave.size])
-combined = unicor.combine_ccfs(np.vstack([c, c]), n_eff=n_eff)
+combined = unicor.combine_ccfs(np.vstack([c, c2]), n_eff=n_eff)
 rv_all, _ = unicor.subpixel_peak(v, combined)
 erv_all = unicor.rv_uncertainty(v, combined, rv_all, n_eff=n_eff.sum())
+print(f"combined:   RV = {rv_all:.3f} +- {erv_all:.3f} km/s")
 ```
+
+```text
+one order:  RV = 12.291 +- 0.012 km/s (CCF peak 0.987)
+combined:   RV = 12.295 +- 0.009 km/s
+```
+
+The uncertainty is the maximum-likelihood error of Zucker (2003): it assumes
+white noise on the `n_eff` independent bins. Filtering or normalising the
+spectrum first correlates the noise, and the error is then no longer
+calibrated; check it by simulation.
 
 ## Velocity conventions
 

@@ -32,8 +32,15 @@ def scalar_distance_matrix(y):
     '''
     Pairwise absolute differences of scalar values.
 
-    :param y: (n,) values (e.g. RVs, km/s).
-    :return: (n, n) array, |y_i - y_j|, in the unit of ``y``.
+    Parameters
+    ----------
+    y : array_like
+        (n,) values (e.g. RVs, km/s).
+
+    Returns
+    -------
+    ndarray
+        (n, n) array of |y_i - y_j|, in the unit of ``y``.
     '''
     y = np.asarray(y, float)
     return np.abs(y[:, None] - y[None, :])
@@ -50,10 +57,22 @@ def error_aware_distance_matrix(y, errors):
     confirmed (2026-10-14) that the published form is intended. Negative
     arguments are clipped to zero and the diagonal is zero.
 
-    :param y: (n,) values.
-    :param errors: (n,) their 1-sigma uncertainties, in the unit of ``y``.
-    :return: (n, n) array of distances.
-    :raises ValueError: if ``errors`` does not have one entry per value.
+    Parameters
+    ----------
+    y : array_like
+        (n,) values.
+    errors : array_like
+        (n,) their 1-sigma uncertainties, in the unit of ``y``.
+
+    Returns
+    -------
+    ndarray
+        (n, n) array of distances, in units of sqrt(unit of ``y``).
+
+    Raises
+    ------
+    ValueError
+        If ``errors`` does not have one entry per value.
     '''
     y = np.asarray(y, float)
     err = np.asarray(errors, float)
@@ -79,9 +98,17 @@ def spectral_distance_matrix(waves, fluxes):
     L2-normalized; the distance of two unit vectors with zero-lag correlation
     r is sqrt(2 (1 - r)).
 
-    :param waves: list of 1-D increasing wavelength arrays (Angstrom).
-    :param fluxes: list of the matching 1-D flux arrays.
-    :return: (n, n) array of distances in [0, 2], zero diagonal.
+    Parameters
+    ----------
+    waves : list of ndarray
+        1-D increasing wavelength arrays (Angstrom).
+    fluxes : list of ndarray
+        The matching 1-D flux arrays.
+
+    Returns
+    -------
+    ndarray
+        (n, n) array of distances in [0, 2], zero diagonal.
     '''
     gram = _gram(resample_spec_to_common_grid(waves, fluxes, factor=1))
     d = np.sqrt(np.clip(1.0 - gram, 0.0, None)) * np.sqrt(2)
@@ -93,9 +120,17 @@ def phase_distance_matrix(times, f):
     '''
     The PDC phase-distance kernel at one trial frequency.
 
-    :param times: (n,) observation times (days).
-    :param f: trial frequency (1/day), > 0.
-    :return: (n, n) array d (1/f - d), d = (t_i - t_j) mod 1/f (days^2).
+    Parameters
+    ----------
+    times : array_like
+        (n,) observation times (days).
+    f : float
+        Trial frequency (1/day), > 0.
+
+    Returns
+    -------
+    ndarray
+        (n, n) array d (1/f - d), with d = (t_i - t_j) mod 1/f (days^2).
     '''
     t = np.asarray(times, float)[None, :]
     d = (t.T - t) % (1 / f)
@@ -120,20 +155,43 @@ def double_centering(a):
     '''
     Double-centered distance matrix (the biased distance correlation).
 
-    :param a: (n, n) distance matrix.
-    :return: a minus its row and column means, plus the grand mean.
+    Parameters
+    ----------
+    a : ndarray
+        (n, n) distance matrix.
+
+    Returns
+    -------
+    ndarray
+        ``a`` minus its row and column means, plus the grand mean.
     '''
     return a - np.mean(a, axis=0)[None, :] - np.mean(a, axis=1)[:, None] + np.mean(a)
 
 
 def unbiased_u_centering(a, n):
     '''
-    :param a: distance matrix (numpy nXn array)
-    :param n: integer (length of a...)
-    :return: U-centered distance matrix (unbiased; zero diagonal)
-    :raises ValueError: for n <= 3, where the /(n-2) factor here and the
-                        1/(n(n-3)) of the U-centered inner product are singular
-                        or negative.
+    U-centered distance matrix (the unbiased distance correlation).
+
+    Row and column sums are divided by (n - 2), the grand sum by
+    (n - 1)(n - 2), and the diagonal is set to zero (Szekely & Rizzo 2014).
+
+    Parameters
+    ----------
+    a : array_like
+        (n, n) distance matrix.
+    n : int
+        Its size.
+
+    Returns
+    -------
+    ndarray
+        (n, n) U-centered matrix, zero diagonal.
+
+    Raises
+    ------
+    ValueError
+        For n <= 3, where the /(n-2) factor here and the 1/(n(n-3)) of the
+        U-centered inner product are singular or negative.
     '''
     if n <= 3:
         raise ValueError(
@@ -152,9 +210,15 @@ def inner_prod(a, b):
     '''
     Unbiased U-centered inner product of two distance matrices.
 
-    :param a: U-centered distance matrix (n x n numpy array).
-    :param b: U-centered distance matrix (n x n numpy array).
-    :return: float, sum(a*b) / (n*(n-3)).
+    Parameters
+    ----------
+    a, b : ndarray
+        (n, n) U-centered distance matrices.
+
+    Returns
+    -------
+    float
+        sum(a * b) / (n (n - 3)).
     '''
     n = len(a)
     return np.sum(a * b) / (n * (n - 3))
@@ -165,9 +229,15 @@ def norm_z(a, b):
     The component of ``a`` orthogonal to ``b`` under the U-centered inner
     product (used to build the partial / semi-partial distance correlation).
 
-    :param a: U-centered distance matrix (n x n numpy array).
-    :param b: U-centered distance matrix (n x n numpy array).
-    :return: a - (<a,b>/<b,b>) * b.
+    Parameters
+    ----------
+    a, b : ndarray
+        (n, n) U-centered distance matrices.
+
+    Returns
+    -------
+    ndarray
+        a - (<a, b> / <b, b>) b.
     '''
     factor = inner_prod(a, b) / inner_prod(b, b)
     return a - factor * b
@@ -178,10 +248,18 @@ def partial_centering(a, c):
     U-center a distance matrix and a control one, and remove the control's
     component from the first (partial distance correlation).
 
-    :param a: (n, n) distance matrix of the quantity of interest.
-    :param c: (n, n) distance matrix of the control quantity.
-    :return: (A, C) -- U-centered ``a`` orthogonal to C, and U-centered ``c``;
-             the arguments of ``pdc_power(..., control=C)``.
+    Parameters
+    ----------
+    a : ndarray
+        (n, n) distance matrix of the quantity of interest.
+    c : ndarray
+        (n, n) distance matrix of the control quantity.
+
+    Returns
+    -------
+    A, C : ndarray
+        U-centered ``a`` made orthogonal to C, and U-centered ``c``: the
+        arguments of ``pdc_power(times, freqs, A, control=C)``.
     '''
     n = len(a)
     control = unbiased_u_centering(c, n)
@@ -196,20 +274,34 @@ def pdc_power(times, freqs, a_centered, unbiased=True, control=None):
     PDC periodogram: correlation of a centered distance matrix with the phase
     distances, at every trial frequency.
 
-    :param times: (n,) observation times (days).
-    :param freqs: (m,) trial frequencies (1/day), > 0.
-    :param a_centered: (n, n) the values' distance matrix, centered the way the
-                       phase matrices will be: ``double_centering`` for
-                       unbiased=False, ``unbiased_u_centering`` for
-                       unbiased=True, or the first output of
-                       ``partial_centering`` with ``control``.
-    :param unbiased: bool, U-centered (True) or double-centered (False) statistic.
-    :param control: None, or the U-centered control matrix (the second output
-                    of ``partial_centering``): every phase matrix is made
-                    orthogonal to it -- the partial periodogram. Unbiased only.
-    :return: (m,) array of PDC power (dimensionless).
-    :raises ValueError: for a control with the biased statistic, or n <= 3
-                        with the unbiased one.
+    Parameters
+    ----------
+    times : array_like
+        (n,) observation times (days).
+    freqs : array_like
+        (m,) trial frequencies (1/day), > 0.
+    a_centered : ndarray
+        (n, n) the values' distance matrix, centered the way the phase
+        matrices will be: ``double_centering`` for unbiased=False,
+        ``unbiased_u_centering`` for unbiased=True, or the first output of
+        ``partial_centering`` with ``control``.
+    unbiased : bool
+        U-centered (True) or double-centered (False) statistic.
+    control : ndarray, optional
+        The U-centered control matrix (the second output of
+        ``partial_centering``): every phase matrix is made orthogonal to it
+        -- the partial periodogram. Unbiased only.
+
+    Returns
+    -------
+    ndarray
+        (m,) PDC power (dimensionless).
+
+    Raises
+    ------
+    ValueError
+        For a control with the biased statistic, or n <= 3 with the unbiased
+        one.
     '''
     if control is not None and not unbiased:
         raise ValueError("the partial periodogram is defined for the unbiased "
@@ -243,11 +335,22 @@ def get_wv_grid(waves, factor):
     The uniform wavelength grid common to all spectra: their overlap, sampled at
     the finest median pixel step.
 
-    :param waves: list of 1-D increasing wavelength arrays (Angstrom).
-    :param factor: float, multiplies the grid step.
-    :return: 1-D wavelength grid (Angstrom).
-    :raises ValueError: if the spectra do not overlap (fewer than two common
-                        grid points).
+    Parameters
+    ----------
+    waves : list of ndarray
+        1-D increasing wavelength arrays (Angstrom).
+    factor : float
+        Multiplies the grid step.
+
+    Returns
+    -------
+    ndarray
+        1-D wavelength grid (Angstrom).
+
+    Raises
+    ------
+    ValueError
+        If the spectra do not overlap (fewer than two common grid points).
     '''
     min_wv = np.max([np.min(w) for w in waves])
     max_wv = np.min([np.max(w) for w in waves])
@@ -265,11 +368,21 @@ def resample_spec_to_common_grid(waves, fluxes, factor):
     '''
     Resample spectra onto their common grid and normalize each one.
 
-    :param waves: list of 1-D increasing wavelength arrays (Angstrom).
-    :param fluxes: list of the matching 1-D flux arrays.
-    :param factor: float, multiplies the common-grid step (see get_wv_grid).
-    :return: (n_grid x n_spectra) array; each column mean-subtracted and
-             L2-normalized.
+    The spectra are linearly interpolated (``unicor.resample``).
+
+    Parameters
+    ----------
+    waves : list of ndarray
+        1-D increasing wavelength arrays (Angstrom).
+    fluxes : list of ndarray
+        The matching 1-D flux arrays.
+    factor : float
+        Multiplies the common-grid step (see ``get_wv_grid``).
+
+    Returns
+    -------
+    ndarray
+        (n_grid, n_spectra); each column mean-subtracted and L2-normalized.
     '''
     wv_grid   = get_wv_grid(waves, factor)
     sp_matrix = np.zeros((len(wv_grid), len(waves)))

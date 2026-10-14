@@ -195,6 +195,40 @@ Keys of `results_frequency` / `results_power`:
   start, end, weight; `#` comments).
 - The instruments' recommended preprocessing (`Recommended.preprocess`,
   `docs/instruments.md`) uses the new `preprocess` keywords.
+- `Observations.calc_rv_against_template` and
+  `calc_rv_against_two_templates` take `velocity_convention` ('cz' default,
+  or 'relativistic') and pass it to `CCF1d` / `CCF2d`; the SB1 driver had no
+  way to pass it, the SB2 one only through `**kwargs`.
+- `Spectrum(wv, sp)` with different numbers of orders, and
+  `Spectrum.select_orders` / `Observations.select_orders` with an index
+  outside 0 .. n_ord - 1, raise `ValueError` (was `AssertionError`, skipped
+  under `python -O`).
+- Mutable default arguments are gone: `Spectrum(wv=None, sp=None)`,
+  `Observations(time_series=None)`, `Template.integrate_spec(wv=None,
+  sp=None)`, `Observations.calc_bis(bisect_val=(0.35, 0.95))`. Calls that
+  pass these arguments behave as before.
+
+### Documentation
+
+- A new README: what SPARTA does (PDC, error-aware PDC, USuRPER and the
+  partial periodograms are now described; the unimplemented "detection of
+  systematic shifts" claim for UNICOR is gone), an offline quickstart on
+  simulated HARPS data, the conventions (units, 'cz' vs 'relativistic',
+  barycentric composition, log-λ grid, native-pixel error bars, uncalibrated
+  errors after `preprocess`, air/vacuum), a module map and the papers to cite.
+  Links are absolute, so they work on PyPI.
+- `CONTRIBUTING.md`: layout, development install, tests, engine isolation,
+  the golden-master policy, the add-an-instrument checklist and the code
+  style.
+- The engine READMEs' quickstarts are self-contained and noisy, with their
+  output shown; the TODCOR one no longer broadens the observed composite.
+- Every public function and method of the object layer has a numpydoc
+  docstring with units; the docstrings that contradicted the code are fixed
+  (e.g. `Spectrum.interpolate`'s step is a multiple of the *median*
+  wavelength step).
+- The bisector span (`unicor.bisector_span`, `CCF1d.calc_bis`,
+  `Observations.calc_bis`) is documented as known to be incorrect and under
+  review; it is unchanged.
 
 ## 0.2.0
 

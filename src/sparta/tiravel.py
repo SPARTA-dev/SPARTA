@@ -30,13 +30,18 @@ from sparta.template import Template
 
 
 class TIRAVEL:
+    '''
+    A template co-added from the observations at trial velocities (Zucker &
+    Mazeh 2006); ``build_template`` sets the results as attributes.
+    '''
     # =============================================================================
     # =============================================================================
     def __init__(self):
         '''
-        No input required. Sets the default edge margin ``self.default_margin``
-        (10 pixels), trimmed from each end of the epochs' common rest-frame
-        range as insurance against interpolation edge effects.
+        Set the default edge margin ``self.default_margin`` (10 pixels).
+
+        The margin is trimmed from each end of the epochs' common rest-frame
+        range, as insurance against interpolation edge effects.
         '''
         self.default_margin = 10
 
@@ -55,42 +60,65 @@ class TIRAVEL:
         should be summed. Orders are pooled into one correlation matrix, so a
         single weight vector describes the whole spectrum.
 
-        :param: spectra    - a list of K Spectrum objects (one per epoch), all
-                            with the same number of orders.
-        :param: velocities - a list of K radial velocities (km/s), the trial
-                            alignment. Only their *differences* matter: adding a
-                            constant to all of them leaves rho untouched and
-                            shifts the returned template by the same amount, so
-                            the template's rest frame is whatever zero point
-                            these carry.
-        :param: orders     - optional list of order indices to use. Default all.
-        :param: reference  - index of the epoch whose sampling defines the
-                            common grid (that epoch is then not resampled).
-        :param: margin     - pixels trimmed from each end of the common range.
-                            Default 10. The legacy implementation hardcoded 100
-                            here; what actually matters is that the de-shifted
-                            epochs overlap at all, which is now checked.
-        :param: kind       - 'cubic' (default) or 'linear' resampling. The
-                            shifts run to many pixels, and linear interpolation
-                            smooths the lines enough to depress the very
-                            correlations being measured.
-        :param: keep_aligned - Boolean. Retain the aligned per-order matrices
-                            (needed by :meth:`plot_template`).
+        Parameters
+        ----------
+        spectra : list of Spectrum
+            K spectra (one per epoch, K >= 2), all with the same number of
+            orders; not modified.
+        velocities : array_like
+            K radial velocities (km/s), the trial alignment. Only their
+            *differences* matter: adding a constant to all of them leaves rho
+            untouched and shifts the returned template by the same amount, so
+            the template's rest frame is whatever zero point these carry.
+        orders : sequence of int, optional
+            Order indices to use. Default all.
+        reference : int
+            Index of the epoch whose sampling defines the common grid (that
+            epoch is then not resampled).
+        margin : int, optional
+            Pixels trimmed from each end of the common range. Default
+            ``self.default_margin`` (10).
+        kind : {'cubic', 'linear'}
+            Resampling. The shifts run to many pixels, and linear
+            interpolation smooths the lines enough to depress the very
+            correlations being measured.
+        keep_aligned : bool
+            Retain the aligned per-order matrices (needed by
+            :meth:`plot_template`).
 
-        :return: self, with the following fields:
-                 self.template     - a Template object holding the co-added
-                                     template, one order per input order.
-                 self.rho          - the alignment measure in [0, 1]: how well
-                                     one principal component describes the set.
-                                     This is TIRAVEL's objective function.
-                 self.weights      - (K,) the co-addition weights (unit norm).
-                 self.correlation  - (K, K) the epoch correlation matrix.
-                 self.diagnostics  - dict with 'lambda_max', 'eigenvalues',
-                                     'explained', 'n_eff' (see tiravel_ops).
-                 self.velocities   - the velocities used.
-                 self.grids        - the common rest-frame grid of each order.
-                 self.aligned      - (if keep_aligned) the per-order aligned,
-                                     normalized epoch matrices.
+        Returns
+        -------
+        TIRAVEL
+            self, with these attributes:
+
+            ``template``
+                Template holding the co-added spectrum, one order per order
+                used (wavelengths in Angstrom; normalized, dimensionless
+                flux).
+            ``rho``
+                The alignment measure in [0, 1]: how well one principal
+                component describes the set. TIRAVEL's objective function.
+            ``weights``
+                (K,) co-addition weights (unit norm).
+            ``correlation``
+                (K, K) epoch correlation matrix.
+            ``diagnostics``
+                dict with 'lambda_max', 'eigenvalues', 'explained', 'n_eff'
+                (see ``sparta.tiravel_ops.alignment``).
+            ``velocities``
+                The velocities used (km/s).
+            ``grids``
+                The common rest-frame grid of each order (Angstrom).
+            ``aligned``
+                If ``keep_aligned``, the per-order aligned, normalized epoch
+                matrices; else None.
+
+        Raises
+        ------
+        ValueError
+            For mismatched or too few epochs, non-finite velocities or flux,
+            epochs with different numbers of orders, or epochs that do not
+            overlap once de-shifted.
         '''
         if len(spectra) != len(velocities):
             raise ValueError(
@@ -169,9 +197,16 @@ class TIRAVEL:
         that epoch anti-correlates with the rest, usually a misaligned velocity
         or a bad spectrum.
 
-        :param: times   - optional x-axis values (e.g. BJD). Default: epoch index.
-        :param: figsize - figure size in inches.
-        :return: the figure object.
+        Parameters
+        ----------
+        times : array_like, optional
+            x-axis values (days, e.g. BJD). Default: the epoch index.
+        figsize : (float, float)
+            Figure size (inches).
+
+        Returns
+        -------
+        matplotlib.figure.Figure
         '''
         x = np.arange(len(self.weights)) if times is None else np.asarray(times)
 
@@ -192,11 +227,25 @@ class TIRAVEL:
         '''
         Plot the co-added template over the aligned epochs that made it.
 
-        :param: order       - index into the orders that were used.
-        :param: show_epochs - Boolean. Underlay the individual aligned spectra.
-        :param: alpha       - transparency of the individual epochs.
-        :param: figsize     - figure size in inches.
-        :return: the figure object.
+        Parameters
+        ----------
+        order : int
+            Index into the orders that were used.
+        show_epochs : bool
+            Underlay the individual aligned spectra.
+        alpha : float
+            Transparency of the individual epochs.
+        figsize : (float, float)
+            Figure size (inches).
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+
+        Raises
+        ------
+        ValueError
+            If ``show_epochs`` but the aligned epochs were not kept.
         '''
         if show_epochs and self.aligned is None:
             raise ValueError('the aligned epochs were not retained; re-run '

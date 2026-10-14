@@ -15,8 +15,10 @@ double-lined run (``calc_rv_against_two_templates``) keeps the two components
 on this object (``vels1``, ``vels2``) and leaves the time series alone.
 
 Conventions: wavelengths in Angstrom, velocities in km/s, times in days (for
-files read from disk, ``time_list`` counts days from the integer day
-``first_time``), periodogram frequencies in 1/day.
+files read from disk or simulated, ``time_list`` counts days from the integer
+day ``first_time``), periodogram frequencies in 1/day. RVs are in the 'cz'
+Doppler convention unless ``velocity_convention='relativistic'`` is passed to
+the RV drivers.
 
 References: UNICOR -- Zucker 2003, MNRAS 342, 1291; TODCOR -- Zucker & Mazeh
 1994, ApJ 420, 806; TIRAVEL -- Zucker & Mazeh 2006, MNRAS 371, 1513; PDC --
@@ -37,34 +39,85 @@ from sparta.tiravel import TIRAVEL
 from tqdm import tqdm
 
 class Observations:
+    '''
+    A spectroscopic (or scalar) time series and the analyses run on it.
+
+    Attributes
+    ----------
+    spec_list : list of Spectrum
+        One spectrum per epoch (the values of a supplied TimeSeries).
+    time_list : list of float
+        Epoch times (days); for read or simulated data, days after
+        ``first_time``.
+    first_time : int
+        The integer day subtracted from the input times (read or simulated
+        data only).
+    time_series : TimeSeries
+        The container the periodograms run on.
+    truth : sparta.instruments.Truth or None
+        What a simulation injected; None for real data.
+    time_system, wavelength_frame : str or None
+        As the loader reported them (e.g. 'BJD-TDB', 'air'); None for a
+        supplied TimeSeries.
+    bcv, snr, air_mass : list of float
+        Per-epoch barycentric correction (km/s; already applied to the
+        wavelengths), S/N and airmass (NaN where unknown). Read or simulated
+        data only.
+    vrad_list : list of float
+        Archive RVs (km/s) of the records whose header carries one; not
+        epoch-aligned.
+    periodicity_detector : PeriodicityDetector
+        Set by ``init_periodicity_detector``.
+
+    The RV methods add their results as attributes; see each method.
+    '''
     # =============================================================================
     # =============================================================================
-    def __init__(self, survey=None, min_snr=-1, target_visits_lib=None, time_series=[],
+    def __init__(self, survey=None, min_snr=-1, target_visits_lib=None, time_series=None,
                  min_avg_flux_val=-1, sample_rate=1, output=False, min_wv=5150, max_wv=5300,
                  simulation=None):
         '''
-        Input: All input is optional, and needs to be called along
-               with its keyword. Below appears a list of the possible input
-               variables.
+        Build the time series from a visit directory, a simulation, or a TimeSeries.
 
-              survey: str, registry key of the data product (see
-                      sparta.instruments.REGISTRY); required with target_visits_lib
-                      or simulation.
-              min_snr: float, can be used to sort out noisy observations
-              target_visits_lib: str, observation visit directory path
-                                 (required when reading files).
-              time_series: TimeSeries object, in case a direct load of TimeSeries (instead of file reading)
-              min_wv, max_wv: float, wavelength window (Angstrom) passed to
-                              single-order loaders.
-              simulation: sparta.instruments.Simulation, with survey='SIMULATED':
-                          simulated spectra instead of files, ingested the same
-                          way; what was injected is kept as ``self.truth``
-                          (sparta.instruments.Truth), which is None otherwise.
+        Exactly one source is used: ``time_series`` if given; else
+        ``simulation`` (with ``survey='SIMULATED'``); else the FITS files
+        under ``target_visits_lib`` (with the product's ``survey`` key).
+        Read and simulated spectra get their barycentric correction applied,
+        and their times become days after the integer day of the first visit.
 
-        When reading files, ``time_system`` and ``wavelength_frame`` record
-        what the loader returned (e.g. 'BJD-TDB', 'air'); a directory whose
-        visits disagree on either raises ValueError. Both are None for a
-        directly supplied TimeSeries.
+        Parameters
+        ----------
+        survey : str, optional
+            Registry key of the data product (``sparta.instruments.REGISTRY``,
+            docs/instruments.md); required unless ``time_series`` is given.
+        min_snr : float
+            Drop records with S/N below it; -1 (default) keeps all, and a
+            record of unknown S/N is always kept.
+        target_visits_lib : str, optional
+            Directory searched (recursively) for .fits, .fits.gz, .fts.gz and
+            .fits.Z files.
+        time_series : TimeSeries, optional
+            Use this series directly instead of reading files.
+        min_avg_flux_val : float
+            Drop records whose mean flux is below it; -1 (default) keeps all.
+        sample_rate : int
+            Read only every ``sample_rate``-th file found.
+        output : bool
+            Print each file path as it is read.
+        min_wv, max_wv : float
+            Wavelength window (Angstrom) passed to the loaders: single-order
+            products are trimmed to it (or pick the order covering it).
+        simulation : sparta.instruments.Simulation, optional
+            Simulated spectra, ingested like files; what was injected is kept
+            as ``self.truth``.
+
+        Raises
+        ------
+        ValueError
+            For a missing or unknown ``survey``, a missing
+            ``target_visits_lib``, a simulation with a non-simulated survey
+            (or vice versa), or visits that disagree on time system or
+            wavelength frame.
         '''
         self.truth = None
         if not isinstance(time_series, TimeSeries):
@@ -107,7 +160,15 @@ class Observations:
         Load every ``sample_rate``-th FITS file under ``target_visits_lib``
         with ``product.load``; the paths are kept in ``self.file_list``.
 
-        :return: list of sparta.instruments.LoadedSpectrum.
+        Parameters
+        ----------
+        product : sparta.instruments.Product
+        target_visits_lib, sample_rate, output, min_wv, max_wv
+            See ``__init__``.
+
+        Returns
+        -------
+        list of sparta.instruments.LoadedSpectrum
         '''
         self.file_list = []
         count = 0
@@ -147,13 +208,20 @@ class Observations:
         modelled as white on the native pixels and resampled once, from
         uniformly spread sub-pixel phases (see CCF2d.cross_correlate).
 
-        :param records: iterable of sparta.instruments.LoadedSpectrum.
-        :param min_snr: float, drop records with snr < min_snr; -1 disables
-                        the cut, and a record of unknown (NaN) snr is kept.
-        :param min_avg_flux_val: float, drop records whose mean flux is below
-                                 it; -1 disables the cut.
-        :raises ValueError: if the records (including dropped ones) disagree on
-                            (time_system, wavelength_frame).
+        Parameters
+        ----------
+        records : iterable of sparta.instruments.LoadedSpectrum
+        min_snr : float
+            Drop records with snr < min_snr; -1 disables the cut, and a record
+            of unknown (NaN) snr is kept.
+        min_avg_flux_val : float
+            Drop records whose mean flux is below it; -1 disables the cut.
+
+        Raises
+        ------
+        ValueError
+            If the records (including dropped ones) disagree on
+            (time_system, wavelength_frame).
         '''
         self.spec_list = []
         self.time_list = []
@@ -208,10 +276,18 @@ class Observations:
                    delta=0.5, cosmic_sigma=3, filter_lowcut=3, filter_highcut=0.15,
                    alpha=0.3):
         '''
-        Apply ``Spectrum.preprocess`` to every epoch, in place; the
-        parameters are passed through (see there).
+        Apply ``Spectrum.preprocess`` to every epoch, in place.
 
-        :return: self.
+        Parameters
+        ----------
+        n_trim, clean_margins, remove_nans, delta, cosmic_sigma, filter_lowcut, filter_highcut, alpha
+            Passed through; see ``Spectrum.preprocess``. The per-instrument
+            recommendations are in docs/instruments.md.
+
+        Returns
+        -------
+        Observations
+            self.
         '''
         with tqdm(total=self.sample_size) as pbar:
             for s in self.spec_list:
@@ -228,10 +304,23 @@ class Observations:
         '''
         Keep or discard the same orders in every epoch (``Spectrum.select_orders``).
 
-        :param orders: Indices of the required orders (0 .. n_ord - 1).
-        :param remove: Boolean. If True, these orders are removed;
-                       otherwise they are the ones kept.
-        :return: self.
+        Parameters
+        ----------
+        orders : sequence of int
+            Order indices, 0 .. n_ord - 1 of each epoch's spectrum.
+        remove : bool
+            If True, drop these orders; if False, keep only these.
+
+        Returns
+        -------
+        Observations
+            self.
+
+        Raises
+        ------
+        ValueError
+            If an index is out of range (the epochs before the offending one
+            have already been changed).
         '''
         for s in self.spec_list:
             s.select_orders(orders, remove=remove)
@@ -243,9 +332,20 @@ class Observations:
         '''
         The spectra the RV engines run on.
 
-        :param engine: str, the engine's name, for the error message.
-        :return: list of Spectrum objects, one per epoch.
-        :raises ValueError: for a scalar (e.g. RV) time series.
+        Parameters
+        ----------
+        engine : str
+            The engine's name, for the error message.
+
+        Returns
+        -------
+        list of Spectrum
+            One per epoch.
+
+        Raises
+        ------
+        ValueError
+            For a scalar (e.g. RV) time series.
         '''
         if is_numeric_scalar(self.spec_list[0]):
             raise ValueError(f'{engine} is available for spectrum time-series only')
@@ -254,36 +354,52 @@ class Observations:
 # =============================================================================
 # =============================================================================
     def calc_rv_against_template(self, template, dv=0.1, vel_bound=150,
-                                 errors_per_order=False, combine_ccfs=True):
+                                 errors_per_order=False, combine_ccfs=True,
+                                 velocity_convention='cz'):
         '''
-        Single-lined (SB1) radial velocities for the whole time series: a UNICOR
-        CCF of every epoch against one resting template.
+        Single-lined (SB1) radial velocities of every epoch, by UNICOR.
 
-        :param: template - a Template object, with which the observations are
-                           correlated.
-        :param: dv, vel_bound, errors_per_order - parameters of
-                           CCF1d.cross_correlate (km/s), see the
-                           documentation therein.
-        :param: combine_ccfs - bool. If True, every epoch's per-order CCFs are
-                           combined by maximum likelihood (Zucker 2003) and the
-                           RV and its uncertainty are read from the combined
-                           CCF. If False, only the per-order measurements are
-                           made.
+        Each epoch is cross-correlated with one template at rest
+        (``CCF1d.cross_correlate``); the spectra are not modified.
 
-        :return: self, with
-                 'ccf_list' - the CCF1d objects, one per epoch;
-                 'vels_per_order', 'evels_per_order', 'ccf_peaks_per_order' -
-                     (epochs x orders) arrays of the per-order RVs (km/s), their
-                     uncertainties (km/s; NaN unless errors_per_order) and CCF peaks;
-                 'vels', 'evels', 'ccf_peaks' - per-epoch RV (km/s), its ML
-                     uncertainty (km/s) and the CCF peak, all from the combined
-                     CCF; None when combine_ccfs is False (an average of the
-                     per-order RVs is left to the caller: their scatter is not
-                     an uncertainty).
-                 With combine_ccfs, time_series.calculated_vrad_list and
-                 time_series.errors are set to vels and evels, so the
-                 periodograms use the measured RVs; without, they are emptied
-                 rather than left holding the RVs of an earlier run.
+        Parameters
+        ----------
+        template : Template
+            The template, at rest, in the observations' wavelength frame.
+        dv : float
+            Log-lambda grid step (km/s) for epochs not already on one.
+        vel_bound : float or (float, float)
+            CCF scan half-width (km/s).
+        errors_per_order : bool
+            Also compute each order's ML uncertainty.
+        combine_ccfs : bool
+            If True, combine every epoch's per-order CCFs by maximum
+            likelihood (Zucker 2003) and read the RV and its uncertainty from
+            the combined CCF. If False, make only the per-order measurements.
+        velocity_convention : {'cz', 'relativistic'}
+            Doppler convention of the RVs (see ``CCF1d.cross_correlate``).
+
+        Returns
+        -------
+        Observations
+            self, with these attributes set:
+
+            ``ccf_list``
+                The CCF1d objects, one per epoch.
+            ``vels_per_order``, ``evels_per_order``, ``ccf_peaks_per_order``
+                (epochs x orders) arrays: per-order RVs (km/s), their
+                uncertainties (km/s; NaN unless ``errors_per_order``) and CCF
+                peaks.
+            ``vels``, ``evels``, ``ccf_peaks``
+                Per-epoch RV (km/s), its ML uncertainty (km/s) and the CCF
+                peak, from the combined CCF. None when ``combine_ccfs`` is
+                False: an average of the per-order RVs is left to the caller,
+                as their scatter is not an uncertainty.
+
+            With ``combine_ccfs``, ``time_series.calculated_vrad_list`` and
+            ``time_series.errors`` are set to copies of ``vels`` and
+            ``evels``, so the periodograms use the measured RVs; without,
+            they are emptied rather than left holding an earlier run's RVs.
         '''
         spectra = self._spectra('RV calculation')
 
@@ -292,7 +408,8 @@ class Observations:
             ccf = CCF1d().cross_correlate(spec, template,
                                           dv=dv,
                                           vel_bound=vel_bound,
-                                          errors_per_order=errors_per_order)
+                                          errors_per_order=errors_per_order,
+                                          velocity_convention=velocity_convention)
             if combine_ccfs:
                 ccf.combine()
             ccfs.append(ccf)
@@ -319,34 +436,50 @@ class Observations:
 # =============================================================================
     def calc_rv_against_two_templates(self, template1, template2, dv=0.1,
                                       vel_bound=150, dvel=None, sigma=None,
-                                      nonneg=True, **kwargs):
+                                      nonneg=True, velocity_convention='cz', **kwargs):
         '''
-        Double-lined (SB2) radial velocities for the whole time series, using
-        TODCOR against two resting templates.
+        Double-lined (SB2) radial velocities of every epoch, by TODCOR.
 
-        The single-lined counterpart is calc_rv_against_template. Each epoch is
-        fitted independently -- orbital motion changes (v1, v2), so epochs are
-        never pooled; the orders within an epoch are pooled into one joint
-        (v1, v2) fit by CCF2d.
+        The single-lined counterpart is ``calc_rv_against_template``. Each
+        epoch is fitted independently -- orbital motion changes (v1, v2), so
+        epochs are never pooled; the orders within an epoch are pooled into
+        one joint (v1, v2) fit by ``CCF2d.cross_correlate``.
 
-        The two components' RVs stay on this object: time_series.
-        calculated_vrad_list (one RV per epoch, read by the periodograms) is
-        left untouched. To run a periodogram on one component, assign it there
-        explicitly, e.g. ``obs.time_series.calculated_vrad_list = obs.vels1``.
+        The two components' RVs stay on this object:
+        ``time_series.calculated_vrad_list`` (one RV per epoch, read by the
+        periodograms) is left untouched. To run a periodogram on one
+        component, assign it there explicitly, e.g.
+        ``obs.time_series.calculated_vrad_list = obs.vels1``.
 
-        :param: template1, template2 - Template objects for the primary and the
-                                       secondary component.
-        :param: dv, vel_bound, dvel, sigma, nonneg - parameters for
-                                       CCF2d.cross_correlate (km/s), see
-                                       the documentation therein. Remaining
-                                       keyword arguments are passed through --
-                                       including keep_windows, which defaults
-                                       to False here (retaining spectrum-sized
-                                       arrays for every epoch fills memory).
+        Parameters
+        ----------
+        template1, template2 : Template
+            The primary's and the secondary's templates, at rest.
+        dv : float
+            Log-lambda grid step (km/s) for epochs not already on one.
+        vel_bound : float or (float, float)
+            Trial-velocity range (km/s) of both components.
+        dvel : float, optional
+            Step of the coarse trial-velocity map (km/s); default 1 km/s.
+        sigma : float or array_like, optional
+            Per-native-pixel noise (flux units), scalar or per order; None
+            (default) estimates each order's noise from its residual.
+        nonneg : bool
+            Constrain both amplitudes to be non-negative.
+        velocity_convention : {'cz', 'relativistic'}
+            Doppler convention of the RVs (see ``CCF2d.cross_correlate``).
+        **kwargs
+            Passed to ``CCF2d.cross_correlate`` (e.g. ``alpha``,
+            ``zeta_max``, ``orders``); ``keep_windows`` defaults to False
+            here, as keeping spectrum-sized arrays for every epoch fills
+            memory.
 
-        :return: self, with 'vels1'/'vels2' (km/s), their uncertainties
-                 'evels1'/'evels2' (km/s, Cramer-Rao), the amplitude pairs
-                 'amps1'/'amps2', and the list of CCF2d objects 'ccf2d_list'.
+        Returns
+        -------
+        Observations
+            self, with ``vels1`` / ``vels2`` (km/s), their Cramer-Rao
+            uncertainties ``evels1`` / ``evels2`` (km/s), the amplitudes
+            ``amps1`` / ``amps2`` and the CCF2d objects ``ccf2d_list``.
         '''
         spectra = self._spectra('RV calculation')
         kwargs.setdefault('keep_windows', False)
@@ -357,6 +490,7 @@ class Observations:
                                         dvel=dvel,
                                         sigma=sigma,
                                         nonneg=nonneg,
+                                        velocity_convention=velocity_convention,
                                         **kwargs)
                 for spec in tqdm(spectra)]
 
@@ -375,26 +509,31 @@ class Observations:
 # =============================================================================
     def build_tiravel_template(self, velocities, **kwargs):
         '''
-        Build a template out of the observations themselves (TIRAVEL), at a
-        given set of trial velocities.
+        Build a template out of the observations themselves (TIRAVEL).
 
-        The template-independent counterpart of calc_rv_against_template: no
-        library template is needed. TIRAVEL shifts every epoch to rest,
-        measures how well the set aligns, and co-adds the epochs with
-        maximum-likelihood weights. Typical use is to bootstrap -- measure
-        ball-park velocities against any rough template, build the TIRAVEL
-        template from them, then re-measure against it.
+        The template-independent counterpart of ``calc_rv_against_template``:
+        no library template is needed. TIRAVEL shifts every epoch to rest at
+        the given trial velocities, measures how well the set aligns, and
+        co-adds the epochs with maximum-likelihood weights. Typical use is to
+        bootstrap -- measure ball-park velocities against any rough template,
+        build the TIRAVEL template from them, then re-measure against it.
 
-        :param: velocities - a list of radial velocities (km/s), one per epoch.
-                             Only their differences matter: the template's rest
-                             frame inherits this set's zero point.
-        :param: kwargs     - passed through to TIRAVEL.build_template (orders,
-                             reference, margin, kind, keep_aligned).
+        Parameters
+        ----------
+        velocities : array_like
+            One radial velocity per epoch (km/s). Only their differences
+            matter: the template's rest frame inherits this set's zero point.
+        **kwargs
+            Passed to ``TIRAVEL.build_template`` (orders, reference, margin,
+            kind, keep_aligned).
 
-        :return: self, with 'tiravel' (the TIRAVEL object, carrying .rho,
-                 .weights, .correlation and .diagnostics) and
-                 'tiravel_template' (its Template, ready for
-                 calc_rv_against_template).
+        Returns
+        -------
+        Observations
+            self, with ``tiravel`` (the TIRAVEL object, carrying ``rho``,
+            ``weights``, ``correlation`` and ``diagnostics``) and
+            ``tiravel_template`` (its Template, ready for
+            ``calc_rv_against_template``).
         '''
         spectra = self._spectra('TIRAVEL')
         self.tiravel = TIRAVEL().build_template(spectra, velocities, **kwargs)
@@ -404,13 +543,29 @@ class Observations:
 
 # =============================================================================
 # =============================================================================
-    def calc_bis(self, bisect_val=[0.35, 0.95], use_combined=True):
+    def calc_bis(self, bisect_val=(0.35, 0.95), use_combined=True):
         '''
-        This function computes BIS from the calculated CCF.
+        Bisector span (BIS) of every epoch's CCF, from ``ccf_list``.
 
-        :param: bisect_val - the values at which to calculate the bisectors
-        :param: use_combined - Boolean. Use the combined CCFs or multiorder.
-        :return: self - added the BIS values (km/s), 'BIS' and 'eBIS'.
+        .. warning:: The BIS formula (``unicor.bisector_span``) is known to be
+           incorrect and is under review: it differences CCF values at the
+           bisector levels, not velocities. It is pinned, unchanged, for a
+           later fix; do not use its output scientifically. The
+           ``use_combined=False`` path is broken too (it raises
+           AttributeError).
+
+        Parameters
+        ----------
+        bisect_val : (float, float)
+            Lower and upper bisector levels, as fractions of the CCF maximum.
+        use_combined : bool
+            Use each epoch's combined CCF (requires
+            ``calc_rv_against_template`` with ``combine_ccfs=True``).
+
+        Returns
+        -------
+        Observations
+            self, with ``BIS`` and ``eBIS`` arrays, one value per epoch.
         '''
         ccf_list = self.ccf_list
         BIS = np.full(len(ccf_list), np.nan)
@@ -441,12 +596,19 @@ class Observations:
 # =============================================================================
     def init_periodicity_detector(self, freq_range=(1/1000, 1), periodogram_grid_resolution=1000):
         """
-        Create ``self.periodicity_detector``, a PeriodicityDetector on this
-        object's time series, ready to compute periodograms.
+        Create ``self.periodicity_detector`` on this object's time series.
 
-        :param freq_range: (f_min, f_max), the frequency grid range (1/day).
-        :param periodogram_grid_resolution: float, grid points per 1/day.
-        :return: self.
+        Parameters
+        ----------
+        freq_range : (float, float)
+            (f_min, f_max) of the frequency grid (1/day); f_min > 0.
+        periodogram_grid_resolution : float
+            Grid points per 1/day (the grid step is its inverse).
+
+        Returns
+        -------
+        Observations
+            self.
         """
         self.periodicity_detector = PeriodicityDetector(time_series=self.time_series, freq_range=freq_range,
                                                         periodogram_grid_resolution=periodogram_grid_resolution)
@@ -456,8 +618,11 @@ class Observations:
 # =============================================================================
     def _relative_times(self):
         """
-        Replace ``time_list`` by the days past ``first_time``, the integer day
-        of the first visit.
+        Make the times relative: subtract ``int(min(time_list))``.
+
+        ``first_time`` keeps the subtracted integer day (truncated toward
+        zero), so ``time_list`` holds days past it, starting within one day
+        of 0. The periodograms only use time differences.
         """
         float_times = [0 for _ in range(self.sample_size)]
         start_time = int(min(self.time_list))
@@ -477,15 +642,31 @@ class Observations:
         RVs and errors; time_list, spec_list, vrad_list, bcv, snr, air_mass;
         and any computed RV products such as vels/evels/ccf_list).
 
-        :param max_vel: float or None, keep epochs with RV <= max_vel (km/s).
-        :param min_vel: float or None, keep epochs with RV >= min_vel (km/s).
-        :param max_time: float or None, keep epochs with time <= max_time (days).
-        :param nan_flag: bool, drop epochs whose RV is NaN. Ignored when no RVs
-                         are stored in time_series.calculated_vrad_list.
-        :param sample_rate: nonzero int; k > 0 keeps every k-th epoch, k < 0
-                            drops every |k|-th epoch.
-        :raises ValueError: for sample_rate=0, for an RV cut with no stored RVs,
-                            or when a per-epoch array has the wrong length.
+        Parameters
+        ----------
+        max_vel : float, optional
+            Keep epochs with RV <= max_vel (km/s).
+        min_vel : float, optional
+            Keep epochs with RV >= min_vel (km/s).
+        max_time : float, optional
+            Keep epochs with time <= max_time (days, as in ``time_list``).
+        nan_flag : bool
+            Drop epochs whose RV is NaN. Ignored when no RVs are stored in
+            ``time_series.calculated_vrad_list``.
+        sample_rate : int
+            Nonzero; k > 0 keeps every k-th epoch, k < 0 drops every |k|-th
+            epoch.
+
+        Returns
+        -------
+        None
+            The object is filtered in place.
+
+        Raises
+        ------
+        ValueError
+            For sample_rate=0, for an RV cut with no stored RVs, or when a
+            per-epoch array has the wrong length.
         """
         ts = self.time_series
         n = len(ts.times)

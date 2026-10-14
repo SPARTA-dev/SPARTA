@@ -25,32 +25,48 @@ from sparta.timeseries import is_numeric_scalar
 
 
 class PeriodicityDetector:
+    '''
+    Periodograms of one TimeSeries on one frequency grid.
+
+    Attributes
+    ----------
+    time_series : TimeSeries
+        The series searched (times in days).
+    frequency_grid : ndarray
+        Trial frequencies (1/day).
+    results_frequency, results_power : dict of str to ndarray
+        Every periodogram computed, under its name: 'GLS'; 'PDC_unbiased' /
+        'PDC_biased'; 'PDC_errors_unbiased' / 'PDC_errors_biased'
+        (error-aware PDC); 'USURPER_unbiased' / 'USURPER_biased';
+        'partial_shift' / 'partial_shape'. Frequencies in 1/day, power
+        dimensionless.
+    period_truth : list of float or None
+        Known periods (days), marked by ``plot_periodograms``; default None.
+    '''
 
     # =============================================================================
     # =============================================================================
     def __init__(self, **kwargs):
         '''
-        Input: keyword arguments.
+        Set up the frequency grid; keyword arguments only.
 
-              time_series: TimeSeries object, the time series for periodicity detection.
+        Parameters
+        ----------
+        time_series : TimeSeries
+            The time series to search.
+        freq_range : (float, float)
+            (f_min, f_max), the grid boundaries (1/day); required. f_min must
+            be > 0, since the phase distance takes dt mod (1/f).
+        periodogram_grid_resolution : float
+            Grid points per 1/day; required. The grid step is
+            1 / resolution (1/day), and f_max is excluded.
 
-              freq_range: (f_min, f_max) tuple, frequency grid boundaries in
-                          1/day (required); f_min must be > 0, since the phase
-                          distance takes dt mod (1/f).
-              periodogram_grid_resolution: float, grid points per 1/day
-                          (required); the grid step is 1/resolution in 1/day.
-
-        The grid is ``self.frequency_grid`` (1/day). Every periodogram is
-        stored under its name in ``self.results_frequency`` and
-        ``self.results_power``: 'GLS'; 'PDC_unbiased' / 'PDC_biased';
-        'PDC_errors_unbiased' / 'PDC_errors_biased' (error-aware PDC);
-        'USURPER_unbiased' / 'USURPER_biased'; 'partial_shift' /
-        'partial_shape'. ``self.period_truth`` (a list of periods,
-        days; default None) marks known periods in ``plot_periodograms``.
-
-        Raises TypeError if freq_range or periodogram_grid_resolution is missing,
-        and ValueError if they do not define a non-empty grid of positive
-        frequencies.
+        Raises
+        ------
+        TypeError
+            If ``freq_range`` or ``periodogram_grid_resolution`` is missing.
+        ValueError
+            If they do not define a non-empty grid of positive frequencies.
         '''
         if 'time_series' in kwargs:
             self.time_series = kwargs['time_series']
@@ -79,18 +95,33 @@ class PeriodicityDetector:
     # =============================================================================
     def calc_pdc(self, calc_biased_flag=False, calc_unbiased_flag=True, errors=False):
         '''
-        PDC periodogram of a scalar series: the values themselves, or, for a
-        spectrum series, the RVs in time_series.calculated_vrad_list.
+        Phase-distance-correlation (PDC) periodogram of a scalar series.
 
-        :param calc_biased_flag: bool, compute the biased PDC ('PDC_biased').
-        :param calc_unbiased_flag: bool, compute the unbiased PDC ('PDC_unbiased').
-        :param errors: bool, use the error-aware distance (Binnenfeld, Shahaf &
-                       Zucker 2024, Eq. 3) with time_series.errors (same unit
-                       as the values); the results are then stored as
-                       'PDC_errors_biased' / 'PDC_errors_unbiased', so both
-                       variants can sit side by side.
-        :raises ValueError: for a spectrum series without RVs, or n <= 3 for
-                            the unbiased PDC.
+        Runs on the values themselves or, for a spectrum series, on the RVs
+        in ``time_series.calculated_vrad_list`` (Zucker 2018).
+
+        Parameters
+        ----------
+        calc_biased_flag : bool
+            Compute the biased (double-centered) PDC, 'PDC_biased'.
+        calc_unbiased_flag : bool
+            Compute the unbiased (U-centered) PDC, 'PDC_unbiased'.
+        errors : bool
+            Use the error-aware distance (Binnenfeld, Shahaf & Zucker 2024,
+            Eq. 3) with ``time_series.errors`` (the values' unit); the results
+            are then stored as 'PDC_errors_biased' / 'PDC_errors_unbiased', so
+            both variants can sit side by side.
+
+        Returns
+        -------
+        None
+            The power (dimensionless) on ``frequency_grid`` (1/day) is stored
+            in ``results_power``.
+
+        Raises
+        ------
+        ValueError
+            For a spectrum series without RVs, or n <= 3 for the unbiased PDC.
         '''
         y = self._scalar_values('PDC')
         if errors:
@@ -104,13 +135,30 @@ class PeriodicityDetector:
     # =============================================================================
     def calc_usurper(self, calc_biased_flag=False, calc_unbiased_flag=True):
         '''
-        USuRPER periodogram of a single-order spectrum series: the PDC of the
-        spectra's chord distances on the unit sphere.
+        USuRPER periodogram of a single-order spectrum series.
 
-        :param calc_biased_flag: bool, compute the biased statistic ('USURPER_biased').
-        :param calc_unbiased_flag: bool, compute the unbiased one ('USURPER_unbiased').
-        :raises ValueError: for a scalar series, multi-order or non-overlapping
-                            spectra, or n <= 3 for the unbiased statistic.
+        The PDC of the spectra's chord distances on the unit sphere
+        (Binnenfeld, Shahaf & Zucker 2020): sensitive to any periodic change
+        of the spectra, shifts and shape changes alike, with no template.
+
+        Parameters
+        ----------
+        calc_biased_flag : bool
+            Compute the biased statistic, 'USURPER_biased'.
+        calc_unbiased_flag : bool
+            Compute the unbiased one, 'USURPER_unbiased'.
+
+        Returns
+        -------
+        None
+            The power on ``frequency_grid`` (1/day) is stored in
+            ``results_power``.
+
+        Raises
+        ------
+        ValueError
+            For a scalar series, multi-order or non-overlapping spectra, or
+            n <= 3 for the unbiased statistic.
         '''
         if is_numeric_scalar(self.time_series.vals[0]):
             raise ValueError('USURPER is available for spectrum time-series only')
@@ -132,10 +180,22 @@ class PeriodicityDetector:
         spectra are not modified); the shift distance is |v_i - v_j|. Both are
         recomputed on every call.
 
-        :param partial_type: 'shift' or 'shape'; the result is stored as
-                             'partial_<partial_type>'.
-        :raises ValueError: for an unknown partial_type, a scalar series,
-                            multi-order spectra, or not one RV per epoch.
+        Parameters
+        ----------
+        partial_type : {'shift', 'shape'}
+            Which partial periodogram; stored as 'partial_<partial_type>'.
+
+        Returns
+        -------
+        None
+            The power on ``frequency_grid`` (1/day) is stored in
+            ``results_power``.
+
+        Raises
+        ------
+        ValueError
+            For an unknown ``partial_type``, a scalar series, multi-order
+            spectra, or not one RV per epoch.
         '''
         if partial_type not in ("shift", "shape"):
             raise ValueError(f"partial_type must be 'shift' or 'shape', not {partial_type!r}.")
@@ -165,8 +225,18 @@ class PeriodicityDetector:
         Generalized Lomb-Scargle periodogram (astropy) of a scalar series: the
         values themselves, or the RVs in time_series.calculated_vrad_list.
 
-        :return: (frequency (1/day), power) arrays, also stored as 'GLS'.
-        :raises ValueError: for a spectrum series without RVs.
+        Returns
+        -------
+        frequency : ndarray
+            A copy of ``frequency_grid`` (1/day).
+        power : ndarray
+            GLS power (astropy's default 'standard' normalization). Both are
+            also stored as 'GLS'.
+
+        Raises
+        ------
+        ValueError
+            For a spectrum series without RVs.
         '''
         frequency = self.frequency_grid.copy()
         power = LombScargle(self.time_series.times, self._scalar_values('GLS')).power(frequency)
@@ -180,10 +250,21 @@ class PeriodicityDetector:
         '''
         The scalar values a periodogram runs on.
 
-        :param method: str, the periodogram's name, for the error message.
-        :return: the values of a scalar series, or the RVs (km/s) stored for a
-                 spectrum series.
-        :raises ValueError: for a spectrum series with no RVs stored.
+        Parameters
+        ----------
+        method : str
+            The periodogram's name, for the error message.
+
+        Returns
+        -------
+        list or ndarray
+            The values of a scalar series, or the RVs (km/s) stored for a
+            spectrum series.
+
+        Raises
+        ------
+        ValueError
+            For a spectrum series with no RVs stored.
         '''
         if is_numeric_scalar(self.time_series.vals[0]):
             return self.time_series.vals
@@ -207,6 +288,7 @@ class PeriodicityDetector:
             self._store(name + "_unbiased", pdc.pdc_power(times, self.frequency_grid, centered))
 
     def _store(self, name, power):
+        '''Store ``power`` and a copy of the frequency grid under ``name``.'''
         self.results_frequency[name] = self.frequency_grid.copy()
         self.results_power[name] = power
 
@@ -214,8 +296,25 @@ class PeriodicityDetector:
     # =============================================================================
     def calc_pdc_pval(self, values, inverse_sf=False):
         '''
-        This function returns the p-value of a given peak value in the PDC periodogram,
-        based on Shen et. al. 2019 (https://arxiv.org/abs/1912.12150).
+        Convert unbiased PDC power to p-values, or p-values to power levels.
+
+        Uses the chi-square approximation of the distance-correlation test
+        (Shen et al. 2019, arXiv:1912.12150):
+        p = chi2_1.sf(n * power + 1), n the number of epochs. It holds for
+        the unbiased statistics at a single trial frequency; it is not a
+        false-alarm probability over the whole grid.
+
+        Parameters
+        ----------
+        values : iterable of float
+            PDC power values, or p-values if ``inverse_sf``.
+        inverse_sf : bool
+            If True, return the power level of each p-value instead.
+
+        Returns
+        -------
+        ndarray
+            The p-values, or the power levels.
         '''
 
         N = len(self.time_series.times)
@@ -235,12 +334,20 @@ class PeriodicityDetector:
         '''
         Plot the calculated periodograms, one panel each.
 
-        :param plot_vals: bool, add a panel of the scalar values (or stored
-                          RVs) against time, folded at period_truth[0] (days)
-                          when period_truth is set.
-        :param annotate_pval: iterable of p-values whose PDC power levels are
-                              drawn on the PDC/USuRPER panels.
-        :param figsize: (width, height per panel), inches.
+        Parameters
+        ----------
+        plot_vals : bool
+            Add a panel of the scalar values (or stored RVs, km/s) against
+            time (days), folded at ``period_truth[0]`` when that is set.
+        annotate_pval : iterable of float, optional
+            p-values whose power levels (``calc_pdc_pval``) are drawn on the
+            unbiased PDC / USuRPER / partial panels.
+        figsize : (float, float)
+            Width and height per panel (inches).
+
+        Returns
+        -------
+        None
         '''
 
         index = 0
@@ -292,11 +399,22 @@ def _single_order_arrays(sp_list):
     The wavelength and flux arrays of single-order spectra, validated for the
     common-grid resampling.
 
-    :param sp_list: list of Spectrum-like objects (``.wv``/``.sp`` lists of
-                    per-order arrays); wavelengths in Angstrom.
-    :return: (waves, fluxes) -- lists of 1-D float arrays, one per spectrum.
-    :raises ValueError: if a spectrum has more than one order, or its
-                        wavelengths are not strictly increasing.
+    Parameters
+    ----------
+    sp_list : list of Spectrum
+        Spectrum-like objects (``.wv`` / ``.sp`` lists of per-order arrays);
+        wavelengths in Angstrom.
+
+    Returns
+    -------
+    waves, fluxes : list of ndarray
+        1-D arrays, one per spectrum.
+
+    Raises
+    ------
+    ValueError
+        If a spectrum has more than one order, or its wavelengths are not
+        strictly increasing.
     '''
     waves, fluxes = [], []
     for i, s in enumerate(sp_list):

@@ -373,6 +373,12 @@ def rv_uncertainty(v, ccf, v_peak, n_eff):
 def bisector_span(v, ccf, n_eff, levels=(0.35, 0.95)):
     """Bisector span (BIS) of a single-peaked CCF and its uncertainty.
 
+    .. warning:: This formula is known to be incorrect and is under review:
+       the bisector midpoints are built from the CCF *values* at the level
+       crossings (``ccf_at`` at each root), not from the crossing velocities,
+       so the result is not a velocity span. It is pinned, unchanged, for a
+       later fix; do not use it scientifically.
+
     Parameters
     ----------
     v : ndarray
@@ -388,8 +394,9 @@ def bisector_span(v, ccf, n_eff, levels=(0.35, 0.95)):
     Returns
     -------
     bis, ebis : float
-        Bisector span and its uncertainty (km/s); NaN when either level does not cut
-        the CCF exactly twice.
+        The span as currently computed (see the warning: not yet a velocity)
+        and its uncertainty (km/s); NaN when either level does not cut the
+        CCF exactly twice.
     """
     v = np.asarray(v, float)
     ccf = np.asarray(ccf, float)

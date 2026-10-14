@@ -18,8 +18,7 @@ Conventions: velocities and the log-λ shift `s` in km/s; ζ (Fourier conjugate)
 in s/km; spectra on a uniform log-λ (constant-velocity-step `dv`) grid, with
 `dv = c·Δ` for the grid's *actual* ln λ step `Δ`; residual flux
 `g = flux − 1`; Fourier grid `np.fft.rfftfreq(N, d=dv)[1:]` (DC dropped,
-positive frequencies only). The math below was independently re-derived and
-verified against the code (2026-07-07).
+positive frequencies only).
 
 ## 1. Model
 
@@ -318,13 +317,14 @@ re-estimation — and χ²_red is a consistency check.
 
 Exact **only** under these; the first is the one to watch:
 
-- **White native noise `σ` per native pixel, resampled once by a linear
-  interpolator.** `oversampling`, `noise_psd` and the native-pixel count
-  behind the CRLB model that resampling (in `CCF2d`: one `Spectrum.interpolate`
-  call from a uniform native grid, probed with unit impulses). **After
+- **White native noise `σ` per native pixel, resampled once by an
+  interpolator linear in the flux.** `oversampling`, `noise_psd` and the
+  native-pixel count behind the CRLB model that resampling (in `CCF2d`: one
+  `Spectrum.interpolate` call from a uniform native grid — the cubic spline of
+  `sparta.spectrum.resample_flux` — probed with unit impulses). **After
   `filter_spectrum` / `preprocess` this calibration does not hold**:
   band-pass filtering, per-order normalisation and the double resampling
-  (`preprocess`'s linear resampling, then `CCF2d`'s log one) remove and
+  (`preprocess`'s linear-λ resampling, then `CCF2d`'s log-λ one) remove and
   correlate noise power that ν and the CRLB do not know about. Measured by
   Monte Carlo on preprocessed spectra: TODCOR RV scatter / eRV = 0.72–0.74,
   i.e. errors ~1.4× too large; UNICOR eRV / RV scatter = 1.17 at

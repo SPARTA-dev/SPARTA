@@ -319,9 +319,20 @@ def upper_envelope(wave, flux, width_A=ENVELOPE_WIDTH_A, percentile=ENVELOPE_PER
 
 def margin_kms(simulation):
     '''
-    Velocity margin (km/s) of the fine grids beyond each order window: the
-    largest shift (|rv| + |bcv|), the rotational and instrumental kernels
-    (vsini + 3 c / R), and ``MARGIN_PAD_KMS`` for the interpolation.
+    Velocity margin of the fine grids beyond each order window.
+
+    The sum of the largest shift (|rv| + |bcv|), the rotational and
+    instrumental kernels (vsini + 3 c / R), and ``MARGIN_PAD_KMS`` for the
+    interpolation.
+
+    Parameters
+    ----------
+    simulation : Simulation
+
+    Returns
+    -------
+    float
+        The margin (km/s).
     '''
     shift = np.max(np.abs(simulation.rv_kms)) + np.max(np.abs(simulation.bcv_kms))
     vsini = max(c.vsini for c in simulation.components)

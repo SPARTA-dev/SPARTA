@@ -23,13 +23,20 @@ import warnings
 from unicor import ccf as unicor_ccf, dsp
 
 class CCF1d:
+    '''
+    UNICOR cross-correlation of one (multi-order) spectrum against a template.
+
+    ``cross_correlate`` fills ``Corr`` (per order); ``combine`` fills
+    ``CorrCombined`` (all orders, by maximum likelihood).
+    '''
     # =============================================================================
     # =============================================================================
     def __init__(self):
         '''
-        No input required. Sets the default CCF velocity step
-        ``self.default_dv`` (0.1 km/s), used when a spectrum carries no
-        log-lambda grid step of its own.
+        Set the default CCF velocity step ``self.default_dv`` (0.1 km/s).
+
+        It is used when neither ``dv`` nor a log-lambda grid of the spectrum
+        sets the step.
         '''
         self.default_dv = 0.1 * u.kilometer / u.second
 
@@ -40,32 +47,6 @@ class CCF1d:
                         velocity_convention='cz'):
         '''
         Cross-correlate every order of a spectrum with a template (UNICOR).
-
-        :param: spectrum - the observed Spectrum (not modified).
-        :param: template - the Template for the CCF (not modified).
-        :param: dv       - scalar. If the spectrum is not logarithmically
-                         evenly-spaced it is resampled, with a stepsize
-                         determined according to dv (in km/s). Default 0.1
-        :param: vel_bound - scalar or [lo, hi] (km/s). The CCF is scanned over
-                         [-V, V], V the largest |vel_bound|. Default 150 km/s,
-                         the same in CCF2d and Observations: it spans the
-                         RV range of most binaries, and it equals the default
-                         margin of Template.cut_multiorder_like, so a template
-                         cut with the defaults covers every observed pixel at
-                         every lag.
-        :param: errors_per_order - Boolean. Indicates if the error should be
-                         calculated (from maximum likelihood) to each
-                         order.
-        :param: velocity_convention - 'cz' (default) or 'relativistic': how a
-                         lag maps to a radial velocity (see
-                         ``unicor.dsp.doppler_factor``). Lag k multiplies the
-                         wavelength by exp(k * Delta), Delta the actual
-                         ln(lambda) step of the grid, and is reported as
-                         c * expm1(k * Delta) ('cz', lambda_obs/lambda_rest =
-                         1 + v/c; IAU 2000, IRAF fxcor) or c * tanh(k * Delta)
-                         ('relativistic'). The two differ by ~v^2/2c (37.5 m/s
-                         at 150 km/s); reading the lag as k * dv was off from
-                         'cz' by -v^2/2c.
 
         The template is resampled onto each order's log-lambda grid continued
         by K = round(vel_bound / dv) steps on each side, and every lag is the
@@ -101,19 +82,71 @@ class CCF1d:
         filter_highcut=0.9, i.e. the errors are 17-38% conservative. Calibrate by
         simulation for preprocessed spectra.
 
-        :return: self.Corr - a dictionary with the following fields:
-                         'vel' - velocity vector at which correlation
-                                 was calculated (increasing, 0 at the
-                                 central lag; not exactly uniform).
-                         'corr'- correlation matrix,
-                                 (# orders X length of velocity vector)
-                         'RV'  - Derived radial velocity
-                         'eRV' - Corresponding uncertainty.
-                         'peakCorr' - Corresponding CCF peak.
-                         'n_eff' - effective number of independent spectral
-                                   bins per order (dimensionless).
-                         'velocity_convention' - the convention of 'vel'
-                                   and 'RV'.
+        Parameters
+        ----------
+        spectrum : Spectrum
+            The observation (not modified), barycentric-corrected
+            (``Observations`` does this on ingest). Resampled onto a log-lambda grid
+            of step ``dv`` unless it already is on one (``Info['GridType']``
+            'log'), in which case its own step is the lag step.
+        template : Template
+            The template, at rest (not modified). A single-order model serves
+            every order; a multi-order one is matched order by order.
+        dv : float or astropy.units.Quantity, optional
+            Log-lambda grid step (km/s if a plain number) for a spectrum not
+            already on one. Default ``self.default_dv``, 0.1 km/s.
+        vel_bound : float, (float, float) or astropy.units.Quantity
+            The CCF is scanned over [-V, V] (km/s if plain numbers), V the
+            largest ``|vel_bound|``. Default 150 km/s, the same in CCF2d and
+            Observations: it spans the RV range of most binaries, and it
+            equals the default margin of ``Template.cut_multiorder_like``, so
+            a template cut with the defaults covers every observed pixel at
+            every lag.
+        errors_per_order : bool
+            Also compute each order's ML uncertainty (otherwise 'eRV' is
+            NaN; the combined uncertainty comes from ``combine``).
+        velocity_convention : {'cz', 'relativistic'}
+            How a lag maps to a radial velocity (see
+            ``unicor.dsp.doppler_factor``). Lag k multiplies the wavelength by
+            exp(k Delta), Delta the actual ln(lambda) step of the grid, and is
+            reported as c expm1(k Delta) ('cz', lambda_obs/lambda_rest =
+            1 + v/c; IAU 2000, IRAF fxcor) or c tanh(k Delta)
+            ('relativistic'). For the same spectrum the 'cz' velocity exceeds
+            the 'relativistic' one by ~v^2/2c (37.5 m/s at 150 km/s).
+
+        Returns
+        -------
+        CCF1d
+            self, with ``n_ord`` and ``Corr``, a dict:
+
+            'vel'
+                Lag velocities (Quantity, km/s): increasing, 0 at the central
+                lag, not exactly uniform.
+            'corr'
+                (n_orders, n_lags) Pearson correlation per order; NaN rows for
+                orders the template does not cover.
+            'RV', 'eRV', 'peakCorr'
+                (n_orders, 1) per-order RV (km/s), its ML uncertainty (km/s;
+                NaN unless ``errors_per_order``) and CCF peak; NaN where the
+                peak cannot be located (e.g. at the scan edge).
+            'n_eff'
+                (n_orders,) effective number of independent spectral bins.
+            'units'
+                The unit of 'vel' (km/s).
+            'velocity_convention'
+                The convention of 'vel' and 'RV'.
+
+        Raises
+        ------
+        ValueError
+            If ``vel_bound`` is below one grid step, or an order's grid is not
+            uniform in ln(lambda) with the declared step, or the orders' steps
+            differ.
+
+        Warns
+        -----
+        UserWarning
+            For each order the template does not cover across the scan.
         '''
 
         # Initialize:
@@ -240,21 +273,21 @@ class CCF1d:
 # =============================================================================
     def combine(self):
         '''
-        This routine takes a matrix of CCF values (# orders X length of velocity vector)
-        that were calculated by the cross_correlate routine, combines the CCFs into
-        a single one, based on a maximum-likelihood approach (Zucker, 2003, MNRAS).
+        Combine the per-order CCFs into one by maximum likelihood (Zucker 2003).
+
         Orders are weighted by their effective number of independent bins
-        (``self.Corr['n_eff']``). The RV is derived from the peak of the
-        cross-correlation, and its uncertainty from the curvature of the combined
-        CCF with the total number of bins.
+        (``self.Corr['n_eff']``). The RV is read from the peak of the combined
+        CCF, and its uncertainty from its curvature with the total number of
+        bins. Run ``cross_correlate`` first; all orders share its lag axis.
 
-        :param: none.
-        :return: A 'CorrCombined' dictionary, with derived combined correlation,
-                derived velocity and uncertainty. The structure is similar
-                to the 'Corr' dictionary; 'n_eff' is the total number of
-                independent bins, 'velocity_convention' that of 'Corr'.
-
-        NOTE: the number of lags is assumed to be identical for all orders
+        Returns
+        -------
+        CCF1d
+            self, with ``CorrCombined``, a dict like ``Corr`` with scalar
+            entries: 'vel', 'corr' (the combined CCF, (n_lags,)), 'RV' and
+            'eRV' (km/s), 'peakCorr', 'units', 'n_eff' (the total) and
+            'velocity_convention'. 'RV', 'eRV' and 'peakCorr' are NaN when the
+            combined peak cannot be located.
         '''
 
         velocities = self.Corr['vel']
@@ -298,16 +331,35 @@ class CCF1d:
         by :meth:`cross_correlate` (``self.Corr['n_eff']``), summed over the
         orders behind ``y``.
 
-        :param x: velocity lags (Quantity or km/s array).
-        :param y: CCF values at ``x``.
-        :param vel: if given, the uncertainty is evaluated at this velocity
-                    (km/s) instead of at the fitted peak, and no peak value
-                    is returned.
-        :param n_ord: number of orders behind ``y``: all of them (the default,
-                      ``self.n_ord``), i.e. the combined CCF. A single order of
-                      a multi-order spectrum is ambiguous here -- use
-                      ``unicor.rv_uncertainty`` with ``self.Corr['n_eff'][i]``.
-        :return: (RV, eRV, ccf_peak, unit) -- velocities in the unit of ``x``.
+        Parameters
+        ----------
+        x : astropy.units.Quantity or array_like
+            Velocity lags (km/s).
+        y : array_like
+            CCF values at ``x``.
+        vel : float, optional
+            If given, the uncertainty is evaluated at this velocity (km/s)
+            instead of at the fitted peak, and the peak value is NaN.
+        n_ord : int, optional
+            Number of orders behind ``y``: all of them (the default,
+            ``self.n_ord``), i.e. the combined CCF. A single order of a
+            multi-order spectrum is ambiguous here -- use
+            ``unicor.rv_uncertainty`` with ``self.Corr['n_eff'][i]``.
+
+        Returns
+        -------
+        RV, eRV : float
+            The velocity and its uncertainty (km/s).
+        ccf_peak : float
+            The CCF at the peak (NaN if ``vel`` was given).
+        unit : astropy.units.Unit or None
+            The unit of ``x``; None for a plain array.
+
+        Raises
+        ------
+        ValueError
+            Before ``cross_correlate``, for a subset ``n_ord``, or if the peak
+            cannot be located.
         """
         x_kms = x.value if isinstance(x, u.Quantity) else np.asarray(x, float)
         if vel is None:
@@ -326,13 +378,28 @@ class CCF1d:
         """
         Bisector span of a single-peaked CCF (see :func:`unicor.bisector_span`).
 
-        :param x: velocity lags (Quantity).
-        :param y: CCF values at ``x``.
-        :param bisect_val: lower and upper bisector levels, as fractions of the
-                           CCF maximum.
-        :param n_ord: number of orders behind ``y``; see :meth:`extract_rv`.
-        :return: (BIS, eBIS, unit); (nan, nan, None) when a level does not cut
-                 the CCF exactly twice.
+        .. warning:: The BIS formula is known to be incorrect and is under
+           review: it differences CCF values at the bisector levels, not
+           velocities. It is pinned, unchanged, for a later fix; do not use
+           its output scientifically.
+
+        Parameters
+        ----------
+        x : astropy.units.Quantity
+            Velocity lags (km/s).
+        y : array_like
+            CCF values at ``x``.
+        bisect_val : (float, float)
+            Lower and upper bisector levels, as fractions of the CCF maximum.
+        n_ord : int, optional
+            Number of orders behind ``y``; see :meth:`extract_rv`.
+
+        Returns
+        -------
+        BIS, eBIS : float
+            NaN when a level does not cut the CCF exactly twice.
+        unit : astropy.units.Unit or None
+            The unit of ``x``; None with the NaN result.
         """
         BIS, eBIS = unicor_ccf.bisector_span(x.value, y, self._n_eff_total(n_ord),
                                              levels=bisect_val)
@@ -344,11 +411,21 @@ class CCF1d:
         """
         Independent spectral bins behind a CCF built from ``n_ord`` orders.
 
-        :param n_ord: number of orders; None means all of them.
-        :return: float, the summed ``self.Corr['n_eff']``.
-        :raises ValueError: before :meth:`cross_correlate` has run, or when
-                            ``n_ord`` names a strict subset of the orders
-                            (which orders is then unknown).
+        Parameters
+        ----------
+        n_ord : int or None
+            Number of orders; None means all of them.
+
+        Returns
+        -------
+        float
+            The summed ``self.Corr['n_eff']``.
+
+        Raises
+        ------
+        ValueError
+            Before :meth:`cross_correlate` has run, or when ``n_ord`` names a
+            strict subset of the orders (which orders is then unknown).
         """
         if not hasattr(self, 'Corr'):
             raise ValueError("run cross_correlate first: the uncertainty needs "
@@ -364,12 +441,22 @@ class CCF1d:
         """
         Second-order (parabolic) estimate of the CCF around its peak.
 
-        :param vels: velocity lags (Quantity or km/s array).
-        :param ccf: CCF values at ``vels``.
-        :param v: if given, return the interpolated CCF value at this velocity
-                  (km/s) instead of the peak.
-        :param npts: odd number of points around the peak used in the fit.
-        :return: (v_peak, ccf_peak) in km/s, or the CCF value at ``v``.
+        Parameters
+        ----------
+        vels : astropy.units.Quantity or array_like
+            Velocity lags (km/s).
+        ccf : array_like
+            CCF values at ``vels``.
+        v : float, optional
+            If given, return the interpolated CCF value at this velocity
+            (km/s) instead of the peak.
+        npts : int
+            Odd number of points around the peak used in the fit.
+
+        Returns
+        -------
+        (float, float) or float
+            (v_peak (km/s), ccf_peak), or the CCF value at ``v``.
         """
         if isinstance(vels, u.Quantity):
             vels = vels.value
@@ -382,12 +469,22 @@ class CCF1d:
     # =============================================================================
     def plot(self, plot_combined=True, plot_orders=True, orders=None, alpha=0.125):
         '''
-        Produce plots of the calculated CCFs.
-        :param plot_combined: Boolean. Plot the combined CCF (if exists)
-        :param plot_orders: Boolean. Plot the ccf of each order required.
-        :param orders: a specific list of order numbers to plot (default all).
-        :param alpha: transparency of the per-order CCFs.
-        :return: fig object
+        Plot the per-order and combined CCFs against velocity.
+
+        Parameters
+        ----------
+        plot_combined : bool
+            Plot the combined CCF and its RV +- eRV band, if ``combine`` ran.
+        plot_orders : bool
+            Plot the CCF of each order in ``orders``.
+        orders : sequence of int, optional
+            Orders to plot; default all.
+        alpha : float
+            Transparency of the per-order CCFs.
+
+        Returns
+        -------
+        matplotlib.figure.Figure
         '''
         if orders is None:
             orders = np.arange(self.n_ord)
@@ -419,13 +516,26 @@ class CCF1d:
 def _template_covered_pixels(w_ext, t_wave, n_lags):
     """Observed pixels whose template is known at every lag of the scan.
 
-    :param w_ext: the order's log-lambda grid extended by ``n_lags`` steps on
-                  each side (Angstrom), see ``unicor.extend_log_grid``.
-    :param t_wave: the template's wavelengths (Angstrom, increasing).
-    :param n_lags: number of lags K on each side of zero.
-    :return: (lo, hi) -- observed pixels ``lo:hi`` need exactly the template
-             nodes ``w_ext[lo: hi + 2K]``, all inside the template's span.
-    :raises ValueError: if no observed pixel is covered at every lag.
+    Parameters
+    ----------
+    w_ext : ndarray
+        The order's log-lambda grid extended by ``n_lags`` steps on each side
+        (Angstrom), see ``unicor.extend_log_grid``.
+    t_wave : ndarray
+        The template's wavelengths (Angstrom, increasing).
+    n_lags : int
+        Number of lags K on each side of zero.
+
+    Returns
+    -------
+    lo, hi : int
+        Observed pixels ``lo:hi`` need exactly the template nodes
+        ``w_ext[lo: hi + 2K]``, all inside the template's span.
+
+    Raises
+    ------
+    ValueError
+        If no observed pixel is covered at every lag.
     """
     # A millionth of a step absorbs the round-off of exp() when the template
     # sits on the observed grid itself.

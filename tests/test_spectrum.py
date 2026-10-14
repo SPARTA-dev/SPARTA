@@ -183,3 +183,22 @@ def test_select_orders_keeps_native_steps_aligned():
     sp.Info["NativeStep"] = [1.0, 2.0, 3.0]
     sp.select_orders(orders=[1], remove=True)
     assert sp.native_steps() == [1.0, 3.0]
+
+
+@pytest.mark.parametrize("orders", [[3], [-1], [0, 5]])
+def test_select_orders_rejects_out_of_range_indices(orders):
+    sp = _three_order_spec()
+    with pytest.raises(ValueError, match="order indices"):
+        sp.select_orders(orders=orders)
+    assert len(sp.wv) == 3                      # untouched
+
+
+def test_mismatched_wv_and_sp_raise_valueerror():
+    with pytest.raises(ValueError, match="orders"):
+        Spectrum(wv=[np.arange(3.0)], sp=[])
+
+
+def test_default_spectra_do_not_share_their_order_lists():
+    a, b = Spectrum(), Spectrum()
+    a.wv.append(np.arange(3.0))
+    assert b.wv == [] and b.n_ord == 0

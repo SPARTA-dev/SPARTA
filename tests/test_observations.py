@@ -13,6 +13,7 @@ import pytest
 
 from sparta.timeseries import TimeSeries
 from sparta.observations import Observations
+from unicor.dsp import C_KMS
 
 TIMES = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]
 VRADS = [-10.0, 0.0, np.nan, 5.0, 12.0, -3.0]
@@ -252,3 +253,45 @@ def test_sb2_run_leaves_calculated_vrad_list_alone():
     obs.calc_rv_against_two_templates(*component_templates(sim), dv=0.3, vel_bound=40)
     assert obs.time_series.calculated_vrad_list is marker
     assert obs.vels1.shape == obs.vels2.shape == (4,)
+
+
+# --- velocity_convention reaches the engines through the drivers --------------
+
+def _relativistic_simulation(components, rv_kms, window):
+    from sparta.instruments import Simulation
+    sim = Simulation(like="HARPS", components=components, times=np.arange(2.0),
+                     rv_kms=rv_kms, snr=None, windows_A=[window],
+                     velocity_convention="relativistic")
+    return Observations(survey="SIMULATED", simulation=sim), sim
+
+
+def test_sb1_driver_passes_the_velocity_convention_to_unicor():
+    from sparta.instruments.simulated import component_templates
+    rv = np.array([-110.0, 120.0])
+    obs, sim = _relativistic_simulation([SUN_LIKE], rv, (5000.0, 5030.0))
+    template = component_templates(sim)[0]
+    vels = {}
+    for convention in ("cz", "relativistic"):
+        obs.calc_rv_against_template(template, dv=0.1, vel_bound=130,
+                                     velocity_convention=convention)
+        assert all(c.Corr["velocity_convention"] == convention for c in obs.ccf_list)
+        vels[convention] = obs.vels.copy()
+    np.testing.assert_allclose(vels["relativistic"], rv, atol=1e-3)
+    # The same spectrum read as cz exceeds the relativistic RV by ~v^2/2c.
+    np.testing.assert_allclose(vels["cz"] - vels["relativistic"], rv ** 2 / (2 * C_KMS),
+                               atol=2e-4)
+
+
+def test_sb2_driver_passes_the_velocity_convention_to_todcor():
+    from sparta.instruments.simulated import component_templates
+    rv = np.column_stack([[-100.0, 90.0], [95.0, -105.0]])
+    obs, sim = _relativistic_simulation(
+        [dict(SUN_LIKE, amplitude=0.7), dict(K_DWARF, amplitude=0.3)], rv, (5000.0, 5060.0))
+    vels = {}
+    for convention in ("cz", "relativistic"):
+        obs.calc_rv_against_two_templates(*component_templates(sim), dv=0.3, vel_bound=120,
+                                          sigma=0.01, velocity_convention=convention)
+        assert all(c.Corr2d["velocity_convention"] == convention for c in obs.ccf2d_list)
+        vels[convention] = np.column_stack([obs.vels1, obs.vels2])
+    np.testing.assert_allclose(vels["cz"] - vels["relativistic"], rv ** 2 / (2 * C_KMS),
+                               atol=2e-4)

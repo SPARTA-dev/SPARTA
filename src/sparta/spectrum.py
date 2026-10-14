@@ -23,16 +23,27 @@ from unicor import dsp
 
 def resample_flux(wave, flux, new_wave, unit=u.Angstrom):
     '''
-    Resample one order's flux with the cubic spline of ``Spectrum.interpolate``
-    (specutils ``SplineInterpolatedResampler``). Other code that must model
-    this resampling exactly (CCF2d's noise model) calls it too.
+    Resample one order's flux with the cubic spline of ``Spectrum.interpolate``.
 
-    :param: wave     - 1-D increasing wavelength array, in ``unit``.
-    :param: flux     - 1-D flux array matching ``wave``.
-    :param: new_wave - 1-D increasing wavelengths (``unit``) inside the span
-                       of ``wave``; outside it the flux is NaN.
-    :param: unit     - astropy unit of both wavelength arrays (default Angstrom).
-    :return: ndarray, the flux at ``new_wave``.
+    The spline is specutils' ``SplineInterpolatedResampler``. Other code that
+    must model this resampling exactly (CCF2d's noise model, the simulator's
+    archive rebinning) calls this function too.
+
+    Parameters
+    ----------
+    wave : array_like
+        1-D increasing wavelengths, in ``unit``.
+    flux : array_like
+        1-D flux matching ``wave``.
+    new_wave : array_like
+        1-D increasing wavelengths (``unit``) inside the span of ``wave``.
+    unit : astropy.units.Unit
+        Unit of both wavelength arrays (default Angstrom).
+
+    Returns
+    -------
+    ndarray
+        The flux at ``new_wave``; NaN outside the span of ``wave``.
     '''
     src = Spec1D(flux=np.asarray(flux, float) * u.dimensionless_unscaled,
                  spectral_axis=np.asarray(wave, float) * unit)
@@ -40,26 +51,65 @@ def resample_flux(wave, flux, new_wave, unit=u.Angstrom):
 
 
 class Spectrum:
+    '''
+    One observed spectrum: per-order wavelength and flux arrays plus metadata.
+
+    The preprocessing methods work in place on ``wv`` / ``sp`` and return
+    ``self``, so they chain.
+
+    Attributes
+    ----------
+    wv, sp : list of ndarray
+        Per-order wavelengths (Angstrom) and fluxes.
+    bjd : float
+        Time of observation (BJD, days).
+    bcv : astropy.units.Quantity
+        Barycentric velocity correction (km/s); 0 once applied.
+    name : str
+        Target name.
+    n_ord : int
+        Number of orders.
+    Info : dict
+        Grid bookkeeping: 'GridType' ('raw', 'linear' or 'log'),
+        'GridDelta', 'GridUnits', 'WavelengthUnits', 'TargetName' and, once
+        resampled, 'NativeStep' (km/s per order, see ``native_steps``).
+    c : astropy.units.Quantity
+        The speed of light (km/s).
+    '''
 
     # =============================================================================
     # =============================================================================
-    def __init__(self, wv=[], sp=[], wave_unit=1.0*u.Angstrom,
+    def __init__(self, wv=None, sp=None, wave_unit=1.0*u.Angstrom,
                  bjd=0.0, bcv=0.0, name='Anonymous'):
         '''
         Build a Spectrum from per-order wavelength and flux lists.
 
-        :param: wv - list of 1-D wavelength arrays (Angstrom), one per order.
-        :param: sp - list of 1-D flux arrays, matching ``wv`` order by order.
-        :param: wave_unit - astropy unit of the wavelengths (default Angstrom).
-        :param: bjd - barycentric Julian date of the observation (days).
-        :param: bcv - barycentric velocity correction (km/s).
-        :param: name - str, the name of the target.
+        The lists are stored as given (not copied).
 
-        Stores the mutable per-order lists ``self.wv`` / ``self.sp``, the
-        grid/units bookkeeping ``self.Info``, the speed of light ``self.c``
-        (km/s), and the order count ``self.n_ord``.
+        Parameters
+        ----------
+        wv : list of array_like, optional
+            1-D wavelength arrays (Angstrom), one per order. Default: none.
+        sp : list of array_like, optional
+            1-D flux arrays, matching ``wv`` order by order. Default: none.
+        wave_unit : astropy.units.Quantity
+            Unit of the wavelengths (default Angstrom).
+        bjd : float
+            Barycentric Julian date of the observation (days).
+        bcv : float or astropy.units.Quantity
+            Barycentric velocity correction (km/s if a plain number).
+        name : str
+            Name of the target.
+
+        Raises
+        ------
+        ValueError
+            If ``wv`` and ``sp`` hold different numbers of orders.
         '''
-        assert len(wv) == len(sp), "Dimensions mismatch (wv vs. sp)"
+        wv = [] if wv is None else wv
+        sp = [] if sp is None else sp
+        if len(wv) != len(sp):
+            raise ValueError(f"wv has {len(wv)} orders but sp has {len(sp)}")
         self.c = consts.c.to('km/s') # The speed of light in km/sec
         self.Info = {'GridType': 'raw',
                      'WavelengthUnits': wave_unit,
@@ -79,15 +129,20 @@ class Spectrum:
     @property
     def orders(self):
         '''
-        The spectrum as a specutils ``SpectrumList`` -- one ``Spectrum1D`` per
-        order, with a real ``SpectralAxis`` (Angstrom) and (normalized,
-        dimensionless) flux. Per-order ``meta`` carries this Spectrum's ``Info``
-        plus ``bjd``/``bcv``/``name``; a recorded ``NativeStep`` is split into
-        the order's own value (km/s), so ``from_spectrum1d`` can restore it.
+        The spectrum as a specutils ``SpectrumList``, one ``Spectrum1D`` per order.
 
         This is the interchange representation for the specutils ecosystem. The
         working ``.wv`` / ``.sp`` lists remain the mutable store used by the
         preprocessing methods; ``orders`` is built from them on access.
+
+        Returns
+        -------
+        specutils.SpectrumList
+            Each order with a real ``SpectralAxis`` (Angstrom) and
+            dimensionless flux. Per-order ``meta`` carries this Spectrum's
+            ``Info`` plus ``bjd``/``bcv``/``name``; a recorded ``NativeStep``
+            is split into the order's own value (km/s), so
+            ``from_spectrum1d`` can restore it.
         '''
         wunit = self.Info.get('WavelengthUnits', 1.0 * u.Angstrom)
         wunit = getattr(wunit, 'unit', wunit)
@@ -108,10 +163,7 @@ class Spectrum:
     @classmethod
     def from_spectrum1d(cls, spectra, bjd=0.0, bcv=0.0, name='Anonymous'):
         '''
-        Build a ``Spectrum`` from one or more specutils ``Spectrum1D`` objects
-        (a single object, a list, or a ``SpectrumList``). Each becomes one
-        order. ``bjd``/``bcv``/``name`` are taken from the first object's
-        ``meta`` when present, else from the arguments.
+        Build a ``Spectrum`` from one or more specutils ``Spectrum1D`` objects.
 
         The sampling bookkeeping that ``orders`` writes is restored, so the
         error estimates still count the native pixels: the grid description
@@ -119,6 +171,24 @@ class Spectrum:
         it (otherwise the grid is taken as 'raw', to be resampled), and the
         per-order ``NativeStep`` (km/s; an order without one counts its own
         grid as native).
+
+        Parameters
+        ----------
+        spectra : specutils.Spectrum1D, list of them, or specutils.SpectrumList
+            Each object becomes one order; its spectral axis is converted to
+            Angstrom.
+        bjd : float
+            Time of observation (BJD, days), used unless the first object's
+            ``meta`` has 'bjd'.
+        bcv : float or astropy.units.Quantity
+            Barycentric velocity correction (km/s), used unless the first
+            object's ``meta`` has 'bcv'.
+        name : str
+            Target name, used unless the first object's ``meta`` has 'name'.
+
+        Returns
+        -------
+        Spectrum
         '''
         if isinstance(spectra, Spec1D):
             spectra = [spectra]
@@ -154,12 +224,18 @@ class Spectrum:
         ``Info['NativeStep']``. A spectrum that was never resampled is taken
         to be honestly sampled on its current grid.
 
-        :return: list of floats (km/s), one per order: the recorded
-                 ``Info['NativeStep']``, else c * median(d(lambda)/lambda) of
-                 each order's current grid.
-        :raises ValueError: if ``Info['NativeStep']`` does not hold one finite,
-                            positive value per current order (e.g. orders
-                            were added or dropped without updating it).
+        Returns
+        -------
+        list of float
+            One step per order (km/s): the recorded ``Info['NativeStep']``,
+            else c * median(d(lambda)/lambda) of the order's current grid.
+
+        Raises
+        ------
+        ValueError
+            If ``Info['NativeStep']`` does not hold one finite, positive value
+            per current order (e.g. orders were added or dropped without
+            updating it).
         '''
         if 'NativeStep' not in self.Info:
             return [dsp.dv_from_wave(w) for w in self.wv]
@@ -178,22 +254,34 @@ class Spectrum:
                    delta=0.5, cosmic_sigma=3, filter_lowcut=3, filter_highcut=0.15,
                    alpha=0.3):
         '''
-        Apply the standard preprocessing chain, in the recommended order:
-        ``trim``, a linear ``interpolate``, ``remove_cosmics``,
-        ``filter_spectrum`` (first-order Butterworth band-pass) and
-        ``apply_cosine_bell``.
+        Apply the standard preprocessing chain, in place.
 
-        :param: n_trim, clean_margins, remove_nans - see ``trim``.
-        :param: delta          - linear resampling step, in units of each
-                                 order's median wavelength step (see
-                                 ``interpolate``).
-        :param: cosmic_sigma   - upward outlier threshold, in mad_std (see
-                                 ``remove_cosmics``).
-        :param: filter_lowcut, filter_highcut - the band-pass edges (see
-                                 ``filter_spectrum``).
-        :param: alpha          - Tukey shape parameter (see
-                                 ``apply_cosine_bell``).
-        :return: self.
+        In the recommended order: ``trim``, a linear-wavelength
+        ``interpolate``, ``remove_cosmics``, ``filter_spectrum``
+        (first-order Butterworth band-pass) and ``apply_cosine_bell``. The
+        filter standardizes each order (zero mean, unit variance), so the
+        flux is no longer continuum-normalized, and the error estimates of
+        UNICOR and TODCOR are no longer calibrated afterwards (see
+        ``CCF1d.cross_correlate``).
+
+        Parameters
+        ----------
+        n_trim, clean_margins, remove_nans
+            See ``trim``.
+        delta : float
+            Linear resampling step, in units of each order's median wavelength
+            step (see ``interpolate``).
+        cosmic_sigma : float
+            Upward outlier threshold, in mad_std (see ``remove_cosmics``).
+        filter_lowcut, filter_highcut : float
+            The band-pass edges (see ``filter_spectrum``).
+        alpha : float
+            Tukey shape parameter (see ``apply_cosine_bell``).
+
+        Returns
+        -------
+        Spectrum
+            self.
         '''
 
         self.trim(n_trim=n_trim, clean_margins=clean_margins, remove_nans=remove_nans)
@@ -208,30 +296,35 @@ class Spectrum:
     # =============================================================================
     def interpolate(self, delta=None, method='linear'):
         '''
-        This function resamples a list of wavelength and spectra
-        so that the wavelength values will be evenly spaced.
+        Resample every order onto an evenly spaced wavelength grid, in place.
 
-        :param: self.wv - list of 1D wavelength arrays.
-        :param: self.sp - list of 1D flux arrays, correspond the wv arrays.
-        :param: delta   - positive float.
-                          If method is 'linear', the step of the evenly
-                          spaced array is taken to be delta*(median delta lambda).
-                          In this case delta is a unitless parameter.
-                          If method is 'log', then the array is resampled
-                          to be logarithmically evenly-spaced. The step is
-                          taken to be log(1+delta/c), where c is the
-                          speed of light in km/sec, and so is delta.
-        :param: method  - string. 'linear' to generate an evenly spaced
-                          wavelength vector. 'log' to generate a
-                          logarithmically evenly-spaced vector.
-        :return: self.wv - list of evenly spaced wavelegth arrays.
-        :return: self.sp - list of flux values, interpolated at wvI.
+        The flux is resampled with the cubic spline of ``resample_flux``. Each
+        new grid lies strictly inside its order: the linear one starts one new
+        step above the first wavelength, the log one one median input step
+        above it. ``Info`` records the grid ('GridType', 'GridDelta',
+        'GridUnits') and the native sampling ('NativeStep', see
+        ``native_steps``).
 
-        Notes: The input, wv and sp, are data from a single observation.
-               Each entry in the list represents a different order.
-               The step size of the interpolated wavelength array is set
-               to be f times the minimal (non zero, positive) wavelength
-               step in the input data.-
+        Parameters
+        ----------
+        delta : float or astropy.units.Quantity, optional
+            For ``method='linear'``: the step, in units of each order's
+            *median* wavelength step (dimensionless; default 0.5). For
+            ``method='log'``: the velocity step (km/s if a plain number;
+            default 0.1 km/s); the ln(lambda) step is ln(1 + delta/c).
+        method : {'linear', 'log'}
+            Evenly spaced in wavelength, or in ln(lambda) (velocity-even, as
+            the CCF requires).
+
+        Returns
+        -------
+        Spectrum
+            self, with ``wv`` / ``sp`` on the new grids.
+
+        Raises
+        ------
+        ValueError
+            For an unknown ``method``.
         '''
         if method not in ('linear', 'log'):
             raise ValueError(f"method must be 'linear' or 'log', not {method!r}")
@@ -310,19 +403,28 @@ class Spectrum:
     def trim(self, n_trim=None, n_trim_left=0, n_trim_right=0,
              clean_margins=False, remove_nans=True):
         '''
-        In some cases the spectra is zero-padded at the edges, which may affect
-        the filtering stage. This routine trims the edges of the data.
+        Trim the edges of every order, in place.
 
-        :param: self.wv - list of 1D wavelength arrays.
-        :param: self.sp - list of 1D flux arrays, correspond the wv arrays.
-        :param: n_trim  - Integer. Number of points to remove from each side
-                          of the spectrum; overrides n_trim_left/n_trim_right.
-        :param: n_trim_left, n_trim_right - Integers. Points to remove from
-                          the blue / red end.
-        :param: clean_margins - Boolean. Trim counting from the first and last
-                          non-zero flux, i.e. drop the zero padding.
-        :param: remove_nans - Boolean. Drop NaN pixels first.
-        :return: self, with self.wv / self.sp trimmed.
+        Spectra are often zero-padded at the edges, which would disturb the
+        filtering stage.
+
+        Parameters
+        ----------
+        n_trim : int, optional
+            Pixels to remove from each end; overrides ``n_trim_left`` /
+            ``n_trim_right``.
+        n_trim_left, n_trim_right : int
+            Pixels to remove from the blue / red end.
+        clean_margins : bool
+            Count the trimmed pixels from the first and last non-zero flux,
+            i.e. drop the zero padding too.
+        remove_nans : bool
+            Drop NaN pixels first.
+
+        Returns
+        -------
+        Spectrum
+            self, with ``wv`` / ``sp`` trimmed.
         '''
         # Initialize data
         wvT, spT = [], []
@@ -359,18 +461,29 @@ class Spectrum:
     # =============================================================================
     def filter_spectrum(self, lowcut, highcut, order):
         '''
-        This function applies a Butterworth fitler to the input
-        spectrum, removes the low-pass instrumental repsponse and the high-pass
-        instrumental noise.
+        Band-pass filter every order with a Butterworth filter, in place.
 
-        :param: self.sp - list of 1D flux arrays, correspond to the wv arrays.
-        :param: lowcut  - float. Stopband freq for low-pass filter. Given in
-                          units of the minimal frequency (max(w)-min(w))**(-1)
-        :param: highcut - float. Stopband freq for the high-pass filter. Given
-                          in units of the Nyquist frequency.
-        :param: order -   integer. The order of the Butterworth filter.
+        Removes the slowly varying instrumental response (below ``lowcut``)
+        and the pixel-scale noise (above ``highcut``). The filter runs forward
+        and backward (zero phase) on the flux minus its 80th percentile, and
+        each filtered order is standardized to zero mean and unit variance.
+        The grid must be evenly spaced: the Nyquist frequency is taken from
+        the first wavelength step.
 
-        :return: spF - list of filtered flux values at wv.
+        Parameters
+        ----------
+        lowcut : float
+            Lower band edge, in units of the lowest frequency of the order,
+            1 / (max(w) - min(w)).
+        highcut : float
+            Upper band edge, in units of the Nyquist frequency (0-1).
+        order : int
+            Order of the Butterworth filter.
+
+        Returns
+        -------
+        Spectrum
+            self, with ``sp`` filtered.
         '''
         # Initialize data
         spF = []
@@ -393,7 +506,8 @@ class Spectrum:
             # Define the Butterworth filter
             b, a = signal.butter(order, [low, highcut], btype='band')
 
-            # Winsorize the data
+            # Subtract a continuum-like level (the 80th percentile) so the
+            # filter's edge transients start near zero.
             s = signal.filtfilt(b, a, self.sp[I]-np.percentile(self.sp[I], 80),
                                 padlen=10*max(len(b), len(a)))
 
@@ -409,14 +523,21 @@ class Spectrum:
     # =============================================================================
     def apply_cosine_bell(self, alpha=0.1):
         '''
-        This function applies a cosine bell (Tukey Window) to the spectrum,
+        Multiply every order by a cosine bell (Tukey window), in place.
 
-        :param:  self.wv - list of 1D wavelength arrays (evenly sampled).
-        :param:  self.sp - list of 1D flux arrays, correspond to the wv arrays.
-        :param:  alpha -   (optional) float. Shape parameter of the Tukey win.
+        The taper brings the order's ends to zero, so it suits a filtered
+        (zero-mean) spectrum.
 
-        :return: spC - list of flux values at wv,
-                      after the cosine bell was applied
+        Parameters
+        ----------
+        alpha : float
+            Shape parameter of the Tukey window: the tapered fraction of the
+            order (0 = no taper, 1 = Hann window).
+
+        Returns
+        -------
+        Spectrum
+            self, with ``sp`` tapered.
         '''
         # Initialize data
         spC = []
@@ -434,24 +555,28 @@ class Spectrum:
 # =============================================================================
     def remove_cosmics(self, sigma_upper=3):
         '''
-        This function replaces positive outliers, i.e., points that
-        significantly deviate above the measured spectra. Significant deviation
-        is defined as points that lie more than sigma_upper x mad_std above the
-        median of the order (iterated, as in astropy's sigma_clip). Points that
+        Replace upward outliers (cosmic-ray hits) in every order, in place.
+
+        An outlier lies more than ``sigma_upper`` x mad_std above the median
+        of its order (iterated, as in astropy's sigma_clip). Points that
         deviate below are never touched.
 
         A clipped pixel is replaced by linear interpolation (in wavelength)
         between its nearest unclipped neighbours, rather than dropped: dropping
         it would break the uniform (linear or log-lambda) grid that
         ``Info['GridType']`` declares and the CCF requires. NaN pixels are left
-        as they are and never used as interpolation anchors.
+        as they are and never used as interpolation anchors. The wavelengths
+        are unchanged.
 
-        :param: self.wv - list of 1D wavelength arrays (Angstrom); unchanged.
-        :param: self.sp - list of 1D flux arrays, correspond to the wv arrays.
-        :param: sigma_upper - float. Number of sigma beyond which points will
-                              be replaced. (Optional. default=3).
+        Parameters
+        ----------
+        sigma_upper : float
+            Clipping threshold, in units of mad_std.
 
-        :return: self, with self.sp holding the cleaned fluxes.
+        Returns
+        -------
+        Spectrum
+            self, with ``sp`` cleaned.
         '''
 
         spR = []
@@ -475,9 +600,16 @@ class Spectrum:
 # =============================================================================
     def barycentric_correction(self):
         '''
-        Apply a barycentric correction to the wavelength vectors
-        of each order. Once it is done, the bcv value in the structure
-        is set to be 0.0 km/s.
+        Apply the barycentric correction to every order's wavelengths, in place.
+
+        The wavelengths are multiplied by (1 + bcv/c) -- always the 'cz'
+        composition, whatever velocity convention the RVs are later read in
+        -- and ``bcv`` is set to 0 km/s, so a second call does nothing.
+
+        Returns
+        -------
+        Spectrum
+            self.
         '''
 
         # The BERV is composed multiplicatively as lambda * (1 + bcv/c) -- the
@@ -500,17 +632,32 @@ class Spectrum:
     # =============================================================================
     def select_orders(self, orders, remove=True):
         '''
-        This routine enables the user to keep or discard orders from the observed
-        data. Orders are numbered according to their index (0-> #ord-1),
+        Keep or discard orders, in place.
 
-        :param orders: Indices of the required orders
-        :param remove: Boolean. If True, these orders will be removed.
-                       otherwise, these will be the orders that will
-                       be kept.
-        :return: Same structure, with the orders arranged.
+        The remaining orders keep their original relative order (sorted by
+        index), and ``n_ord`` and any recorded ``Info['NativeStep']`` are
+        updated to match.
+
+        Parameters
+        ----------
+        orders : sequence of int
+            Order indices, 0 .. n_ord - 1.
+        remove : bool
+            If True, drop these orders; if False, keep only these.
+
+        Returns
+        -------
+        Spectrum
+            self.
+
+        Raises
+        ------
+        ValueError
+            If an index is outside 0 .. n_ord - 1.
         '''
-        assert (np.max(orders) < self.n_ord), "Invalid order numbers"
-        assert (np.min(orders) >= 0), "Invalid order numbers"
+        if np.max(orders) >= self.n_ord or np.min(orders) < 0:
+            raise ValueError(f"order indices must lie in 0..{self.n_ord - 1}, got "
+                             f"{np.min(orders)}..{np.max(orders)}")
 
         if remove:
             x = np.setdiff1d(np.arange(self.n_ord), orders)
@@ -531,7 +678,7 @@ class Spectrum:
 
 
 def _same(a, b):
-    '''True if two Info values are both absent or compare equal.'''
+    '''Whether two Info values are both absent (None) or compare equal.'''
     if a is None or b is None:
         return a is b
     return bool(np.all(a == b))

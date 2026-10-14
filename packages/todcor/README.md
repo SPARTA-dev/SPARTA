@@ -3,7 +3,7 @@
 Standalone Python engine for **Fourier-domain two-component (TODCOR) radial
 velocities** of double-lined spectroscopic binaries — the array-level core of
 [SPARTA](https://github.com/SPARTA-dev/SPARTA)'s TODCOR. Its only dependencies are
-numpy and [`unicor`](../unicor) (for the shared log-λ grid and broadening
+numpy and [`unicor`](https://github.com/SPARTA-dev/SPARTA/tree/master/packages/unicor) (for the shared log-λ grid and broadening
 primitives; it brings in scipy).
 
 `todcor` fits the radial velocities *and* relative amplitudes of both
@@ -41,43 +41,84 @@ pip install \
 
 ## Quick start
 
+A self-contained example: two synthetic templates, a noisy composite at known
+velocities, and the fit. It runs in under a second.
+
 ```python
 import numpy as np
 import todcor
 
-dv, R = 1.0, 60000.0
+rng = np.random.default_rng(1)
+dv, R = 1.0, 60000.0                                # grid step (km/s), resolving power
+
+# Two rest-frame templates (continuum 1) with random absorption lines, on a fine
+# log-lambda grid that covers the observed range plus the velocity shifts,
+# broadened to the instrument's resolution (FWHM c/R).
+t_wave, _ = todcor.log_lambda_grid(4990.0, 5110.0, 0.1)
+def template(n_lines):
+    centres = rng.uniform(4992.0, 5108.0, n_lines)
+    depths = rng.uniform(0.1, 0.6, n_lines)
+    lines = np.sum(depths[:, None] * np.exp(-0.5 * ((t_wave - centres[:, None]) / 0.04) ** 2), axis=0)
+    return 1.0 + todcor.broaden_gaussian_residual(-lines, 0.1, todcor.C_KMS / R)
+t1, t2 = template(80), template(80)
+
+# The observation: both components shifted and diluted, sampled on the analysis
+# grid, plus white noise of 0.01 per pixel.
 wave, _ = todcor.log_lambda_grid(5000.0, 5100.0, dv)
+sigma = 0.01
+observed = todcor.composite_flux(wave, [(t_wave, t1), (t_wave, t2)],
+                                 velocities=(25.3, -41.7), amplitudes=(0.7, 0.3))
+observed += rng.normal(0.0, sigma, wave.size)
 
-# Residual templates (flux - 1), instrumentally broadened and apodised.
-def prep(flux):
-    g = todcor.broaden_gaussian_residual(flux - 1.0, dv, todcor.C_KMS / R)
-    return g * todcor.tukey_window(len(g))
+# Residuals (flux - 1) on the analysis grid. The templates go there at rest;
+# the observation is already broadened, so it is only tapered, like them.
+taper = todcor.tukey_window(wave.size)
+g1 = (todcor.resample(t_wave, t1, wave) - 1.0) * taper
+g2 = (todcor.resample(t_wave, t2, wave) - 1.0) * taper
+data = (observed - 1.0) * taper
 
-g1, g2 = prep(template1_flux), prep(template2_flux)   # on `wave`
-data = prep(observed_flux)                             # composite, on `wave`
-
-v1 = np.arange(-60, 61, 1.0)
-v2 = np.arange(-60, 61, 1.0)
-res = todcor.todcor_map(data, g1, g2, dv, v1, v2, sigma=0.01)
-best = res["best"]                                    # v1, v2, a1, a2, chi2
+v1 = v2 = np.arange(-80.0, 80.5, 0.5)               # trial velocities (km/s)
+res = todcor.todcor_map(data, g1, g2, todcor.log_grid_step(wave), v1, v2, sigma=sigma,
+                        nonneg=True)
 crlb = todcor.crlb_from_map(res["logL_profile"], v1, v2)
+best = res["best"]
+print(f"grid peak: v1 = {best['v1']:.1f}, v2 = {best['v2']:.1f} km/s, "
+      f"a1 = {best['a1']:.3f}, a2 = {best['a2']:.3f}, chi2_red = {best['chi2_red']:.2f}")
+print("refined:   v1 = {:.3f} +- {:.3f}, v2 = {:.3f} +- {:.3f} km/s".format(
+      crlb["peak_refined"][0], crlb["sigma_v1"], crlb["peak_refined"][1], crlb["sigma_v2"]))
 ```
 
-Several windows (orders) of the same epoch:
+```text
+grid peak: v1 = 25.5, v2 = -41.5 km/s, a1 = 0.702, a2 = 0.296, chi2_red = 1.01
+refined:   v1 = 25.301 +- 0.012, v2 = -41.647 +- 0.030 km/s
+```
+
+The injected values are v1 = 25.3, v2 = −41.7 km/s, a1 = 0.7, a2 = 0.3. The
+observation is never broadened here: real data already carry the instrumental
+profile, so only the templates are matched to the resolution. `sigma` is the
+per-pixel noise of the observed flux; with it right, `chi2_red` ≈ 1. The
+quadratic refinement of `crlb_from_map` needs a map step that resolves the
+peak; SPARTA's `CCF2d` re-evaluates a finer local map around it instead (see
+the method notes).
+
+Several windows (orders) of the same epoch, evaluated on one shared velocity
+grid, pool by adding their statistics:
 
 ```python
-stats = [todcor.window_stats(d, g1, g2, dv, v1, v2, sigma=s) for d, g1, g2, s in windows]
-res = todcor.profile_from_stats(todcor.combine_stats(stats), v1, v2)
+stats = [todcor.window_stats(d, g1, g2, dv, v1, v2, sigma=s) for d, g1, g2, dv, s in windows]
+res = todcor.profile_from_stats(todcor.combine_stats(stats), v1, v2, nonneg=True)
 ```
 
 ## Learn the method
 
-- [`docs/todcor_method.md`](docs/todcor_method.md): the derivation (sufficient
-  statistics, the χ² quadratic form, profile vs marginal amplitudes, Parseval,
-  the even-N Nyquist drop, window combination).
-- SPARTA's [`examples/todcor/`](../../examples/todcor/) notebooks 01–03 walk
-  through it numerically using this package alone; notebook 04 runs it through
-  SPARTA's `Spectrum`/`Template`/`Observations` objects.
+- [`docs/todcor_method.md`](https://github.com/SPARTA-dev/SPARTA/blob/master/packages/todcor/docs/todcor_method.md):
+  the derivation (sufficient statistics, the χ² quadratic form, profile vs
+  marginal amplitudes, Parseval, the even-N Nyquist drop, window combination,
+  the noise budget and its assumptions).
+- SPARTA's [`examples/todcor/`](https://github.com/SPARTA-dev/SPARTA/tree/master/examples/todcor)
+  notebooks 01–03 walk through it numerically with this package alone.
+  SPARTA's `CCF2d` and `Observations.calc_rv_against_two_templates` run it on
+  multi-order spectra.
 
 ## Test
 

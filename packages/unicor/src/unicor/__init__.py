@@ -3,7 +3,8 @@
 A standalone, numpy + scipy engine for measuring radial velocities of
 single-lined spectra: correlate an observation against a template on a uniform
 log-lambda grid, combine orders by maximum likelihood (Zucker 2003, MNRAS 342,
-1291), and read the RV, its uncertainty and the bisector span off the peak.
+1291), and read the RV and its uncertainty off the peak. (The bisector span is
+also provided; its formula is known to be incorrect and is under review.)
 
 Everything takes plain floats / arrays: velocities in km/s, wavelengths in
 Angstrom. Velocities follow the 'cz' Doppler convention (lambda_obs/lambda_rest
