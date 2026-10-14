@@ -112,6 +112,45 @@ white noise on the `n_eff` independent bins. Filtering or normalising the
 spectrum first correlates the noise, and the error is then no longer
 calibrated; check it by simulation.
 
+## Per-order atoms
+
+The steps above, packaged one call per order — the loop body of SPARTA's
+`CCF1d`, which is built from exactly these calls:
+
+- `lag_axis(waves, dv_kms, n_lags)` → `(dln, v)`: checks that every order is
+  uniform in ln λ with the declared step and that the orders share it, and
+  returns the common velocity of each lag (km/s).
+- `ccf_order(wave, flux, t_wave, t_flux, n_lags, dv_kms=..., native_step_kms=...)`
+  → `CCFOrder`: resamples the template onto the extended grid, correlates the
+  pixels it covers at every lag (`template_coverage`), and returns
+  `velocity`, `ccf`, `loglike`, `rv`, `erv` (with `errors=True`), `peak`,
+  `n_eff` and the correlated pixels `lo:hi`. It raises `ValueError` if the
+  template covers no pixel; `rv`, `erv` and `peak` are NaN if the peak lies
+  beyond the scan.
+- `effective_bins(n_pix, dv_kms, native_step_kms)`: `n_pix·min(1, dv/native)`,
+  the independent bins behind a resampled order.
+- `measure_rv(v, ccf, n_eff)` → `RVMeasurement(rv, erv, peak)`: the sub-pixel
+  peak and its ML uncertainty.
+
+Continuing the quick start, with the order split in two:
+
+```python
+waves, fluxes = np.array_split(wave, 2), np.array_split(observed, 2)
+_, v = unicor.lag_axis(waves, dv, K)
+orders = [unicor.ccf_order(w, f, t_wave, t_flux, K, dv_kms=dv, native_step_kms=dv)
+          for w, f in zip(waves, fluxes)]
+n_eff = np.array([o.n_eff for o in orders])
+combined = unicor.combine_ccfs(np.vstack([o.ccf for o in orders]), n_eff=n_eff)
+rv = unicor.measure_rv(v, combined, n_eff.sum())
+print("per order: ", ", ".join(f"{o.rv:.3f}" for o in orders), "km/s")
+print(f"combined:   RV = {rv.rv:.3f} +- {rv.erv:.3f} km/s (CCF peak {rv.peak:.3f})")
+```
+
+```text
+per order:  12.268, 12.309 km/s
+combined:   RV = 12.290 +- 0.012 km/s (CCF peak 0.987)
+```
+
 ## Velocity conventions
 
 | `velocity_convention` | `λ_obs/λ_rest` | lag `k` → `v` |

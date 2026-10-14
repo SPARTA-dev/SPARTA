@@ -575,3 +575,172 @@ def test_cz_and_relativistic_readings_differ_by_v2_over_2c(v0):
     rv = {conv: unicor.subpixel_peak(*unicor.ccf_vs_velocity(
         template, observed, wave, velocity_convention=conv))[0] for conv in CONVENTIONS}
     assert rv['cz'] - rv['relativistic'] == pytest.approx(v0 ** 2 / (2 * C), rel=3e-3)
+
+
+# --- Per-order atoms: one order in, its CCF and RV out -------------------------
+# ccf_order is the loop body of SPARTA's CCF1d.cross_correlate; lag_axis,
+# effective_bins and measure_rv the steps around it. Each is pinned here
+# against the lower-level functions it composes.
+
+def _template_arrays():
+    """A line template (5050 A) on a fine log grid much wider than ``grid``."""
+    t_wave, _ = unicor.log_lambda_grid(4950.0, 5200.0, 0.1)
+    return t_wave, _line_spectrum(0.0, t_wave)
+
+
+def test_template_coverage_of_a_wide_template_is_the_whole_order(grid):
+    k = 40
+    ext = unicor.extend_log_grid(grid, k)
+    assert unicor.template_coverage(ext, _template_arrays()[0], k) == (0, grid.size)
+
+
+def test_template_coverage_on_the_observed_span_drops_the_scan_at_each_end(grid):
+    # Pixel i needs the template at nodes i .. i + 2K of the extended grid, so
+    # a template on the observed span alone covers pixels K .. N - K - 1.
+    k = 40
+    ext = unicor.extend_log_grid(grid, k)
+    assert unicor.template_coverage(ext, grid, k) == (k, grid.size - k)
+
+
+def test_template_coverage_refuses_a_template_that_covers_no_pixel(grid):
+    k = 40
+    ext = unicor.extend_log_grid(grid, k)
+    with pytest.raises(ValueError, match="does not cover any pixel"):
+        unicor.template_coverage(ext, np.linspace(6000.0, 6100.0, 50), k)
+    # Narrower than the scan: each pixel misses the template at some lag.
+    with pytest.raises(ValueError, match="does not cover any pixel"):
+        unicor.template_coverage(ext, grid[100:150], k)
+
+
+@pytest.mark.parametrize("conv", CONVENTIONS)
+def test_lag_axis_is_the_shared_velocity_of_each_lag(grid, conv):
+    k = 30
+    waves = [grid, grid[50:400]]
+    dln, v = unicor.lag_axis(waves, DV, k, velocity_convention=conv)
+    # The orders' steps agree to round-off; the axis uses their median.
+    assert dln == np.median([unicor.log_grid_dln(w) for w in waves])
+    assert dln == pytest.approx(DV / C, rel=1e-12)
+    np.testing.assert_array_equal(
+        v, unicor.velocity_from_log_shift(np.arange(-k, k + 1) * dln, conv))
+    assert v[k] == 0.0 and v.size == 2 * k + 1
+
+
+def test_lag_axis_refuses_a_grid_whose_step_is_not_the_declared_one(grid):
+    with pytest.raises(ValueError, match="order 1: the wavelength grid step"):
+        unicor.lag_axis([grid, unicor.log_lambda_grid(5000.0, 5100.0, 0.6)[0]], DV, 10)
+
+
+def test_lag_axis_refuses_orders_whose_ln_steps_differ():
+    # Within the rtol=1e-3 step check, but 100 lags apart the two axes would be
+    # misregistered by 0.04 lag.
+    waves = [unicor.log_lambda_grid(5000.0, 5050.0, step)[0] for step in (0.5, 0.5002)]
+    with pytest.raises(ValueError, match="velocity axis"):
+        unicor.lag_axis(waves, 0.5, 100)
+    unicor.lag_axis(waves, 0.5, 1)
+
+
+def test_lag_axis_refuses_bad_grids_conventions_and_lag_counts(grid):
+    with pytest.raises(ValueError, match="uniform"):
+        unicor.lag_axis([np.delete(grid, 100)], DV, 10)
+    with pytest.raises(ValueError, match="convention"):
+        unicor.lag_axis([grid], DV, 10, velocity_convention='classical')
+    with pytest.raises(ValueError, match="n_lags"):
+        unicor.lag_axis([grid], DV, 0)
+
+
+def test_effective_bins_count_native_pixels():
+    assert unicor.effective_bins(1000, 0.25, 1.0) == 250.0      # 4x oversampled
+    assert unicor.effective_bins(1000, 1.0, 0.25) == 1000.0     # coarser than native
+    assert unicor.effective_bins(1000, 0.5, 0.5) == 1000.0
+    np.testing.assert_array_equal(
+        unicor.effective_bins(np.array([1000, 600]), 0.5, np.array([1.0, 0.25])),
+        [500.0, 600.0])
+
+
+@pytest.mark.parametrize("dv, native", [(0.0, 1.0), (0.5, 0.0), (0.5, -1.0),
+                                        (0.5, np.nan), (np.inf, 1.0)])
+def test_effective_bins_refuse_non_positive_steps(dv, native):
+    with pytest.raises(ValueError, match="positive"):
+        unicor.effective_bins(1000, dv, native)
+
+
+@pytest.mark.parametrize("conv", CONVENTIONS)
+@pytest.mark.parametrize("v_inj", [-12.3, 0.0, 7.7])
+def test_ccf_order_recovers_the_injected_rv(grid, conv, v_inj):
+    t_wave, t_flux = _template_arrays()
+    order = unicor.ccf_order(grid, _line_spectrum(v_inj, grid, conv), t_wave, t_flux, 80,
+                             dv_kms=DV, native_step_kms=DV, velocity_convention=conv,
+                             errors=True)
+    assert order.rv == pytest.approx(v_inj, abs=0.05)
+    assert order.peak == pytest.approx(1.0, abs=0.01)
+    assert 0.0 < order.erv < 0.05
+    assert (order.lo, order.hi, order.n_eff) == (0, grid.size, float(grid.size))
+
+
+def test_ccf_order_is_the_composition_of_the_lower_level_functions(grid):
+    # A template starting inside the order: only part of it is correlated.
+    t_wave, t_flux = _template_arrays()
+    cut = np.searchsorted(t_wave, 5010.0)
+    t_wave, t_flux = t_wave[cut:], t_flux[cut:]
+    k, native = 60, 2.0
+    flux = _line_spectrum(4.2, grid) + np.random.default_rng(9).normal(0, 0.01, grid.size)
+    order = unicor.ccf_order(grid, flux, t_wave, t_flux, k, dv_kms=DV,
+                             native_step_kms=native, errors=True)
+    ext = unicor.extend_log_grid(grid, k)
+    lo, hi = unicor.template_coverage(ext, t_wave, k)
+    assert lo > 0 and (order.lo, order.hi) == (lo, hi)
+    v, c = unicor.ccf_vs_velocity(unicor.resample(t_wave, t_flux, ext)[lo:hi + 2 * k],
+                                  flux[lo:hi], grid[lo:hi])
+    n_eff = unicor.effective_bins(hi - lo, DV, native)
+    rv, peak = unicor.subpixel_peak(v, c)
+    assert np.array_equal(order.velocity, v) and np.array_equal(order.ccf, c)
+    assert np.array_equal(order.loglike, unicor.loglike_from_ccf(c, n_eff))
+    assert (order.rv, order.peak, order.n_eff) == (rv, peak, n_eff)
+    assert order.erv == unicor.rv_uncertainty(v, c, rv, n_eff)
+
+
+def test_ccf_order_without_errors_leaves_the_uncertainty_nan(grid):
+    t_wave, t_flux = _template_arrays()
+    order = unicor.ccf_order(grid, _line_spectrum(3.0, grid), t_wave, t_flux, 40,
+                             dv_kms=DV, native_step_kms=DV)
+    assert np.isnan(order.erv) and np.isfinite(order.rv)
+
+
+def test_ccf_order_beyond_the_scan_is_nan_but_keeps_its_ccf(grid):
+    # The peak lies outside +-20 km/s: no RV, but the CCF itself is valid.
+    t_wave, t_flux = _template_arrays()
+    order = unicor.ccf_order(grid, _line_spectrum(-35.0, grid), t_wave, t_flux, 40,
+                             dv_kms=DV, native_step_kms=DV, errors=True)
+    assert np.isnan(order.rv) and np.isnan(order.erv) and np.isnan(order.peak)
+    assert np.all(np.isfinite(order.ccf)) and order.ccf.size == 81
+
+
+def test_ccf_order_refuses_an_order_the_template_does_not_cover(grid):
+    t_wave = np.linspace(6000.0, 6100.0, 500)
+    with pytest.raises(ValueError, match="does not cover any pixel"):
+        unicor.ccf_order(grid, _line_spectrum(0.0, grid), t_wave, np.ones(500), 40,
+                         dv_kms=DV, native_step_kms=DV)
+
+
+def test_ccf_order_result_is_frozen(grid):
+    t_wave, t_flux = _template_arrays()
+    order = unicor.ccf_order(grid, _line_spectrum(0.0, grid), t_wave, t_flux, 20,
+                             dv_kms=DV, native_step_kms=DV)
+    with pytest.raises(AttributeError):
+        order.rv = 1.0
+
+
+def test_measure_rv_is_the_subpixel_peak_and_its_ml_uncertainty(grid):
+    v, c = _ccf(0.0, _line_spectrum(5.5, grid), grid, vmax=30)
+    m = unicor.measure_rv(v, c, 812.0)
+    rv, peak = unicor.subpixel_peak(v, c)
+    assert (m.rv, m.peak) == (rv, peak)
+    assert m.erv == unicor.rv_uncertainty(v, c, rv, 812.0)
+
+
+def test_measure_rv_refuses_a_peak_it_cannot_locate(grid):
+    v, c = _ccf(0.0, _line_spectrum(-35.0, grid), grid, vmax=20)
+    with pytest.raises(ValueError, match="edge"):
+        unicor.measure_rv(v, c, 812.0)
+    with pytest.raises(ValueError, match="NaN"):
+        unicor.measure_rv(v, np.full_like(c, np.nan), 812.0)

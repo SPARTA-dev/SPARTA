@@ -12,6 +12,7 @@ recovered RV must equal the injected RV, for both signs, with no pull to zero,
 in either Doppler convention ('cz' by default, or 'relativistic').
 """
 import inspect
+import warnings
 
 import numpy as np
 import pytest
@@ -108,6 +109,21 @@ def test_an_order_the_template_does_not_cover_is_nan_not_fatal():
         ccf = CCF1d().cross_correlate(spectrum=obs, template=tmpl, dv=0.5, vel_bound=50)
     assert np.isnan(ccf.Corr["RV"][0, 0])
     assert float(ccf.Corr["RV"][1, 0]) == pytest.approx(4.0, abs=0.05)
+
+
+@pytest.mark.parametrize("break_template", ["decreasing", "short_flux"])
+def test_a_malformed_template_fails_the_call_instead_of_nan_orders(break_template):
+    # A template the CCF cannot use is the caller's error, not a per-order
+    # failure: it raises rather than warning and NaN-ing every order.
+    obs = Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0)], name="o")
+    if break_template == "decreasing":
+        tmpl = Template(Spectrum(wv=[WAVE[::-1].copy()], sp=[_line(5500.0)[::-1]], name="t"))
+    else:
+        tmpl = Template(Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0)[:-1]], name="t"))
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(ValueError, match="template order 0"):
+            CCF1d().cross_correlate(spectrum=obs, template=tmpl, dv=0.5, vel_bound=50)
 
 
 def _log_spectrum(wave, flux, dv):

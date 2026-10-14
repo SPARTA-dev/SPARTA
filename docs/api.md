@@ -21,7 +21,7 @@ Signatures and the numpydoc summary, Parameters, Returns and Raises of every pub
   - [`sparta.instruments`](#spartainstruments) — `Instrument`, `LoadedSpectrum`, `Product`, `Recommended`, `Component`, `Simulation`, `Truth`
   - [`sparta.plotting`](#spartaplotting)
 - **unicor**
-  - [`unicor.ccf`](#unicorccf)
+  - [`unicor.ccf`](#unicorccf) — `CCFOrder`, `RVMeasurement`
   - [`unicor.dsp`](#unicordsp)
 - **todcor**
   - [`todcor.estimator`](#todcorestimator)
@@ -743,7 +743,7 @@ Cross-correlate every order of a spectrum with a template (UNICOR).
 
 **Raises**
 
-- *ValueError*: If `output` is unknown, `vel_bound` is below one grid step, an order's grid is not uniform in ln(lambda) with the declared step, or the orders' steps differ.
+- *ValueError*: If `output` is unknown, `vel_bound` is below one grid step, an order's grid is not uniform in ln(lambda) with the declared step, the orders' steps differ, or a template order in use is not strictly increasing in wavelength or does not match its flux.
 
 ##### `CCF1d.combine`
 
@@ -2535,6 +2535,169 @@ Bisector span (BIS) of a single-peaked CCF and its uncertainty.
 **Returns**
 
 - `bis, ebis` (*float*): The span as currently computed (see the warning: not yet a velocity) and its uncertainty (km/s); NaN when either level does not cut the CCF exactly twice.
+
+#### `unicor.CCFOrder`
+
+```python
+CCFOrder(velocity, ccf, loglike, rv, erv, peak, n_eff, lo, hi)
+```
+
+One order's cross-correlation with a template (`ccf_order`).
+
+**Parameters**
+
+- `velocity` (*ndarray, shape (2K + 1,)*): Lag velocities (km/s) on the order's own correlated grid, increasing, 0 at the central lag.
+- `ccf` (*ndarray, shape (2K + 1,)*): Pearson correlation at each lag (dimensionless, in [-1, 1]).
+- `loglike` (*ndarray, shape (2K + 1,)*): Zucker (2003) log-likelihood `-(n_eff/2) ln(1 - ccf**2)` (dimensionless, >= 0; `loglike_from_ccf`).
+- `rv` (*float*): Velocity of the sub-pixel CCF peak (km/s); NaN if the peak cannot be located (e.g. at the edge of the scan).
+- `erv` (*float*): ML uncertainty of `rv` (km/s); NaN unless requested, or if `rv` is NaN or not a true maximum.
+- `peak` (*float*): CCF value at the peak (dimensionless); NaN with `rv`.
+- `n_eff` (*float*): Effective number of independent spectral bins behind `ccf` (dimensionless, > 0; `effective_bins` of the correlated pixels).
+- `lo, hi` (*int*): The correlated observed pixels, `wave[lo:hi]` (`template_coverage`).
+
+#### `unicor.RVMeasurement`
+
+```python
+RVMeasurement(rv, erv, peak)
+```
+
+A radial velocity read off a CCF (`measure_rv`).
+
+**Parameters**
+
+- `rv` (*float*): Velocity of the sub-pixel CCF peak (km/s).
+- `erv` (*float*): Its ML uncertainty (km/s); NaN when `rv` is not a true maximum of the spline through the CCF.
+- `peak` (*float*): CCF value at the peak (dimensionless).
+
+#### `unicor.template_coverage`
+
+```python
+unicor.template_coverage(w_ext, t_wave, n_lags)
+```
+
+Observed pixels whose template is known at every lag of the scan.
+
+**Parameters**
+
+- `w_ext` (*ndarray*): The order's log-lambda grid extended by `n_lags` steps on each side (Angstrom), see `extend_log_grid`.
+- `t_wave` (*ndarray*): The template's wavelengths (Angstrom, increasing).
+- `n_lags` (*int*): Number of lags K on each side of zero.
+
+**Returns**
+
+- `lo, hi` (*int*): Observed pixels `lo:hi` need exactly the template nodes `w_ext[lo: hi + 2K]`, all inside the template's span.
+
+**Raises**
+
+- *ValueError*: If no observed pixel is covered at every lag.
+
+#### `unicor.lag_axis`
+
+```python
+unicor.lag_axis(waves, dv_kms, n_lags, velocity_convention='cz')
+```
+
+The velocity of each lag, shared by orders on one log-lambda step.
+
+**Parameters**
+
+- `waves` (*sequence of ndarray*): Each order's wavelength grid (Angstrom), uniform in ln(lambda).
+- `dv_kms` (*float*): The declared grid step (km/s); every order's measured step `c * Delta_i` must match it to a relative 1e-3.
+- `n_lags` (*int*): Number of lags K (>= 1) on each side of zero.
+- `velocity_convention` (*{'cz', 'relativistic'}*): Doppler convention mapping lags to velocities, see `unicor.dsp.doppler_factor`. Default 'cz'.
+
+**Returns**
+
+- `dln` (*float*): The common ln(lambda) step `Delta` (dimensionless): the median of the orders' measured steps.
+- `v` (*ndarray, shape (2K + 1,)*): Velocity of lags k = -K..K (km/s), increasing, 0 at k = 0.
+
+**Raises**
+
+- *ValueError*: If `n_lags` is not a positive integer; an order is not uniform in ln(lambda) or its step is not `dv_kms`; the orders' steps differ by more than a thousandth of a lag across the scan; or `velocity_convention` is unknown.
+
+#### `unicor.effective_bins`
+
+```python
+unicor.effective_bins(n_pix, dv_kms, native_step_kms)
+```
+
+Independent spectral bins behind `n_pix` pixels on a `dv_kms` grid.
+
+**Parameters**
+
+- `n_pix` (*int or array_like*): Pixels correlated (dimensionless, >= 0).
+- `dv_kms` (*float*): Step of the correlated grid (km/s, > 0).
+- `native_step_kms` (*float or array_like*): Native sampling step (km/s, > 0), the coarsest the data have had.
+
+**Returns**
+
+- *float or ndarray*: The effective number of bins (dimensionless), broadcast over the inputs.
+
+**Raises**
+
+- *ValueError*: If `n_pix` is negative, or a step is not finite and positive.
+
+#### `unicor.ccf_order`
+
+```python
+unicor.ccf_order(
+    wave,
+    flux,
+    t_wave,
+    t_flux,
+    n_lags,
+    *,
+    dv_kms,
+    native_step_kms,
+    velocity_convention='cz',
+    errors=False,
+)
+```
+
+Cross-correlate one order with a template and read its RV.
+
+**Parameters**
+
+- `wave` (*ndarray, shape (N,)*): The order's wavelengths (Angstrom), uniform in ln(lambda) with step `dv_kms`.
+- `flux` (*ndarray, shape (N,)*): The order's flux (finite).
+- `t_wave` (*ndarray*): Template wavelengths (Angstrom, strictly increasing), at rest.
+- `t_flux` (*ndarray*): Template flux at `t_wave`.
+- `n_lags` (*int*): Number of lags K (>= 1) on each side of zero; the scan half-width is `K * dv_kms` km/s.
+- `dv_kms` (*float*): Step of the order's grid (km/s); with `native_step_kms` it sets `n_eff` (`effective_bins`).
+- `native_step_kms` (*float*): The order's native sampling step (km/s).
+- `velocity_convention` (*{'cz', 'relativistic'}*): Doppler convention mapping lags to velocities. Default 'cz'.
+- `errors` (*bool*): Also compute the ML uncertainty of the RV (`rv_uncertainty`); otherwise `erv` is NaN.
+
+**Returns**
+
+- *CCFOrder*: The CCF, its log-likelihood, RV, uncertainty, peak, `n_eff` and the correlated pixel range. `rv`, `erv` and `peak` are NaN when the peak cannot be located (e.g. beyond the scan).
+
+**Raises**
+
+- *ValueError*: If the template covers no observed pixel at every lag or its wavelengths are not strictly increasing (one per flux value), the grid is not uniform in ln(lambda), a flux is not finite or constant, or `velocity_convention` is unknown (see `ccf_vs_velocity`).
+
+#### `unicor.measure_rv`
+
+```python
+unicor.measure_rv(v, ccf, n_eff)
+```
+
+Radial velocity, its ML uncertainty and the peak of a CCF.
+
+**Parameters**
+
+- `v` (*ndarray*): Velocity lags (km/s), increasing.
+- `ccf` (*ndarray*): CCF values at `v` (single-order or combined).
+- `n_eff` (*float*): Effective number of independent spectral bins behind `ccf` (dimensionless, > 0).
+
+**Returns**
+
+- *RVMeasurement*: `rv` and `erv` (km/s) and `peak` (the CCF at `rv`).
+
+**Raises**
+
+- *ValueError*: If the peak cannot be located (at the scan edge, not concave, or a non-finite CCF), or `n_eff` is not finite and positive.
+- *numpy.linalg.LinAlgError*: If the parabola fit around the peak fails.
 
 ### unicor.dsp
 

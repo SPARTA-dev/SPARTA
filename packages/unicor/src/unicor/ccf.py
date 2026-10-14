@@ -31,7 +31,21 @@ For several orders sharing the velocity lags ``v``::
 
 ``n_eff`` is the number of *independent* spectral bins: the number of pixels
 on the native (detector) sampling, not on a finer resampled grid -- and not the
-number of velocity lags.
+number of velocity lags (:func:`effective_bins`).
+
+Per-order atoms
+---------------
+The same steps, one call per order -- the loop body of SPARTA's ``CCF1d``::
+
+    dln, v = lag_axis(waves, dv, K)                     # shared lag velocities
+    orders = [ccf_order(w, f, t_wave, t_flux, K, dv_kms=dv, native_step_kms=nat)
+              for w, f, nat in zip(waves, fluxes, native_steps)]
+    combined = combine_ccfs([o.ccf for o in orders], n_eff=[o.n_eff for o in orders])
+    rv = measure_rv(v, combined, sum(o.n_eff for o in orders))
+
+:func:`ccf_order` returns a :class:`CCFOrder`, :func:`measure_rv` an
+:class:`RVMeasurement`; :func:`template_coverage` says which observed pixels
+the template serves at every lag.
 
 Two output modes
 ----------------
@@ -42,11 +56,13 @@ relative to no correlation (C = 0). It is monotonic in ``C**2`` at fixed N, so
 both curves peak at the same lag; read the RV and its error off the CCF
 (:func:`subpixel_peak`, :func:`rv_uncertainty`) whichever curve you keep.
 """
+from dataclasses import dataclass
+
 import numpy as np
 from scipy import interpolate
 from scipy.signal import correlate as _correlate
 
-from .dsp import log_grid_dln, velocity_from_log_shift
+from .dsp import C_KMS, log_grid_dln, resample, velocity_from_log_shift
 
 OUTPUTS = ('ccf', 'loglike')
 
@@ -523,3 +539,313 @@ def bisector_span(v, ccf, n_eff, levels=(0.35, 0.95)):
 
     bis = (low[1] + low[0]) / 2 - (high[1] + high[0]) / 2
     return bis, np.sqrt(2) * err
+
+
+# =============================================================================
+# Per-order atoms
+# =============================================================================
+@dataclass(frozen=True, eq=False)
+class CCFOrder:
+    """
+    One order's cross-correlation with a template (:func:`ccf_order`).
+
+    Parameters
+    ----------
+    velocity : ndarray, shape (2K + 1,)
+        Lag velocities (km/s) on the order's own correlated grid, increasing,
+        0 at the central lag.
+    ccf : ndarray, shape (2K + 1,)
+        Pearson correlation at each lag (dimensionless, in [-1, 1]).
+    loglike : ndarray, shape (2K + 1,)
+        Zucker (2003) log-likelihood ``-(n_eff/2) ln(1 - ccf**2)``
+        (dimensionless, >= 0; :func:`loglike_from_ccf`).
+    rv : float
+        Velocity of the sub-pixel CCF peak (km/s); NaN if the peak cannot be
+        located (e.g. at the edge of the scan).
+    erv : float
+        ML uncertainty of ``rv`` (km/s); NaN unless requested, or if ``rv``
+        is NaN or not a true maximum.
+    peak : float
+        CCF value at the peak (dimensionless); NaN with ``rv``.
+    n_eff : float
+        Effective number of independent spectral bins behind ``ccf``
+        (dimensionless, > 0; :func:`effective_bins` of the correlated pixels).
+    lo, hi : int
+        The correlated observed pixels, ``wave[lo:hi]``
+        (:func:`template_coverage`).
+    """
+    velocity: np.ndarray
+    ccf: np.ndarray
+    loglike: np.ndarray
+    rv: float
+    erv: float
+    peak: float
+    n_eff: float
+    lo: int
+    hi: int
+
+
+@dataclass(frozen=True)
+class RVMeasurement:
+    """
+    A radial velocity read off a CCF (:func:`measure_rv`).
+
+    Parameters
+    ----------
+    rv : float
+        Velocity of the sub-pixel CCF peak (km/s).
+    erv : float
+        Its ML uncertainty (km/s); NaN when ``rv`` is not a true maximum of
+        the spline through the CCF.
+    peak : float
+        CCF value at the peak (dimensionless).
+    """
+    rv: float
+    erv: float
+    peak: float
+
+
+def template_coverage(w_ext, t_wave, n_lags):
+    """Observed pixels whose template is known at every lag of the scan.
+
+    Parameters
+    ----------
+    w_ext : ndarray
+        The order's log-lambda grid extended by ``n_lags`` steps on each side
+        (Angstrom), see :func:`extend_log_grid`.
+    t_wave : ndarray
+        The template's wavelengths (Angstrom, increasing).
+    n_lags : int
+        Number of lags K on each side of zero.
+
+    Returns
+    -------
+    lo, hi : int
+        Observed pixels ``lo:hi`` need exactly the template nodes
+        ``w_ext[lo: hi + 2K]``, all inside the template's span.
+
+    Raises
+    ------
+    ValueError
+        If no observed pixel is covered at every lag.
+    """
+    # A millionth of a step absorbs the round-off of exp() when the template
+    # sits on the observed grid itself.
+    tol = 1e-6 * np.log(w_ext[1] / w_ext[0])
+    ln_ext = np.log(w_ext)
+    inside = np.flatnonzero((ln_ext >= np.log(t_wave[0]) - tol) &
+                            (ln_ext <= np.log(t_wave[-1]) + tol))
+    n_obs = len(w_ext) - 2 * n_lags
+    # The covered nodes are contiguous; pixel i needs nodes i .. i + 2K.
+    lo, hi = (inside[0], inside[-1] - 2 * n_lags + 1) if inside.size else (0, 0)
+    if hi <= lo:
+        raise ValueError(
+            f"the template ({t_wave[0]:.2f}-{t_wave[-1]:.2f} A) does not cover any "
+            f"pixel of the order ({w_ext[n_lags]:.2f}-{w_ext[n_lags + n_obs - 1]:.2f} A) "
+            f"across the +-{n_lags}-lag scan; use a wider template or a smaller vel_bound")
+    return lo, hi
+
+
+def lag_axis(waves, dv_kms, n_lags, velocity_convention='cz'):
+    """The velocity of each lag, shared by orders on one log-lambda step.
+
+    Lag k is ``k * Delta`` in ln(lambda) only if every order really is
+    velocity-even with the declared step (dropping pixels breaks that
+    silently), and the orders' CCFs share one velocity axis only if they share
+    ``Delta``. Both are verified here.
+
+    Parameters
+    ----------
+    waves : sequence of ndarray
+        Each order's wavelength grid (Angstrom), uniform in ln(lambda).
+    dv_kms : float
+        The declared grid step (km/s); every order's measured step
+        ``c * Delta_i`` must match it to a relative 1e-3.
+    n_lags : int
+        Number of lags K (>= 1) on each side of zero.
+    velocity_convention : {'cz', 'relativistic'}
+        Doppler convention mapping lags to velocities, see
+        :func:`unicor.dsp.doppler_factor`. Default 'cz'.
+
+    Returns
+    -------
+    dln : float
+        The common ln(lambda) step ``Delta`` (dimensionless): the median of the
+        orders' measured steps.
+    v : ndarray, shape (2K + 1,)
+        Velocity of lags k = -K..K (km/s), increasing, 0 at k = 0.
+
+    Raises
+    ------
+    ValueError
+        If ``n_lags`` is not a positive integer; an order is not uniform in
+        ln(lambda) or its step is not ``dv_kms``; the orders' steps differ by
+        more than a thousandth of a lag across the scan; or
+        ``velocity_convention`` is unknown.
+    """
+    if int(n_lags) != n_lags or n_lags < 1:
+        raise ValueError(f"n_lags must be a positive integer, got {n_lags}")
+    dln = np.array([log_grid_dln(w) for w in waves])
+    for i, step in enumerate(C_KMS * dln):
+        if not np.isclose(step, dv_kms, rtol=1e-3):
+            raise ValueError(
+                f"order {i}: the wavelength grid step is {step:.6g} km/s but "
+                f"{dv_kms:.6g} km/s is declared")
+    dln_common = float(np.median(dln))
+    # Tolerate a thousandth of a lag of misregistration at the scan edge.
+    if np.max(np.abs(dln / dln_common - 1)) * n_lags > 1e-3:
+        raise ValueError(
+            "the orders' ln(lambda) steps differ (relative spread "
+            f"{np.ptp(dln) / dln_common:.2g}), so their CCFs cannot share one "
+            "velocity axis; resample them onto one log-lambda grid step")
+    v = velocity_from_log_shift(np.arange(-n_lags, n_lags + 1) * dln_common,
+                                velocity_convention)
+    return dln_common, v
+
+
+def effective_bins(n_pix, dv_kms, native_step_kms):
+    """Independent spectral bins behind ``n_pix`` pixels on a ``dv_kms`` grid.
+
+    Resampling onto a grid finer than the native (detector) sampling adds
+    samples but no information, so ``n_pix * min(1, dv / native)`` bins are
+    counted; a grid coarser than the native one keeps every pixel.
+
+    Parameters
+    ----------
+    n_pix : int or array_like
+        Pixels correlated (dimensionless, >= 0).
+    dv_kms : float
+        Step of the correlated grid (km/s, > 0).
+    native_step_kms : float or array_like
+        Native sampling step (km/s, > 0), the coarsest the data have had.
+
+    Returns
+    -------
+    float or ndarray
+        The effective number of bins (dimensionless), broadcast over the
+        inputs.
+
+    Raises
+    ------
+    ValueError
+        If ``n_pix`` is negative, or a step is not finite and positive.
+    """
+    n_pix = np.asarray(n_pix, float)
+    native_step_kms = np.asarray(native_step_kms, float)
+    if np.any(n_pix < 0):
+        raise ValueError(f"n_pix must be non-negative, got {n_pix}")
+    if not (np.isfinite(dv_kms) and dv_kms > 0
+            and np.all(np.isfinite(native_step_kms) & (native_step_kms > 0))):
+        raise ValueError("dv_kms and native_step_kms must be finite and positive (km/s), "
+                         f"got {dv_kms} and {native_step_kms}")
+    return n_pix * np.minimum(1.0, dv_kms / native_step_kms)
+
+
+def ccf_order(wave, flux, t_wave, t_flux, n_lags, *, dv_kms, native_step_kms,
+              velocity_convention='cz', errors=False):
+    """Cross-correlate one order with a template and read its RV.
+
+    The template is resampled (linearly) onto the order's log-lambda grid
+    continued by K = ``n_lags`` steps on each side (:func:`extend_log_grid`);
+    only the observed pixels it covers at every lag are correlated
+    (:func:`template_coverage`) -- it is never extrapolated -- and each lag
+    is a Pearson correlation over those pixels (:func:`ccf_vs_velocity`). The
+    RV is the sub-pixel peak (:func:`subpixel_peak`) on the velocity axis of
+    the correlated pixels.
+
+    Parameters
+    ----------
+    wave : ndarray, shape (N,)
+        The order's wavelengths (Angstrom), uniform in ln(lambda) with step
+        ``dv_kms``.
+    flux : ndarray, shape (N,)
+        The order's flux (finite).
+    t_wave : ndarray
+        Template wavelengths (Angstrom, strictly increasing), at rest.
+    t_flux : ndarray
+        Template flux at ``t_wave``.
+    n_lags : int
+        Number of lags K (>= 1) on each side of zero; the scan half-width is
+        ``K * dv_kms`` km/s.
+    dv_kms : float
+        Step of the order's grid (km/s); with ``native_step_kms`` it sets
+        ``n_eff`` (:func:`effective_bins`).
+    native_step_kms : float
+        The order's native sampling step (km/s).
+    velocity_convention : {'cz', 'relativistic'}
+        Doppler convention mapping lags to velocities. Default 'cz'.
+    errors : bool
+        Also compute the ML uncertainty of the RV (:func:`rv_uncertainty`);
+        otherwise ``erv`` is NaN.
+
+    Returns
+    -------
+    CCFOrder
+        The CCF, its log-likelihood, RV, uncertainty, peak, ``n_eff`` and the
+        correlated pixel range. ``rv``, ``erv`` and ``peak`` are NaN when the
+        peak cannot be located (e.g. beyond the scan).
+
+    Raises
+    ------
+    ValueError
+        If the template covers no observed pixel at every lag or its
+        wavelengths are not strictly increasing (one per flux value), the
+        grid is not uniform in ln(lambda), a flux is not finite or constant,
+        or ``velocity_convention`` is unknown (see :func:`ccf_vs_velocity`).
+    """
+    wave = np.asarray(wave, float)
+    flux = np.asarray(flux, float)
+    t_wave = np.asarray(t_wave, float)
+    t_flux = np.asarray(t_flux, float)
+
+    w_ext = extend_log_grid(wave, n_lags)
+    t_ext = resample(t_wave, t_flux, w_ext)
+    lo, hi = template_coverage(w_ext, t_wave, n_lags)
+    v, ccf = ccf_vs_velocity(t_ext[lo: hi + 2 * n_lags], flux[lo:hi], wave[lo:hi],
+                             velocity_convention)
+    n_eff = effective_bins(hi - lo, dv_kms, native_step_kms)
+
+    # A peak that cannot be located (e.g. at the scan edge) is a NaN RV, not
+    # an error: the CCF itself is valid and still enters a combination.
+    try:
+        rv, peak = subpixel_peak(v, ccf)
+        erv = rv_uncertainty(v, ccf, rv, n_eff) if errors else np.nan
+    except (ValueError, np.linalg.LinAlgError):
+        rv, erv, peak = np.nan, np.nan, np.nan
+
+    return CCFOrder(velocity=v, ccf=ccf, loglike=loglike_from_ccf(ccf, n_eff), rv=rv,
+                    erv=erv, peak=peak, n_eff=n_eff, lo=lo, hi=hi)
+
+
+def measure_rv(v, ccf, n_eff):
+    """Radial velocity, its ML uncertainty and the peak of a CCF.
+
+    The sub-pixel peak (:func:`subpixel_peak`) and the curvature error
+    (:func:`rv_uncertainty`) there -- for a combined CCF
+    (:func:`combine_ccfs`), pass the total ``n_eff`` of its orders.
+
+    Parameters
+    ----------
+    v : ndarray
+        Velocity lags (km/s), increasing.
+    ccf : ndarray
+        CCF values at ``v`` (single-order or combined).
+    n_eff : float
+        Effective number of independent spectral bins behind ``ccf``
+        (dimensionless, > 0).
+
+    Returns
+    -------
+    RVMeasurement
+        ``rv`` and ``erv`` (km/s) and ``peak`` (the CCF at ``rv``).
+
+    Raises
+    ------
+    ValueError
+        If the peak cannot be located (at the scan edge, not concave, or a
+        non-finite CCF), or ``n_eff`` is not finite and positive.
+    numpy.linalg.LinAlgError
+        If the parabola fit around the peak fails.
+    """
+    rv, peak = subpixel_peak(v, ccf)
+    return RVMeasurement(rv=rv, erv=rv_uncertainty(v, ccf, rv, n_eff), peak=peak)

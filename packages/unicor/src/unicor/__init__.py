@@ -22,11 +22,15 @@ Layout
                  sub-pixel peak, ML uncertainty, bisector span. The CCF and
                  the combination return the correlation (``output='ccf'``)
                  or the Zucker (2003) log-likelihood (``output='loglike'``).
+                 Per-order atoms: ``lag_axis``, ``ccf_order`` (-> ``CCFOrder``),
+                 ``template_coverage``, ``effective_bins``, ``measure_rv``
+                 (-> ``RVMeasurement``).
 """
 
 from .ccf import (
-    bisector_span, ccf_at, ccf_vs_velocity, check_output, combine_ccfs,
-    extend_log_grid, loglike_from_ccf, rv_uncertainty, subpixel_peak,
+    CCFOrder, RVMeasurement, bisector_span, ccf_at, ccf_order, ccf_vs_velocity,
+    check_output, combine_ccfs, effective_bins, extend_log_grid, lag_axis,
+    loglike_from_ccf, measure_rv, rv_uncertainty, subpixel_peak, template_coverage,
 )
 from .dsp import (
     C_KMS, broaden_gaussian, broaden_gaussian_residual, broaden_rotational,
@@ -36,11 +40,13 @@ from .dsp import (
     velocity_from_log_shift, zero_lag_correlation,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     'ccf_vs_velocity', 'extend_log_grid', 'combine_ccfs', 'loglike_from_ccf',
     'check_output', 'subpixel_peak', 'ccf_at', 'rv_uncertainty', 'bisector_span',
+    'lag_axis', 'template_coverage', 'effective_bins', 'ccf_order', 'measure_rv',
+    'CCFOrder', 'RVMeasurement',
     'C_KMS', 'dv_from_wave', 'log_lambda_grid', 'log_grid_dln', 'log_grid_step',
     'resample', 'tukey_window',
     'doppler_factor', 'velocity_from_log_shift', 'shift_kms', 'doppler_shift_wave',

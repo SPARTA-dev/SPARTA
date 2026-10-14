@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 # Distribution name is prefixed: "unicor" on PyPI is an unrelated package.
 # The import name is plain `unicor`.
 name = "sparta-unicor"
-version = "0.1.0"
+version = "0.2.0"
 description = "Standalone 1-D cross-correlation radial-velocity engine (UNICOR, from SPARTA)."
 readme = "README.md"
 license = "MIT"
