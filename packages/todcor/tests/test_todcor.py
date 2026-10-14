@@ -336,6 +336,122 @@ def test_crlb_interior_peak_reports_on_edge_false():
 
 
 # =============================================================================
+# The two-dimensional correlation R (output='ccf') and the output modes
+# =============================================================================
+def _noisy_case(seed=7, sigma=0.01):
+    wave_grid, win, t1, t2, g1, g2, dv = _build_case()
+    flux = composite_flux(wave_grid, [t1, t2], [100.0, -150.0], [0.7, 0.5])
+    flux = flux + np.random.default_rng(seed).normal(0.0, sigma, flux.shape)
+    v1 = np.arange(40.0, 161.0, 2.0)
+    v2 = np.arange(-210.0, -89.0, 2.0)
+    return window_stats((flux - 1.0) * win, g1, g2, dv, v1, v2, sigma=sigma), v1, v2
+
+
+@pytest.mark.parametrize("nonneg", [False, True])
+def test_r_is_the_explained_power_fraction_and_shares_the_logl_argmax(nonneg):
+    st, v1, v2 = _noisy_case()
+    res = profile_from_stats(st, v1, v2, nonneg=nonneg)
+    R = res["R"]
+    assert np.all((R >= 0) & (R <= 1))
+    # R^2 = 1 - chi2_min / SD, so logL_profile = -(SD/2)(1 - R^2) node by node.
+    np.testing.assert_allclose(res["logL_profile"], -0.5 * st["SD"] * (1 - R ** 2),
+                               rtol=1e-10, atol=1e-8 * st["SD"])
+    assert np.argmax(R) == np.argmax(res["logL_profile"])
+    i, j = np.unravel_index(np.argmax(R), R.shape)
+    assert res["best"]["R"] == R[i, j]
+    assert 0.9 < res["best"]["R"] < 1.0
+
+
+def test_r_is_the_zucker_mazeh_two_dimensional_correlation():
+    # Zucker & Mazeh (1994): with the light ratio fitted at every node,
+    # R^2 = (c1^2 - 2 c1 c2 c12 + c2^2) / (1 - c12^2), with c1, c2 the
+    # normalised data-template correlations and c12 the template-template one.
+    st, v1, v2 = _noisy_case()
+    c1 = st["b1"][:, None] / np.sqrt(st["S11"] * st["SD"])
+    c2 = st["b2"][None, :] / np.sqrt(st["S22"] * st["SD"])
+    c12 = st["A12"] / np.sqrt(st["S11"] * st["S22"])
+    zm94 = np.sqrt((c1 ** 2 - 2 * c1 * c2 * c12 + c2 ** 2) / (1 - c12 ** 2))
+    np.testing.assert_allclose(profile_from_stats(st, v1, v2)["R"], zm94, rtol=1e-9)
+
+
+@pytest.mark.parametrize("n", [256, 257])
+def test_r_is_one_for_a_noiseless_composite_at_the_truth(n):
+    grid = np.exp(np.linspace(np.log(4400), np.log(4520), n))
+    dv = np.log(grid[1] / grid[0]) * ops.C_KMS
+    g1 = -0.5 * np.exp(-0.5 * ((grid - 4450) / 2.0) ** 2)
+    g2 = +0.6 * np.exp(-0.5 * ((grid - 4485) / 3.0) ** 2)
+    data = model_flux(grid, dv, g1, g2, 33.0, -51.0, 0.7, 0.5) - 1.0
+    # The lines are ~130 km/s wide (sigma): scan well beyond that.
+    v1, v2 = 33.0 + 25.0 * np.arange(-12, 13), -51.0 + 25.0 * np.arange(-12, 13)
+    res = todcor_map(data, g1, g2, dv, v1, v2, sigma=0.01)
+    assert (res["best"]["v1"], res["best"]["v2"]) == (33.0, -51.0)
+    assert res["best"]["R"] == pytest.approx(1.0, abs=1e-12)
+    assert res["R"].min() < 0.9
+
+
+def _periodic_case(n=1201, k_max=60, n_lags=40, seed=11):
+    """Data and template 1 on one odd-N log grid, sharing the low Fourier modes
+    1..k_max; template 2 only in the modes above, so it is orthogonal to both at
+    every shift. Template 1 is periodic over the window -- extended by repeating
+    it, unicor's lag k is exactly TODCOR's circular shift by k pixels."""
+    rng = np.random.default_rng(seed)
+    wave, _ = ops.log_lambda_grid(5000.0, 5000.0 * np.exp(n * 0.5 / ops.C_KMS), 0.5)
+    wave = wave[:n]
+    def band(lo, hi):
+        spec = np.zeros(n // 2 + 1, complex)
+        spec[lo:hi + 1] = rng.normal(size=hi + 1 - lo) + 1j * rng.normal(size=hi + 1 - lo)
+        return np.fft.irfft(spec, n)
+    g1 = band(1, k_max)
+    shifted = np.roll(g1, 7)                             # the data: g1 moved by 7 pixels
+    data = 0.8 * shifted + 0.3 * band(1, k_max)          # plus 'noise' in the same band
+    g2 = band(k_max + 1, n // 2)
+    template_ext = np.concatenate([g1[-n_lags:], g1, g1[:n_lags]])
+    return wave, data, g1, g2, template_ext, n_lags
+
+
+@pytest.mark.parametrize("nonneg", [False, True])
+def test_one_template_r_reduces_to_unicors_ccf(nonneg):
+    # With template 2 orthogonal to the data and to template 1 at every shift,
+    # c2 = c12 = 0 and R(v1, v2) = |c1(v1)|: the 1-D normalised CCF of the data
+    # against template 1 (clipped at 0 when the amplitudes must be >= 0).
+    import unicor
+    wave, data, g1, g2, template_ext, k = _periodic_case()
+    v, ccf = unicor.ccf_vs_velocity(template_ext, data, wave)
+    dv = ops.log_grid_step(wave)
+    v2 = np.array([-3.0, 0.0, 12.5])
+    res = todcor_map(data, g1, g2, dv, v, v2, sigma=1.0, nonneg=nonneg)
+    want = np.maximum(ccf, 0.0) if nonneg else np.abs(ccf)
+    for j in range(v2.size):
+        np.testing.assert_allclose(res["R"][:, j], want, atol=1e-10)
+    assert v[np.argmax(res["R"][:, 0])] == pytest.approx(v[k + 7])
+
+
+def test_output_selects_the_primary_map_and_nothing_else():
+    st, v1, v2 = _noisy_case()
+    as_ccf = profile_from_stats(st, v1, v2, nonneg=True)
+    as_lnl = profile_from_stats(st, v1, v2, nonneg=True, output='loglike')
+    assert as_ccf["output"] == 'ccf' and as_ccf["map"] is as_ccf["R"]
+    assert as_lnl["output"] == 'loglike' and as_lnl["map"] is as_lnl["logL_profile"]
+    assert as_ccf["best"] == as_lnl["best"]
+    for key in ("R", "logL_profile", "logL_marginal", "a1", "a2", "chi2"):
+        np.testing.assert_array_equal(as_ccf[key], as_lnl[key])
+
+
+@pytest.mark.parametrize("bad", ['R', 'logL', None])
+def test_an_unknown_output_mode_is_refused_by_the_estimator(bad):
+    st, v1, v2 = _noisy_case()
+    with pytest.raises(ValueError, match="output"):
+        profile_from_stats(st, v1, v2, output=bad)
+
+
+def test_r_is_undefined_without_data_power():
+    st, v1, v2 = _noisy_case()
+    flat = dict(st, SD=0.0, b1=0.0 * st["b1"], b2=0.0 * st["b2"])
+    with pytest.raises(ValueError, match="no power"):
+        profile_from_stats(flat, v1, v2)
+
+
+# =============================================================================
 # Oversampled analysis grids: Fisher weights and noise degrees of freedom
 # =============================================================================
 def _narrow_line_flux(wave, centers, depths, fwhm=8.0, v=0.0):

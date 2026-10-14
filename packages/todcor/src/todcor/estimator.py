@@ -15,7 +15,7 @@
 # spectroscopic binaries with TODCOR. I. A new two-dimensional correlation
 # algorithm."
 #
-# Dependencies: numpy, unicor.dsp.
+# Dependencies: numpy, unicor (dsp, and ccf.check_output).
 """The Fourier-domain TODCOR estimator (the derivation).
 
 Method
@@ -39,8 +39,10 @@ once and reused at every trial velocity::
 
 The amplitudes ``(a1, a2)`` enter linearly, so for every trial ``(v1, v2)`` they
 are solved in closed form by 2x2 weighted least squares.  Profiling them out
-gives a log-likelihood surface over ``(v1, v2)`` -- the classic TODCOR
-correlation map (Zucker & Mazeh 1994), here cast as a Gaussian likelihood.
+gives two equivalent surfaces over ``(v1, v2)``: the Gaussian log-likelihood
+``-chi^2/2`` and the classic TODCOR two-dimensional correlation ``R``
+(Zucker & Mazeh 1994), the fraction of the data's power the best-fit pair of
+templates explains (below).
 
 Sufficient statistics
 ---------------------
@@ -72,6 +74,22 @@ The 2x2 normal equations ``N a = b`` with ``N = [[S11, A12], [A12, S22]]`` and
     a1 = (S22 b1 - A12 b2) / det        a2 = (S11 b2 - A12 b1) / det
 
 Substituting the profile amplitudes gives ``logL_profile = -chi^2/2``.
+
+The two-dimensional correlation
+-------------------------------
+At the profile amplitudes ``chi^2_min = SD - b^T N^-1 b``, so::
+
+    R^2 = 1 - chi^2_min / SD = b^T N^-1 b / SD
+        = (c1^2 - 2 c1 c2 c12 + c2^2) / (1 - c12^2)
+
+with the normalised correlations ``c1 = b1 / sqrt(S11 SD)``,
+``c2 = b2 / sqrt(S22 SD)`` and ``c12 = A12 / sqrt(S11 S22)`` -- exactly
+Zucker & Mazeh's (1994) ``R`` with the light ratio fitted at every node.  The
+weighted inner products drop the DC mode, so they are mean-subtracted, as a
+Pearson correlation is, and the noise scale cancels.  ``R`` is in [0, 1] (1 for
+a noiseless, perfectly matched composite); with ``chi^2_min`` from the
+constrained fit under ``nonneg=True``.  At fixed ``SD``,
+``logL_profile = -(SD/2) (1 - R^2)``: the two surfaces share their argmax.
 *Marginalising* the amplitudes under a flat (improper) prior on
 ``(a1, a2) in R^2`` -- a Gaussian integral with precision ``N`` -- adds the
 usual ``-1/2 ln|det|`` (the amplitude-posterior width)::
@@ -135,6 +153,7 @@ Assumptions (exact only under these)
 
 import numpy as np
 
+from unicor.ccf import check_output
 from unicor.dsp import parseval_weights, rfft_positive, shift_kms
 
 
@@ -441,8 +460,8 @@ def chi2_from_stats(stats, a1, a2):
 
 # =============================================================================
 # =============================================================================
-def profile_from_stats(stats, v1_grid, v2_grid, nonneg=False):
-    """Profile/marginalise the amplitudes from (combined) statistics -> logL maps.
+def profile_from_stats(stats, v1_grid, v2_grid, nonneg=False, output='ccf'):
+    """Profile/marginalise the amplitudes from (combined) statistics -> R and logL maps.
 
     Parameters
     ----------
@@ -458,19 +477,36 @@ def profile_from_stats(stats, v1_grid, v2_grid, nonneg=False):
         would be an orthant-truncated Gaussian integral, so this drops *both*
         the ``-1/2 ln|det|`` width term and the truncation term ``ln Phi_N``
         (not attempted).  Velocities come from the profile peak regardless.
+    output : {'ccf', 'loglike'}
+        Which surface is the primary result, ``'map'``: the two-dimensional
+        correlation ``R`` (default) or ``logL_profile``.  Both are always
+        returned; they share their argmax, so ``best`` does not depend on it.
 
     Returns
     -------
     dict
-        ``logL_profile``, ``logL_marginal``, ``a1``, ``a2``, ``chi2`` : (n1, n2)
-        maps; ``v1_grid``, ``v2_grid``; and ``best``, the ``logL_profile``
-        argmax as ``{'v1', 'v2', 'a1', 'a2', 'chi2', 'chi2_red'}`` (km/s /
-        dimensionless), where ``chi2_red = chi2 / (nu - 4)`` (four fitted
-        parameters; ``nan`` if ``nu <= 4``).  The reported peak is always the
-        *profile* argmax -- the marginal peak can differ by the
-        ``det``-gradient.
+        ``R``, ``logL_profile``, ``logL_marginal``, ``a1``, ``a2``, ``chi2`` :
+        (n1, n2) maps, where ``R = sqrt(1 - chi2 / SD)`` is the
+        two-dimensional correlation (dimensionless, in [0, 1]); ``map``, the
+        one of ``R`` / ``logL_profile`` that ``output`` selects (the same
+        array, not a copy), and ``output``; ``v1_grid``, ``v2_grid``; and
+        ``best``, the ``logL_profile`` argmax as ``{'v1', 'v2', 'a1', 'a2',
+        'chi2', 'chi2_red', 'R'}`` (km/s / dimensionless), where
+        ``chi2_red = chi2 / (nu - 4)`` (four fitted parameters; ``nan`` if
+        ``nu <= 4``).  The reported peak is always the *profile* argmax -- the
+        marginal peak can differ by the ``det``-gradient.
+
+    Raises
+    ------
+    ValueError
+        If ``output`` is unknown, or the data carry no power (``SD <= 0``),
+        which leaves ``R`` undefined.
     """
+    check_output(output)
     S11, S22, SD = stats["S11"], stats["S22"], stats["SD"]
+    if not SD > 0:
+        raise ValueError(f"the data have no power in the fitted modes (SD = {SD}); "
+                         "there is nothing to correlate")
     b1g = stats["b1"][:, None]  # (n1, 1)
     b2g = stats["b2"][None, :]  # (1, n2)
     A12 = stats["A12"]  # (n1, n2)
@@ -498,6 +534,8 @@ def profile_from_stats(stats, v1_grid, v2_grid, nonneg=False):
 
     chi2 = chi2_from_stats(stats, a1, a2)
     logL_profile = -0.5 * chi2
+    # chi2 lies in [0, SD] at the (constrained) optimum; clip its round-off.
+    R = np.sqrt(np.clip(1.0 - chi2 / SD, 0.0, 1.0))
     if nonneg:
         logL_marginal = logL_profile.copy()
     else:
@@ -512,8 +550,12 @@ def profile_from_stats(stats, v1_grid, v2_grid, nonneg=False):
         "chi2": float(chi2[i, j]),
         "chi2_red": float(chi2[i, j] / (stats["nu"] - 4.0))
         if stats["nu"] > 4.0 else np.nan,
+        "R": float(R[i, j]),
     }
     return {
+        "R": R,
+        "map": R if output == "ccf" else logL_profile,
+        "output": output,
         "logL_profile": logL_profile,
         "logL_marginal": logL_marginal,
         "a1": a1,
@@ -624,8 +666,9 @@ def crlb_from_map(logL, v1_grid, v2_grid, half=3):
 # =============================================================================
 # =============================================================================
 def todcor_map(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None,
-               nonneg=False, oversampling=1.0, noise_psd=None, velocity_convention='cz'):
-    """Single-window TODCOR log-likelihood map (convenience wrapper).
+               nonneg=False, oversampling=1.0, noise_psd=None, velocity_convention='cz',
+               output='ccf'):
+    """Single-window TODCOR correlation and log-likelihood maps (convenience wrapper).
 
     Equivalent to ``profile_from_stats(window_stats(...), v1_grid, v2_grid)``.
     For several line/order/instrument windows of *one epoch*, accumulate with
@@ -641,18 +684,21 @@ def todcor_map(data_g, g1, g2, dv, v1_grid, v2_grid, sigma=1.0, zeta_max=None,
     nonneg : bool
         As :func:`profile_from_stats`: constrain both amplitudes to be
         non-negative.
+    output : {'ccf', 'loglike'}
+        As :func:`profile_from_stats`: the primary surface ``'map'`` is the
+        two-dimensional correlation ``R`` (default) or ``logL_profile``.
 
     Returns
     -------
     dict
-        The :func:`profile_from_stats` result: the (n1, n2) maps
-        'logL_profile', 'logL_marginal', 'a1', 'a2', 'chi2'; 'v1_grid',
-        'v2_grid'; and 'best' (v1, v2, a1, a2, chi2, chi2_red at the profile
-        argmax).
+        The :func:`profile_from_stats` result: the (n1, n2) maps 'R',
+        'logL_profile', 'logL_marginal', 'a1', 'a2', 'chi2', and 'map' (the
+        one ``output`` selects) with 'output'; 'v1_grid', 'v2_grid'; and
+        'best' (v1, v2, a1, a2, chi2, chi2_red, R at the profile argmax).
     """
     stats = window_stats(
         data_g, g1, g2, dv, v1_grid, v2_grid, sigma=sigma, zeta_max=zeta_max,
         oversampling=oversampling, noise_psd=noise_psd,
         velocity_convention=velocity_convention,
     )
-    return profile_from_stats(stats, v1_grid, v2_grid, nonneg=nonneg)
+    return profile_from_stats(stats, v1_grid, v2_grid, nonneg=nonneg, output=output)

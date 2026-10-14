@@ -11,6 +11,11 @@ Conventions: velocities in km/s, in the 'cz' Doppler convention
 (lambda_obs/lambda_rest = 1 + v/c) unless ``velocity_convention='relativistic'``;
 wavelengths in Angstrom.
 
+Two output modes (``output``): 'ccf' (default) makes the correlation the
+primary result, 'loglike' the Zucker (2003) log-likelihood
+-(N/2) ln(1 - C^2). Both are always stored; the RV and its uncertainty come
+from the CCF either way, so they do not depend on the mode.
+
 Reference: Zucker 2003, MNRAS 342, 1291 (ML combination of orders and the RV
 uncertainty).
 """
@@ -28,7 +33,9 @@ class CCF1d:
     UNICOR cross-correlation of one (multi-order) spectrum against a template.
 
     ``cross_correlate`` fills ``Corr`` (per order); ``combine`` fills
-    ``CorrCombined`` (all orders, by maximum likelihood).
+    ``CorrCombined`` (all orders, by maximum likelihood). Each holds the CCF
+    ('corr') and its log-likelihood ('loglike'); ``output`` says which is the
+    primary result, the one ``plot`` draws.
     '''
     # =============================================================================
     # =============================================================================
@@ -45,7 +52,7 @@ class CCF1d:
     # =============================================================================
     def cross_correlate(self, spectrum, template,
                         dv=None, vel_bound=150, errors_per_order=False,
-                        velocity_convention='cz'):
+                        velocity_convention='cz', output='ccf'):
         '''
         Cross-correlate every order of a spectrum with a template (UNICOR).
 
@@ -114,6 +121,13 @@ class CCF1d:
             1 + v/c; IAU 2000, IRAF fxcor) or c tanh(k Delta)
             ('relativistic'). For the same spectrum the 'cz' velocity exceeds
             the 'relativistic' one by ~v^2/2c (37.5 m/s at 150 km/s).
+        output : {'ccf', 'loglike'}
+            The primary result: the CCF (default) or the Zucker (2003)
+            log-likelihood -(n_eff/2) ln(1 - C^2) of each order
+            (``unicor.loglike_from_ccf``). Both are stored either way (the
+            log-likelihood costs one logarithm per lag); the mode is recorded
+            and selects what ``plot`` draws. The RVs, uncertainties and peaks
+            come from the CCF in both modes and are identical.
 
         Returns
         -------
@@ -126,6 +140,9 @@ class CCF1d:
             'corr'
                 (n_orders, n_lags) Pearson correlation per order; NaN rows for
                 orders the template does not cover.
+            'loglike'
+                (n_orders, n_lags) log-likelihood per order,
+                -(n_eff/2) ln(1 - corr^2) (dimensionless, 0 where corr = 0).
             'RV', 'eRV', 'peakCorr'
                 (n_orders, 1) per-order RV (km/s), its ML uncertainty (km/s;
                 NaN unless ``errors_per_order``) and CCF peak; NaN where the
@@ -136,13 +153,15 @@ class CCF1d:
                 The unit of 'vel' (km/s).
             'velocity_convention'
                 The convention of 'vel' and 'RV'.
+            'output'
+                The mode: 'ccf' or 'loglike'.
 
         Raises
         ------
         ValueError
-            If ``vel_bound`` is below one grid step, or an order's grid is not
-            uniform in ln(lambda) with the declared step, or the orders' steps
-            differ.
+            If ``output`` is unknown, ``vel_bound`` is below one grid step,
+            an order's grid is not uniform in ln(lambda) with the declared
+            step, or the orders' steps differ.
 
         Warns
         -----
@@ -150,8 +169,7 @@ class CCF1d:
             For each order the template does not cover across the scan.
         '''
 
-        # Initialize:
-        # ----------
+        unicor_ccf.check_output(output)
         template = deepcopy(template)
         spec = deepcopy(spectrum)
 
@@ -260,12 +278,14 @@ class CCF1d:
         self.Corr = {
             'vel': V,
             'corr': corr,
+            'loglike': unicor_ccf.loglike_from_ccf(corr, n_eff),
             'RV': RV,
             'eRV': eRV,
             'units': V.unit,
             'peakCorr': SpecCorr,
             'n_eff': n_eff,
-            'velocity_convention': velocity_convention}
+            'velocity_convention': velocity_convention,
+            'output': output}
         self.n_ord = Nord
 
         return self
@@ -285,40 +305,31 @@ class CCF1d:
         -------
         CCF1d
             self, with ``CorrCombined``, a dict like ``Corr`` with scalar
-            entries: 'vel', 'corr' (the combined CCF, (n_lags,)), 'RV' and
-            'eRV' (km/s), 'peakCorr', 'units', 'n_eff' (the total) and
-            'velocity_convention'. 'RV', 'eRV' and 'peakCorr' are NaN when the
-            combined peak cannot be located.
+            entries: 'vel', 'corr' (the combined CCF, (n_lags,)), 'loglike'
+            (the summed log-likelihood, sum_i -(N_i/2) ln(1 - C_i^2) =
+            -(N_tot/2) ln(1 - corr^2), (n_lags,)), 'RV' and 'eRV' (km/s),
+            'peakCorr', 'units', 'n_eff' (the total), 'velocity_convention'
+            and 'output' (from ``cross_correlate``). 'RV', 'eRV' and
+            'peakCorr' are NaN when the combined peak cannot be located.
         '''
 
         velocities = self.Corr['vel']
         CombinedCorr = unicor_ccf.combine_ccfs(self.Corr['corr'], n_eff=self.Corr['n_eff'])
         n_eff_total = float(np.sum(self.Corr['n_eff']))
+        common = {'vel': velocities, 'corr': CombinedCorr,
+                  'loglike': self.Corr['loglike'].sum(axis=0), 'n_eff': n_eff_total,
+                  'velocity_convention': self.Corr['velocity_convention'],
+                  'output': self.Corr['output']}
 
         try:
             V, eRV, CorrPeak, vUnit = self.extract_rv(velocities, CombinedCorr)
 
-            # Return the corresponding velocity grid.
-            self.CorrCombined = {
-                'vel': velocities,
-                'corr': CombinedCorr,
-                'RV': V,
-                'eRV': eRV,
-                'units': vUnit,
-                'peakCorr': CorrPeak,
-                'n_eff': n_eff_total,
-                'velocity_convention': self.Corr['velocity_convention']}
+            self.CorrCombined = {**common, 'RV': V, 'eRV': eRV, 'units': vUnit,
+                                 'peakCorr': CorrPeak}
 
         except (ValueError, np.linalg.LinAlgError):
-            self.CorrCombined = {
-                'vel': velocities,
-                'corr': CombinedCorr,
-                'RV': np.nan,
-                'eRV': np.nan,
-                'units': '',
-                'peakCorr': np.nan,
-                'n_eff': n_eff_total,
-                'velocity_convention': self.Corr['velocity_convention']}
+            self.CorrCombined = {**common, 'RV': np.nan, 'eRV': np.nan, 'units': '',
+                                 'peakCorr': np.nan}
 
         return self
 
@@ -470,22 +481,24 @@ class CCF1d:
     # =============================================================================
     def plot(self, plot_combined=True, plot_orders=True, orders=None, alpha=0.125):
         '''
-        Plot the per-order and combined CCFs against velocity.
+        Plot the per-order and combined CCFs -- or, if ``cross_correlate`` ran
+        with ``output='loglike'``, their log-likelihoods -- against velocity.
 
-        The CCFs are derived curves on the lag grid, drawn as black lines (the
-        orders faint, the combined CCF bold); the combined RV and its +- eRV
-        band are red (``sparta.plotting``).
+        The curves are derived on the lag grid, drawn as black lines (the
+        orders faint, the combined one bold); the combined RV and its +- eRV
+        band are red (``sparta.plotting``). The combined log-likelihood is the
+        sum of the orders'.
 
         Parameters
         ----------
         plot_combined : bool
-            Plot the combined CCF and its RV +- eRV band, if ``combine`` ran.
+            Plot the combined curve and its RV +- eRV band, if ``combine`` ran.
         plot_orders : bool
-            Plot the CCF of each order in ``orders``.
+            Plot the curve of each order in ``orders``.
         orders : sequence of int, optional
             Orders to plot; default all.
         alpha : float
-            Opacity of the per-order CCFs.
+            Opacity of the per-order curves.
 
         Returns
         -------
@@ -494,16 +507,18 @@ class CCF1d:
         if orders is None:
             orders = np.arange(self.n_ord)
         vel = u.Quantity(self.Corr['vel'], u.km / u.s).value
+        key, name = (('corr', 'CCF') if self.Corr['output'] == 'ccf'
+                     else ('loglike', r'$\ln L$'))
 
         fig, ax = plt.subplots(figsize=(8, 3.2), layout='constrained')
 
         if plot_orders:
             for o in orders:
-                sp_plot.plot_curve(ax, vel, self.Corr['corr'][o], lw=0.75, alpha=alpha)
+                sp_plot.plot_curve(ax, vel, self.Corr[key][o], lw=0.75, alpha=alpha)
 
         combined = getattr(self, 'CorrCombined', None)
         if plot_combined and combined is not None:
-            sp_plot.plot_curve(ax, vel, combined['corr'], lw=1.6, label='combined CCF')
+            sp_plot.plot_curve(ax, vel, combined[key], lw=1.6, label=f'combined {name}')
             rv, erv = combined['RV'], combined['eRV']
             if np.isfinite(rv):
                 ax.axvline(rv, color=sp_plot.MODEL_COLOR, lw=0.8,
@@ -512,7 +527,7 @@ class CCF1d:
             ax.legend(loc='upper right')
 
         ax.set_xlabel('Radial velocity (km/s)')
-        ax.set_ylabel('CCF')
+        ax.set_ylabel('CCF' if key == 'corr' else r'$\ln L$ (Zucker 2003)')
 
         return fig
 

@@ -406,3 +406,46 @@ def test_ccf1d_refuses_orders_whose_ln_steps_differ(template):
     obs.Info["GridType"], obs.Info["GridDelta"] = "log", 0.5 * u.km / u.s
     with pytest.raises(ValueError, match="velocity axis"):
         CCF1d().cross_correlate(spectrum=obs, template=template, vel_bound=50)
+
+
+# --- Output modes: the CCF or the Zucker (2003) log-likelihood ----------------
+
+def _two_order_noisy_spectrum(seed=5):
+    rng = np.random.default_rng(seed)
+    wave = MC_WAVE.copy()
+    return Spectrum(wv=[wave, wave.copy()],
+                    sp=[_forest(wave, 3.0) + rng.normal(0.0, 0.02, wave.size)
+                        for _ in range(2)], name="o")
+
+
+def test_output_modes_store_both_curves_and_identical_rvs(forest_template):
+    obs = _two_order_noisy_spectrum()
+    runs = {mode: CCF1d().cross_correlate(obs, forest_template, dv=NATIVE_DV / 4,
+                                          vel_bound=30, errors_per_order=True,
+                                          output=mode).combine()
+            for mode in ("ccf", "loglike")}
+    ccf, lnl = runs["ccf"], runs["loglike"]
+    assert (ccf.Corr["output"], lnl.Corr["output"]) == ("ccf", "loglike")
+    assert lnl.CorrCombined["output"] == "loglike"
+    for key in ("corr", "loglike", "RV", "eRV", "peakCorr", "n_eff"):
+        np.testing.assert_array_equal(ccf.Corr[key], lnl.Corr[key])
+    for key in ("corr", "loglike", "RV", "eRV", "peakCorr"):
+        np.testing.assert_array_equal(ccf.CorrCombined[key], lnl.CorrCombined[key])
+    # Per order -(N_i/2) ln(1 - C_i^2); combined, their sum, which is the ML
+    # CCF's -(N_tot/2) ln(1 - ML^2).
+    corr, n_eff = ccf.Corr["corr"], ccf.Corr["n_eff"]
+    np.testing.assert_allclose(ccf.Corr["loglike"],
+                               -0.5 * n_eff[:, None] * np.log(1 - corr ** 2), rtol=1e-12)
+    combined = ccf.CorrCombined
+    np.testing.assert_allclose(combined["loglike"], ccf.Corr["loglike"].sum(axis=0), rtol=1e-12)
+    np.testing.assert_allclose(combined["loglike"],
+                               -0.5 * n_eff.sum() * np.log(1 - combined["corr"] ** 2),
+                               rtol=1e-9)
+    assert np.argmax(combined["loglike"]) == np.argmax(combined["corr"])
+
+
+@pytest.mark.parametrize("bad", ["CCF", "lnL", None])
+def test_an_unknown_output_mode_is_refused(template, bad):
+    obs = Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0)], name="o")
+    with pytest.raises(ValueError, match="output"):
+        CCF1d().cross_correlate(obs, template, dv=0.5, vel_bound=20, output=bad)

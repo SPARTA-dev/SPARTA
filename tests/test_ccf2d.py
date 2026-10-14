@@ -604,3 +604,50 @@ def test_ccf2d_refuses_an_unknown_convention():
     with pytest.raises(ValueError, match='convention'):
         CCF2d().cross_correlate(spec, tmpl1, tmpl2, vel_bound=120, dvel=4.0,
                                 velocity_convention='classical')
+
+
+# =============================================================================
+# Output modes: the two-dimensional correlation R or the log-likelihood
+# =============================================================================
+def _noisy_sparta_case(seed=2, noise=0.01):
+    spec, tmpl1, tmpl2 = _sparta_case()
+    rng = np.random.default_rng(seed)
+    spec.sp = [s + rng.normal(0.0, noise, s.size) for s in spec.sp]
+    return spec, tmpl1, tmpl2
+
+
+def test_output_modes_store_both_maps_and_identical_fits():
+    spec, tmpl1, tmpl2 = _noisy_sparta_case()
+    kw = dict(vel_bound=150, dvel=2.0, alpha=0.1)           # sigma=None: two passes
+    as_ccf = CCF2d().cross_correlate(spec, tmpl1, tmpl2, **kw)
+    as_lnl = CCF2d().cross_correlate(spec, tmpl1, tmpl2, output='loglike', **kw)
+    a, b = as_ccf.Corr2d, as_lnl.Corr2d
+    for key in ('RV1', 'RV2', 'eRV1', 'eRV2', 'rho12', 'a1_best', 'a2_best', 'R_best',
+                'chi2_best', 'chi2_red', 'sigma'):
+        np.testing.assert_array_equal(a[key], b[key])
+    for res_a, res_b in ((a, b), (a['fine'], b['fine'])):
+        for key in ('R', 'logL_profile', 'logL_marginal', 'a1', 'a2', 'chi2'):
+            np.testing.assert_array_equal(res_a[key], res_b[key])
+        assert res_a['map'] is res_a['R'] and res_b['map'] is res_b['logL_profile']
+    assert (a['output'], b['output']) == ('ccf', 'loglike')
+    np.testing.assert_array_equal(as_ccf.crlb['cov'], as_lnl.crlb['cov'])
+
+
+def test_r_map_is_the_explained_power_fraction_of_the_pooled_orders():
+    spec, tmpl1, tmpl2 = _noisy_sparta_case()
+    fit = CCF2d().cross_correlate(spec, tmpl1, tmpl2, vel_bound=150, dvel=2.0, alpha=0.1)
+    r, sd = fit.Corr2d, fit.stats['SD']
+    assert np.all((r['R'] >= 0) & (r['R'] <= 1))
+    np.testing.assert_allclose(r['logL_profile'], -0.5 * sd * (1 - r['R'] ** 2),
+                               rtol=1e-9, atol=1e-9 * sd)
+    assert np.argmax(r['R']) == np.argmax(r['logL_profile'])
+    assert r['R'].max() <= r['R_best'] < 1.0
+    # A noiseless composite is matched almost perfectly at its peak.
+    clean = CCF2d().cross_correlate(*_sparta_case(), vel_bound=150, dvel=2.0, sigma=0.01)
+    assert clean.Corr2d['R_best'] > 0.999
+
+
+@pytest.mark.parametrize("bad", ['R', 'logL', None])
+def test_ccf2d_refuses_an_unknown_output_mode(bad):
+    with pytest.raises(ValueError, match="output"):
+        CCF2d().cross_correlate(*_sparta_case(), vel_bound=60, dvel=4.0, output=bad)

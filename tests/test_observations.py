@@ -332,3 +332,35 @@ def test_progress_true_without_tqdm_explains_how_to_install(monkeypatch):
     assert _progress([1, 2], False) == [1, 2]
     with pytest.raises(ImportError, match=r"SPARTA\[progress\]"):
         _progress([1, 2], True)
+
+
+# --- output reaches the engines through the drivers ---------------------------
+
+def test_sb1_driver_passes_the_output_mode_and_the_rvs_do_not_depend_on_it(sb1):
+    obs, template = _sb1_observations(sb1)
+    runs = {}
+    for mode in ("ccf", "loglike"):
+        obs.calc_rv_against_template(template, dv=0.1, vel_bound=40, output=mode)
+        assert all(c.Corr["output"] == mode for c in obs.ccf_list)
+        runs[mode] = (obs.vels.copy(), obs.evels.copy())
+    np.testing.assert_array_equal(runs["ccf"], runs["loglike"])
+    with pytest.raises(ValueError, match="output"):
+        obs.calc_rv_against_template(template, dv=0.1, vel_bound=40, output="lnL")
+
+
+def test_sb2_driver_passes_the_output_mode_and_the_rvs_do_not_depend_on_it():
+    from sparta.instruments import Simulation
+    from sparta.instruments.simulated import component_templates
+    sim = Simulation(like="HARPS", windows_A=[(5000.0, 5060.0)], times=np.arange(2.0),
+                     rv_kms=np.column_stack([[-20.0, 20.0], [25.0, -25.0]]),
+                     snr=100.0, noise="constant", seed=4,
+                     components=[dict(SUN_LIKE, amplitude=0.7), dict(K_DWARF, amplitude=0.3)])
+    obs = Observations(survey="SIMULATED", simulation=sim)
+    runs = {}
+    for mode in ("ccf", "loglike"):
+        obs.calc_rv_against_two_templates(*component_templates(sim), dv=0.3, vel_bound=40,
+                                          output=mode)
+        assert all(c.Corr2d["output"] == mode for c in obs.ccf2d_list)
+        runs[mode] = np.array([obs.vels1, obs.vels2, obs.evels1, obs.evels2,
+                               obs.amps1, obs.amps2])
+    np.testing.assert_array_equal(runs["ccf"], runs["loglike"])

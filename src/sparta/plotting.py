@@ -1,4 +1,4 @@
-"""The SPARTA figure style: data, model, one extra series, unfilled maps.
+"""The SPARTA figure style: data, model, one extra series, grey-scale maps.
 
 Every figure in SPARTA (the plot methods and the examples) draws each kind of
 curve the same way:
@@ -12,7 +12,7 @@ model / fit                red line                                      ``plot_
 one extra series           blue line (truth, 2nd component, comparison)  ``plot_extra``
 derived curves             black line (CCFs, periodograms, profiles)     ``plot_curve``
 further series             grey lines / linestyles, never more colours   ``GREY``
-2-D maps                   black unfilled contours, no colour map        ``contour_map``
+2-D maps                   grey-scale image, peak black, no colour       ``map_image``
 best fit / truth on a map  red ``+`` / blue ``x``                         ``mark_fit`` / ``mark_truth``
 =========================  ============================================  ===============
 
@@ -25,17 +25,20 @@ is drawn as a line.
 Red marks what was fitted or detected (a model curve, an RV, a best-fit
 point); blue marks the truth (a true RV or period, an injected (v1, v2)).
 
-Log-likelihood maps are contoured in Delta lnL below the maximum
-(``dlnl_levels``): -0.5, -2, -4.5 (1, 2, 3 sigma for one parameter, drawn
-thicker, ``dlnl_linewidths``), then -10, -30, -100, ... -- dense at the peak,
-sparse in the far field. ``dlnl_legend_entries`` lists the levels in a legend.
+Maps are grey-scale images, white at their lowest value and black at the
+peak (``map_image``, with a thin grey ``map_colorbar``). A correlation map is
+shaded linearly; a log-likelihood map as Delta lnL below its maximum on a
+symmetric-log scale (``dlnl_norm``): linear to -4.5 (3 sigma for one
+parameter), logarithmic beyond, so a map 1e5 deep still shows its structure.
+The fit and truth markers carry a thin white edge, so they read on black.
 
 ``apply_style`` sets matching rcParams (font sizes, ticks, layout) for a
 session; the plot methods do not call it, so they never change global state.
 """
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
+from matplotlib import patheffects
+from matplotlib.colors import SymLogNorm
 
 DATA_COLOR = 'k'
 MODEL_COLOR = 'tab:red'
@@ -46,11 +49,16 @@ DATA_LW = 0.75
 CURVE_LW = 1.0
 MODEL_LW = 1.2
 EXTRA_LW = 1.0
-CONTOUR_LW = 0.5
-CONTOUR_INNER_LW = 1.1
+
+# Maps: high values black (the peak), low ones white.
+MAP_CMAP = 'Greys'
 
 # Delta lnL = -k^2/2 is the k-sigma bound of one Gaussian parameter.
 SIGMA_LEVELS = (0.5, 2.0, 4.5)
+DLNL_LABEL = r'$\Delta\ln L$ (linear to $-4.5$, log beyond)'
+
+# Keeps the red / blue markers legible on the black peak of a map.
+_WHITE_EDGE = [patheffects.withStroke(linewidth=3.2, foreground='white')]
 
 STYLE = {
     'font.size': 11.0, 'axes.labelsize': 11.0, 'axes.titlesize': 11.0,
@@ -188,13 +196,16 @@ def plot_points(ax, x, y, yerr=None, **kw):
     return ax.errorbar(x, y, yerr=yerr, **kw)
 
 
-def dlnl_levels(depth):
+def dlnl_norm(depth):
     '''
-    Contour levels for a log-likelihood map, as Delta lnL below its maximum.
+    The display scale of a Delta lnL map: linear within the 3-sigma level,
+    logarithmic beyond.
 
-    -0.5, -2, -4.5 (the 1, 2, 3 sigma bounds of one parameter), then
-    -10, -30, -100, -300, ... (a 1-3 sequence) down to ``depth``: dense at
-    the peak, sparse in the far field.
+    A Delta lnL map of a high-S/N spectrum runs to -1e5 or deeper, so on a
+    linear grey scale all its structure near the peak would share the darkest
+    shade. A symmetric-log scale is linear for ``|Delta lnL| <= 4.5`` (the
+    3-sigma bound of one parameter) and gives every decade beyond it the same
+    share of the grey scale.
 
     Parameters
     ----------
@@ -204,110 +215,82 @@ def dlnl_levels(depth):
 
     Returns
     -------
-    ndarray
-        Increasing, negative Delta lnL levels.
+    matplotlib.colors.SymLogNorm
+        From ``-depth`` (white) to 0 (the peak, black).
     '''
-    depth = abs(float(depth))
-    decades = 10.0 ** np.arange(1, np.ceil(np.log10(max(depth, 10.0))) + 1)
-    mags = np.concatenate([SIGMA_LEVELS, np.sort(np.concatenate([decades, 3 * decades]))])
-    mags = mags[mags < depth] if depth > SIGMA_LEVELS[0] else mags[:1]
-    return -mags[::-1]
+    depth = max(abs(float(depth)), SIGMA_LEVELS[-1])
+    return SymLogNorm(linthresh=SIGMA_LEVELS[-1], linscale=1.0, vmin=-depth, vmax=0.0)
 
 
-def dlnl_linewidths(levels):
+def map_image(ax, x, y, z, loglike=False, **kw):
     '''
-    Contour line widths for Delta lnL levels: thicker at the 1-3 sigma levels.
+    Draw a 2-D map as a grey-scale image: white at the lowest value, black at
+    the peak (no colour).
 
-    Parameters
-    ----------
-    levels : sequence of float
-        Delta lnL levels (negative).
-
-    Returns
-    -------
-    ndarray
-        ``CONTOUR_INNER_LW`` where ``|level| <= 4.5``, else ``CONTOUR_LW``.
-    '''
-    mags = np.abs(np.asarray(levels, float))
-    return np.where(mags <= SIGMA_LEVELS[-1], CONTOUR_INNER_LW, CONTOUR_LW)
-
-
-def dlnl_legend_entries(levels):
-    '''
-    Legend handles and labels that list Delta lnL contour levels.
-
-    One entry for the thick (``|level| <= 4.5``) and one for the thin levels,
-    each present only if it has levels; at most three thin values are spelled
-    out.
-
-    Parameters
-    ----------
-    levels : sequence of float
-        Delta lnL levels (negative).
-
-    Returns
-    -------
-    handles : list of matplotlib.lines.Line2D
-    labels : list of str
-    '''
-    mags = np.sort(np.abs(np.asarray(levels, float)))
-    inner, outer = mags[mags <= SIGMA_LEVELS[-1]], mags[mags > SIGMA_LEVELS[-1]]
-    handles, labels = [], []
-    if inner.size:
-        label = '$' + ', '.join(f'-{m:g}' for m in inner) + '$'
-        if np.array_equal(inner, SIGMA_LEVELS):
-            label += r' (1$-$3$\sigma$)'
-        handles.append(Line2D([], [], color=DATA_COLOR, lw=CONTOUR_INNER_LW))
-        labels.append(label)
-    if outer.size:
-        label = ('$' + ', '.join(f'-{m:g}' for m in outer[:3])
-                 + (r', \ldots$' if outer.size > 3 else '$'))
-        handles.append(Line2D([], [], color=DATA_COLOR, lw=CONTOUR_LW))
-        labels.append(label)
-    return handles, labels
-
-
-def contour_map(ax, x, y, z, levels=None, **kw):
-    '''
-    Draw a 2-D map as black, unfilled contour lines (no colour map).
-
-    With ``levels=None`` the map is read as a log-likelihood with any offset
-    and contoured at ``max(z) + dlnl_levels(...)``; the 1-3 sigma levels are
-    drawn thicker. Explicit ``levels`` are used as given, in the units of
-    ``z``.
+    With ``loglike=False`` the grey scale is linear from ``min(z)`` to
+    ``max(z)`` (e.g. a correlation map, R in [0, 1]). With ``loglike=True``
+    ``z`` is a log-likelihood with any offset, drawn as Delta lnL below its
+    maximum on ``dlnl_norm`` (linear to -4.5, logarithmic beyond); label the
+    colour bar with ``DLNL_LABEL``.
 
     Parameters
     ----------
     ax : matplotlib.axes.Axes
     x, y : 1-D array_like
-        Grid along the horizontal and vertical axes (e.g. v1, v2 in km/s).
+        Grid along the horizontal and vertical axes (e.g. v1, v2 in km/s);
+        each cell is centred on its node.
     z : 2-D array_like
-        Map of shape ``(len(y), len(x))``; non-finite cells are not contoured.
-    levels : sequence of float, optional
-        Contour values in the units of ``z``.
+        Map of shape ``(len(y), len(x))``; non-finite cells are left blank.
+    loglike : bool
+        Read ``z`` as a log-likelihood (see above).
     **kw
-        Passed to ``ax.contour``.
+        Passed to ``ax.pcolormesh`` (e.g. ``norm`` to override the scale).
 
     Returns
     -------
-    matplotlib.contour.QuadContourSet
+    matplotlib.collections.QuadMesh
+        Pass it to ``map_colorbar``.
     '''
-    z = np.asarray(z, float)
-    if levels is None:
-        top = np.nanmax(z)
-        dlevels = dlnl_levels(top - np.nanmin(z))
-        levels = top + dlevels
-        lw = dlnl_linewidths(dlevels)
+    z = np.ma.masked_invalid(np.asarray(z, float))
+    if loglike:
+        z = z - z.max()
+        kw = {'norm': dlnl_norm(z.min()), **kw}
     else:
-        levels = np.sort(np.asarray(levels, float))
-        lw = CONTOUR_LW
-    kw = {'colors': DATA_COLOR, 'linewidths': lw, 'linestyles': 'solid', **kw}
-    return ax.contour(x, y, np.ma.masked_invalid(z), levels=levels, **kw)
+        kw = {'vmin': z.min(), 'vmax': z.max(), **kw}
+    kw = {'cmap': MAP_CMAP, 'shading': 'nearest', 'rasterized': True, **kw}
+    return ax.pcolormesh(x, y, z, **kw)
+
+
+def map_colorbar(mesh, label, ax=None, **kw):
+    '''
+    A thin grey-scale colour bar for a ``map_image``.
+
+    Parameters
+    ----------
+    mesh : matplotlib.collections.QuadMesh
+        The ``map_image`` result.
+    label : str
+        What the shade means, e.g. ``'$R$'`` or ``DLNL_LABEL``.
+    ax : matplotlib.axes.Axes, optional
+        The axes to take the room from; default the map's own. Pass
+        ``cax=`` (in ``**kw``) to draw into a given axes instead.
+    **kw
+        Passed to ``Figure.colorbar`` (``cax``, ``orientation``...).
+
+    Returns
+    -------
+    matplotlib.colorbar.Colorbar
+    '''
+    if 'cax' not in kw:
+        kw = {'ax': mesh.axes if ax is None else ax, 'aspect': 40, 'pad': 0.02, **kw}
+    cbar = mesh.axes.figure.colorbar(mesh, label=label, **kw)
+    cbar.outline.set_linewidth(0.5)
+    return cbar
 
 
 def mark_fit(ax, x, y, **kw):
     '''
-    Mark the best fit on a map: a red ``+``.
+    Mark the best fit on a map: a red ``+`` with a thin white edge.
 
     Parameters
     ----------
@@ -321,13 +304,14 @@ def mark_fit(ax, x, y, **kw):
     -------
     list of matplotlib.lines.Line2D
     '''
-    kw = {'color': MODEL_COLOR, 'ms': 12, 'mew': 1.6, 'ls': 'none', 'zorder': 4, **kw}
+    kw = {'color': MODEL_COLOR, 'ms': 12, 'mew': 1.6, 'ls': 'none', 'zorder': 4,
+          'path_effects': _WHITE_EDGE, **kw}
     return ax.plot(x, y, marker='+', **kw)
 
 
 def mark_truth(ax, x, y, **kw):
     '''
-    Mark the true value on a map: a blue ``x``.
+    Mark the true value on a map: a blue ``x`` with a thin white edge.
 
     Parameters
     ----------
@@ -341,5 +325,6 @@ def mark_truth(ax, x, y, **kw):
     -------
     list of matplotlib.lines.Line2D
     '''
-    kw = {'color': EXTRA_COLOR, 'ms': 9, 'mew': 1.6, 'ls': 'none', 'zorder': 4, **kw}
+    kw = {'color': EXTRA_COLOR, 'ms': 9, 'mew': 1.6, 'ls': 'none', 'zorder': 4,
+          'path_effects': _WHITE_EDGE, **kw}
     return ax.plot(x, y, marker='x', **kw)

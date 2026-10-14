@@ -358,7 +358,7 @@ class Observations:
 # =============================================================================
     def calc_rv_against_template(self, template, dv=0.1, vel_bound=150,
                                  errors_per_order=False, combine_ccfs=True,
-                                 velocity_convention='cz', progress=False):
+                                 velocity_convention='cz', output='ccf', progress=False):
         '''
         Single-lined (SB1) radial velocities of every epoch, by UNICOR.
 
@@ -381,6 +381,10 @@ class Observations:
             the combined CCF. If False, make only the per-order measurements.
         velocity_convention : {'cz', 'relativistic'}
             Doppler convention of the RVs (see ``CCF1d.cross_correlate``).
+        output : {'ccf', 'loglike'}
+            The primary result of each epoch's CCF1d: the CCF (default) or
+            the Zucker (2003) log-likelihood (see ``CCF1d.cross_correlate``).
+            Both are stored; the RVs and uncertainties do not depend on it.
         progress : bool
             Show a tqdm progress bar over the epochs. Off by default; needs the
             optional ``tqdm`` package (``pip install "SPARTA[progress]"``).
@@ -415,7 +419,8 @@ class Observations:
                                           dv=dv,
                                           vel_bound=vel_bound,
                                           errors_per_order=errors_per_order,
-                                          velocity_convention=velocity_convention)
+                                          velocity_convention=velocity_convention,
+                                          output=output)
             if combine_ccfs:
                 ccf.combine()
             ccfs.append(ccf)
@@ -442,8 +447,8 @@ class Observations:
 # =============================================================================
     def calc_rv_against_two_templates(self, template1, template2, dv=0.1,
                                       vel_bound=150, dvel=None, sigma=None,
-                                      nonneg=True, velocity_convention='cz', progress=False,
-                                      **kwargs):
+                                      nonneg=True, velocity_convention='cz', output='ccf',
+                                      progress=False, **kwargs):
         '''
         Double-lined (SB2) radial velocities of every epoch, by TODCOR.
 
@@ -475,6 +480,11 @@ class Observations:
             Constrain both amplitudes to be non-negative.
         velocity_convention : {'cz', 'relativistic'}
             Doppler convention of the RVs (see ``CCF2d.cross_correlate``).
+        output : {'ccf', 'loglike'}
+            The primary map of each epoch's CCF2d: the two-dimensional
+            correlation R (default) or the profile log-likelihood (see
+            ``CCF2d.cross_correlate``). Both are stored; the RVs, errors and
+            amplitudes do not depend on it.
         progress : bool
             Show a tqdm progress bar over the epochs. Off by default; needs the
             optional ``tqdm`` package (``pip install "SPARTA[progress]"``).
@@ -501,6 +511,7 @@ class Observations:
                                         sigma=sigma,
                                         nonneg=nonneg,
                                         velocity_convention=velocity_convention,
+                                        output=output,
                                         **kwargs)
                 for spec in _progress(spectra, progress)]
 

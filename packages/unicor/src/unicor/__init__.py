@@ -19,12 +19,14 @@ Layout
                  ``todcor`` package).
 ``unicor.ccf`` - CCF vs velocity (against a template on the observed grid
                  extended by the scan half-width), multi-order combination,
-                 sub-pixel peak, ML uncertainty, bisector span.
+                 sub-pixel peak, ML uncertainty, bisector span. The CCF and
+                 the combination return the correlation (``output='ccf'``)
+                 or the Zucker (2003) log-likelihood (``output='loglike'``).
 """
 
 from .ccf import (
-    bisector_span, ccf_at, ccf_vs_velocity, combine_ccfs, extend_log_grid,
-    rv_uncertainty, subpixel_peak,
+    bisector_span, ccf_at, ccf_vs_velocity, check_output, combine_ccfs,
+    extend_log_grid, loglike_from_ccf, rv_uncertainty, subpixel_peak,
 )
 from .dsp import (
     C_KMS, broaden_gaussian, broaden_gaussian_residual, broaden_rotational,
@@ -37,8 +39,8 @@ from .dsp import (
 __version__ = "0.1.0"
 
 __all__ = [
-    'ccf_vs_velocity', 'extend_log_grid', 'combine_ccfs', 'subpixel_peak', 'ccf_at',
-    'rv_uncertainty', 'bisector_span',
+    'ccf_vs_velocity', 'extend_log_grid', 'combine_ccfs', 'loglike_from_ccf',
+    'check_output', 'subpixel_peak', 'ccf_at', 'rv_uncertainty', 'bisector_span',
     'C_KMS', 'dv_from_wave', 'log_lambda_grid', 'log_grid_dln', 'log_grid_step',
     'resample', 'tukey_window',
     'doppler_factor', 'velocity_from_log_shift', 'shift_kms', 'doppler_shift_wave',

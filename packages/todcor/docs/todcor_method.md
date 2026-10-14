@@ -4,6 +4,9 @@ Single source of truth for the two-component (double-lined) velocity fit
 implemented in the `todcor` package. It fits the radial velocities — and relative
 amplitudes — of *both* components of an SB2 by transforming the actual template
 spectra, TODCOR (Zucker & Mazeh 1994) recast as a Gaussian profile likelihood.
+The same sufficient statistics give Zucker & Mazeh's two-dimensional
+correlation `R(v1, v2)` (§4, *The two-dimensional correlation*), the default
+primary map.
 
 The implementation is split into `unicor.dsp` (grid / FFT / Parseval /
 broadening primitives, shared with UNICOR), `todcor.simulate` (forward model)
@@ -98,9 +101,57 @@ Normal equations `N a = b` with `N = [[S11, A12], [A12, S22]]`, `b = (b1, b2)`:
     a1  = (S22 b1 − A12 b2) / det
     a2  = (S11 b2 − A12 b1) / det
 
-Substituting back gives `logL_profile = −χ²/2` over the `(v1, v2)` grid — the
-TODCOR correlation map. `profile_from_stats` does this; `todcor_map` is the
-single-window convenience wrapper `profile_from_stats(window_stats(...))`.
+Substituting back gives `logL_profile = −χ²/2` over the `(v1, v2)` grid, and its
+normalised form, the two-dimensional correlation `R` (below).
+`profile_from_stats` does this; `todcor_map` is the single-window convenience
+wrapper `profile_from_stats(window_stats(...))`.
+
+### The two-dimensional correlation `R` (`output='ccf'`)
+
+At the profile amplitudes `â = N⁻¹b` the misfit is `χ²_min = SD − bᵀN⁻¹b`, so the
+fraction of the data's weighted power that the best-fit pair of templates explains
+is
+
+    R² ≡ 1 − χ²_min / SD = bᵀN⁻¹b / SD
+       = (S22 b1² − 2 A12 b1 b2 + S11 b2²) / (det · SD)
+       = (c1² − 2 c1 c2 c12 + c2²) / (1 − c12²)
+
+with the normalised correlations `c1 = b1/√(S11 SD)` (data vs template 1 at `v1`),
+`c2 = b2/√(S22 SD)` and `c12 = A12/√(S11 S22)` (template 1 vs template 2 at
+`v2 − v1`); the last line divides numerator and denominator by `S11 S22 SD`. It
+is Zucker & Mazeh's (1994) `R(s1, s2)` with the light ratio at its optimum at
+every node — their analytic maximisation over α is the 2×2 least-squares fit
+here. Properties:
+
+- **Pearson-normalised.** The DC mode is dropped (§2), so every inner product is
+  of mean-subtracted arrays; `σ`, the oversampling factor and the Parseval
+  constants cancel. `R` is free of the noise scale; with windows pooled (§7) it
+  is the correlation of the weighted ensemble, so only the windows' *relative*
+  weights enter. Like `c1` and `c2`, it correlates the *tapered* arrays.
+- **Bounded.** `0 ≤ χ²_min ≤ SD` (`a = 0` is feasible, χ² is a sum of squares), so
+  `R ∈ [0, 1]`, and `R = 1` exactly for a noiseless composite of the two
+  templates at a node. Under `nonneg=True`, `χ²_min` is the constrained minimum
+  and `R² = 1 − χ²/SD` still holds, with the same bounds; on the edge `a2 = 0`,
+  `R = max(c1, 0)`.
+- **One template.** If template 2 is orthogonal to the data and to template 1 at
+  every shift (`c2 = c12 = 0`), `R = |c1(v1)|`: the one-dimensional normalised
+  CCF. On a window over which template 1 is periodic (so the circular Fourier
+  shift is unicor's shift of an extended template) with odd `N` (no dropped
+  Nyquist mode), `c1` equals `unicor.ccf_vs_velocity` lag by lag — tested to 1e−10.
+- **Same peak as the likelihood.** At fixed `SD`, `logL_profile = −(SD/2)(1 − R²)`,
+  monotonic in `R`: the two maps share their argmax, so the velocities, the
+  amplitudes and the CRLB (§8, which needs the log-likelihood's curvature) do not
+  depend on which map is the primary one.
+
+`profile_from_stats` and `todcor_map` always return both maps (`'R'`,
+`'logL_profile'`, plus `'logL_marginal'`) and `best['R']` at the argmax;
+`output='ccf'` (default) or `'loglike'` selects which is `'map'`, the primary
+surface. `R` costs one element-wise operation on `χ²`. `CCF2d` stores both maps
+on its coarse and fine grids, `R_best` at the refined peak, and draws the
+primary map. Why `R` is the default: on a high-S/N spectrum `ΔlnL` spans
+~10⁵ across the map and only the node at the peak is within a few units of the
+maximum, while `R` keeps the ridges where one template matches one star and
+the crossing where both do.
 
 ## 5. Profile vs marginal likelihood
 
@@ -373,7 +424,7 @@ All of these except `CCF2d` are reachable from the `todcor` namespace; the
 | `resampled_noise_psd` | `todcor.estimator` | noise spectrum of resampled white native noise → `noise_psd` (§8) |
 | `combine_stats` | `todcor.estimator` | (weighted) sum of statistics across windows → joint fit (§7, §8) |
 | `chi2_from_stats` | `todcor.estimator` | χ² of statistics at given amplitudes — per-window shares of the joint χ² (§8) |
-| `profile_from_stats` | `todcor.estimator` | profile/marginalise amplitudes → logL maps (§4–5) |
+| `profile_from_stats` | `todcor.estimator` | profile/marginalise amplitudes → `R` and logL maps (§4–5) |
 | `todcor_map` | `todcor.estimator` | single-window convenience wrapper (§4) |
 | `crlb_from_map` | `todcor.estimator` | Cramér–Rao velocity errors from curvature (§8) |
 | `model_flux` | `todcor.simulate` | reconstruct the best-fit composite for residual plots |

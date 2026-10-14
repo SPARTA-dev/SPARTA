@@ -8,8 +8,10 @@ simultaneously on a 2-D ``(v1, v2)`` grid -- Zucker & Mazeh (1994, ApJ 420,
 On a uniform log-lambda grid a Doppler shift is a translation, so in the Fourier
 domain it is a phase factor: the templates are transformed **once** and reused
 at every trial velocity. The amplitudes enter linearly and are solved in closed
-form (2x2 weighted least squares) at each node; profiling them out gives the
-classic TODCOR correlation map.
+form (2x2 weighted least squares) at each node; profiling them out gives two
+equivalent (v1, v2) maps -- the classic TODCOR two-dimensional correlation R
+(``output='ccf'``, the default primary map) and the Gaussian log-likelihood
+(``output='loglike'``), which share their peak.
 
 Everything takes plain floats / arrays: velocities and the log-lambda shift in
 km/s, ``zeta`` (the Fourier conjugate) in s/km, kernel widths as FWHM in km/s.

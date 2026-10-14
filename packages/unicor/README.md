@@ -90,6 +90,23 @@ one order:  RV = 12.291 +- 0.012 km/s (CCF peak 0.987)
 combined:   RV = 12.295 +- 0.009 km/s
 ```
 
+## Two outputs: correlation or log-likelihood
+
+`ccf_vs_velocity` and `combine_ccfs` take `output='ccf'` (the default: the
+correlation) or `output='loglike'`: the Zucker (2003) log-likelihood
+`lnL(v) = −(N/2)·ln(1 − C(v)²)`, with `N` the independent bins (`n_eff`,
+required in this mode), taken as 0 where `C = 0`. For several orders it is the
+sum `Σ_i −(N_i/2)·ln(1 − C_i²)`, which equals `−(N_tot/2)·ln(1 − ML²)` of the
+combined CCF. `loglike_from_ccf(ccf, n_eff)` converts a CCF you already have.
+The log-likelihood is monotonic in `C²`, so both curves peak at the same lag;
+read the RV and its error off the CCF (`subpixel_peak`, `rv_uncertainty`) in
+either case.
+
+```python
+v, lnl = unicor.ccf_vs_velocity(template, observed, wave, output="loglike", n_eff=wave.size)
+total = unicor.combine_ccfs(np.vstack([c, c2]), n_eff=n_eff, output="loglike")
+```
+
 The uncertainty is the maximum-likelihood error of Zucker (2003): it assumes
 white noise on the `n_eff` independent bins. Filtering or normalising the
 spectrum first correlates the noise, and the error is then no longer

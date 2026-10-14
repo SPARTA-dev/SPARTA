@@ -10,8 +10,8 @@ flat, and `Observations` is the only time-series driver. **There are no
 aliases or shims**: every old name below is gone and raises `ImportError`,
 `AttributeError` or `TypeError`. Numerical results are unchanged; the golden
 master (UNICOR, TODCOR, TIRAVEL, periodograms, instrument readers) passes
-bit-for-bit or at 1e-9 relative. The `unicor` and `todcor` engine APIs did not
-change.
+bit-for-bit or at 1e-9 relative. The `unicor` and `todcor` engine APIs changed
+only by the additive `output` modes (see "Other changes").
 
 ### Modules
 
@@ -227,16 +227,34 @@ Keys of `results_frequency` / `results_power`:
   needs the optional extra (`pip install "SPARTA[progress]"`).
 - `Observations` reads files in sorted order, so the epoch order no longer
   depends on the filesystem.
+- **Two output modes, `output='ccf'` (default) or `output='loglike'`,** in
+  `unicor.ccf_vs_velocity` / `combine_ccfs`, `todcor.profile_from_stats` /
+  `todcor_map`, `CCF1d.cross_correlate`, `CCF2d.cross_correlate` and both
+  `Observations` RV drivers; any other value raises `ValueError`. UNICOR's
+  log-likelihood is Zucker's (2003) `-(N_i/2) ln(1 - C_i^2)` per order with
+  the effective bins `n_eff`, summed over orders (`= -(N_tot/2) ln(1 - ML^2)`;
+  new `unicor.loglike_from_ccf`); `CCF1d.Corr` / `CorrCombined` store it as
+  `'loglike'` next to `'corr'`. TODCOR's correlation is Zucker & Mazeh's
+  (1994) two-dimensional `R = sqrt(1 - chi2_min / SD)`, from the same
+  sufficient statistics (`res['R']`, `best['R']`, `Corr2d['R']`,
+  `Corr2d['R_best']`); its log-likelihood is the Gaussian `-chi2/2` as
+  before. Both surfaces are always stored; the mode is recorded (`'output'`),
+  selects TODCOR's primary `'map'` and what `plot()` draws. RVs, errors and
+  amplitudes are identical in both modes (the errors still come from the
+  log-likelihood). **Default change:** `CCF2d`'s primary map and plot are now
+  `R`, not Delta lnL — pass `output='loglike'` for the old surface.
 - One plot style for every figure, in the new `sparta.plotting` module
   (exported): data as thin black mid-centred steps (`plot_data`), scattered
   epochs as black points with error bars (`plot_points`), models red
   (`plot_model`), one extra series blue (`plot_extra`), derived curves such as
   CCFs and periodograms black lines (`plot_curve`), maps as black unfilled
-  contours of Delta lnL at -0.5, -2, -4.5, -10, -30, ... (`contour_map`,
-  `dlnl_levels`), best fit a red `+`, truth a blue `x`; `apply_style()` sets
-  the matching rcParams. `CCF2d.plot` draws no colour map or colour bar any
-  more: `levels` is now a sequence of Delta lnL values (default
-  `dlnl_levels`), not a number of filled levels. `TimeSeries.plot_velocities`
+  maps as grey-scale images with the peak black and a thin grey colour bar
+  (`map_image`, `map_colorbar`; a correlation map shaded linearly, a
+  log-likelihood map as Delta lnL on a symmetric-log scale, linear to -4.5
+  and logarithmic beyond, `dlnl_norm`), best fit a red `+`, truth a blue
+  `x`, both white-edged so they read on black; `apply_style()` sets the
+  matching rcParams. `CCF2d.plot` loses `levels` (no contours, no colour
+  map). `TimeSeries.plot_velocities`
   loses `sty` and returns the figure instead of showing it;
   `plot_periodograms` returns the figure. All the example notebooks use the
   style.

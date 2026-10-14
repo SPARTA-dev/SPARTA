@@ -19,7 +19,7 @@ Radial velocities and periodicity searches for spectroscopic time series:
     per-instrument archive loaders and a simulator, by survey key.
 ``plotting``
     the figure style: data as black steps, models red, one extra series blue,
-    maps as black unfilled contours.
+    maps as grey-scale images with the peak black.
 
 The array-level engines are the standalone ``unicor`` and ``todcor``
 packages; the PDC math is in ``sparta.pdc`` and the TIRAVEL measure in

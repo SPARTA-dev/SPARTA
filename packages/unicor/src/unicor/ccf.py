@@ -32,12 +32,40 @@ For several orders sharing the velocity lags ``v``::
 ``n_eff`` is the number of *independent* spectral bins: the number of pixels
 on the native (detector) sampling, not on a finer resampled grid -- and not the
 number of velocity lags.
+
+Two output modes
+----------------
+:func:`ccf_vs_velocity` and :func:`combine_ccfs` take ``output='ccf'`` (the
+default: the correlation itself) or ``output='loglike'``: the Zucker (2003)
+log-likelihood ``log L = -(N/2) log(1 - C**2)`` (:func:`loglike_from_ccf`),
+relative to no correlation (C = 0). It is monotonic in ``C**2`` at fixed N, so
+both curves peak at the same lag; read the RV and its error off the CCF
+(:func:`subpixel_peak`, :func:`rv_uncertainty`) whichever curve you keep.
 """
 import numpy as np
 from scipy import interpolate
 from scipy.signal import correlate as _correlate
 
 from .dsp import log_grid_dln, velocity_from_log_shift
+
+OUTPUTS = ('ccf', 'loglike')
+
+
+def check_output(output):
+    """Validate an ``output`` mode: 'ccf' (the correlation) or 'loglike'.
+
+    Parameters
+    ----------
+    output : str
+        The requested mode.
+
+    Raises
+    ------
+    ValueError
+        If ``output`` is not one of ``OUTPUTS``.
+    """
+    if output not in OUTPUTS:
+        raise ValueError(f"output must be one of {OUTPUTS}, got {output!r}")
 
 
 def extend_log_grid(wave, n_lags):
@@ -75,7 +103,8 @@ def extend_log_grid(wave, n_lags):
     return wave[0] * np.exp(dln * np.arange(-k, n + k))
 
 
-def ccf_vs_velocity(template, signal, wave, velocity_convention='cz'):
+def ccf_vs_velocity(template, signal, wave, velocity_convention='cz', output='ccf',
+                    n_eff=None):
     """Pearson cross-correlation of ``signal`` against a template, vs velocity.
 
     ``signal`` holds N pixels on the uniform log-lambda grid ``wave``;
@@ -111,24 +140,38 @@ def ccf_vs_velocity(template, signal, wave, velocity_convention='cz'):
     velocity_convention : {'cz', 'relativistic'}
         Doppler convention mapping lags to velocities, see
         :func:`unicor.dsp.doppler_factor`. Default 'cz'.
+    output : {'ccf', 'loglike'}
+        Return the correlation (default) or the Zucker (2003)
+        log-likelihood ``-(n_eff/2) log(1 - C**2)`` (:func:`loglike_from_ccf`).
+    n_eff : float, optional
+        Effective number of independent spectral bins behind the signal
+        (dimensionless, > 0; native pixels, see :func:`rv_uncertainty`).
+        Required for ``output='loglike'``, unused otherwise.
 
     Returns
     -------
     v : ndarray, shape (2K + 1,)
         Velocity of each lag k = -K..K (km/s), increasing, 0 at k = 0.
     ccf : ndarray, shape (2K + 1,)
-        Pearson correlation in [-1, 1]. Peaks at the velocity by which
-        ``signal`` is red-shifted relative to ``template``.
+        Pearson correlation in [-1, 1] (``output='ccf'``), or its
+        log-likelihood (``output='loglike'``, dimensionless, >= 0). Peaks at
+        the velocity by which ``signal`` is red-shifted relative to
+        ``template``.
 
     Raises
     ------
     ValueError
-        If ``len(template) - len(signal)`` is not a positive even number 2K;
+        If ``output`` is unknown, or 'loglike' without ``n_eff``;
+        if ``len(template) - len(signal)`` is not a positive even number 2K;
         if ``wave`` is not an N-node grid uniform in ln(lambda); if
         ``velocity_convention`` is unknown; if either flux array is not finite;
         or if ``signal`` or the template segment of any lag is constant (the
         correlation is then 0/0 -- typically a template without lines there).
     """
+    check_output(output)
+    if output == 'loglike' and n_eff is None:
+        raise ValueError("output='loglike' needs n_eff, the number of independent "
+                         "spectral bins behind the signal")
     t = np.asarray(template, float)
     s = np.asarray(signal, float)
     if t.ndim != 1 or s.ndim != 1:
@@ -176,10 +219,57 @@ def ccf_vs_velocity(template, signal, wave, velocity_convention='cz'):
             "velocity scan or use a template with lines across the order)")
     ccf = numer / np.sqrt(seg_var * s_norm2)
     # Segment m is the template shifted by K - m pixels: reverse to ascending lag.
-    return v, ccf[::-1]
+    ccf = ccf[::-1]
+    if output == 'loglike':
+        return v, loglike_from_ccf(ccf, n_eff)
+    return v, ccf
 
 
-def combine_ccfs(ccfs, n_eff=None):
+def loglike_from_ccf(ccf, n_eff):
+    """Zucker (2003) log-likelihood of a CCF: ``-(N/2) log(1 - C**2)``.
+
+    For white noise on N independent bins and a template matched up to an
+    amplitude, maximising the likelihood over that amplitude and the noise
+    level leaves ``log L(v) = -(N/2) log(1 - C(v)**2)`` plus a constant
+    (Zucker 2003, MNRAS 342, 1291, §2), taken here as zero where C = 0. It
+    rises monotonically with ``C**2``, so it peaks where ``|C|`` does, and its
+    curvature at the peak is the one :func:`rv_uncertainty` uses.
+
+    Parameters
+    ----------
+    ccf : ndarray, shape (n_lags,) or (n_orders, n_lags)
+        Normalized CCF(s); clipped to [-1, 1] first.
+    n_eff : float or array_like, shape (n_orders,)
+        Effective number of independent spectral bins (dimensionless, > 0):
+        a scalar, or one per order (row) of ``ccf``.
+
+    Returns
+    -------
+    ndarray, shape of ``ccf``
+        The log-likelihood (dimensionless, >= 0); +inf where ``|C| = 1``
+        (a perfect, noiseless match).
+
+    Raises
+    ------
+    ValueError
+        If ``n_eff`` is not finite and positive, or does not match the rows.
+    """
+    C = np.clip(np.asarray(ccf, float), -1.0, 1.0)
+    n_eff = np.asarray(n_eff, float)
+    if not np.all(np.isfinite(n_eff) & (n_eff > 0)):
+        raise ValueError(f"n_eff must be finite and positive, got {n_eff}")
+    if n_eff.ndim == 1:
+        if C.ndim != 2 or n_eff.shape != C.shape[:1]:
+            raise ValueError(f"n_eff must hold one value per row of ccf ({C.shape}), "
+                             f"got shape {n_eff.shape}")
+        n_eff = n_eff[:, None]
+    elif n_eff.ndim != 0:
+        raise ValueError(f"n_eff must be a scalar or one value per order, got shape {n_eff.shape}")
+    with np.errstate(divide='ignore'):
+        return -0.5 * n_eff * np.log1p(-C ** 2)
+
+
+def combine_ccfs(ccfs, n_eff=None, output='ccf'):
     """Combine per-order CCFs into one, by maximum likelihood (Zucker 2003, §3.1).
 
     Order ``i`` with ``N_i`` independent bins contributes
@@ -196,19 +286,26 @@ def combine_ccfs(ccfs, n_eff=None):
         Per-order normalized CCFs on a common velocity-lag axis.
     n_eff : array_like, shape (n_orders,), optional
         Effective number of independent spectral bins of each order
-        (dimensionless, > 0). None weights all orders equally.
+        (dimensionless, > 0). None weights all orders equally (``output='ccf'``
+        only).
+    output : {'ccf', 'loglike'}
+        Return the ML-combined CCF (default) or the summed log-likelihood
+        ``sum_i -(N_i/2) log(1 - C_i**2) = -(N_tot/2) log(1 - ML**2)``.
 
     Returns
     -------
     combined : ndarray, shape (n_lags,)
-        The ML-combined CCF, in [0, 1]; pair it with ``N_tot = sum(n_eff)`` in
-        :func:`rv_uncertainty`.
+        The ML-combined CCF, in [0, 1] -- pair it with ``N_tot = sum(n_eff)``
+        in :func:`rv_uncertainty` -- or the summed log-likelihood
+        (dimensionless, >= 0).
 
     Raises
     ------
     ValueError
-        If ``n_eff`` does not hold one finite, positive value per order.
+        If ``output`` is unknown, ``n_eff`` does not hold one finite, positive
+        value per order, or is None with ``output='loglike'``.
     """
+    check_output(output)
     # Clip to [-1, 1] so a per-order value that overshoots numerically cannot
     # drive 1 - C**2 negative (which would make the combined CCF NaN).
     C = np.clip(np.atleast_2d(np.asarray(ccfs, float)), -1.0, 1.0)
@@ -223,6 +320,11 @@ def combine_ccfs(ccfs, n_eff=None):
         if not np.all(np.isfinite(n_eff) & (n_eff > 0)):
             raise ValueError(f"n_eff must be finite and positive, got {n_eff}")
         weights = n_eff / n_eff.sum()
+    if output == 'loglike':
+        if n_eff is None:
+            raise ValueError("output='loglike' needs n_eff: the log-likelihood "
+                             "scales with each order's number of independent bins")
+        return loglike_from_ccf(C, n_eff).sum(axis=0)
     return np.sqrt(1 - np.prod((1 - C ** 2) ** weights[:, None], axis=0))
 
 

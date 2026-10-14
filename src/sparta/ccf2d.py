@@ -9,6 +9,12 @@ Cramer-Rao uncertainties. The estimator lives in ``todcor.estimator``, the
 forward model in ``todcor.simulate``, the grid/FFT/broadening primitives in
 ``unicor.dsp``; this class handles the SPARTA-object orchestration.
 
+Two output modes (``output``): 'ccf' (default) makes the two-dimensional
+correlation R(v1, v2) of Zucker & Mazeh (1994) the primary map, 'loglike' the
+profile log-likelihood. Both maps are always stored and share their argmax;
+the RVs, amplitudes and Cramer-Rao errors come from the log-likelihood in both
+modes and are identical.
+
 Conventions: velocities in km/s, 'cz' (lambda_obs/lambda_rest = 1 + v/c) unless
 ``velocity_convention='relativistic'``; wavelengths in Angstrom; the fit runs on
 a log-lambda (velocity-even) grid.
@@ -22,10 +28,10 @@ import warnings
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
 from astropy import units as u
 
 from unicor import dsp
+from unicor.ccf import check_output
 from todcor.simulate import model_flux
 from todcor.estimator import (
     chi2_from_stats, combine_stats, crlb_from_map, profile_from_stats,
@@ -40,7 +46,8 @@ class CCF2d:
     TODCOR fit of one double-lined (multi-order) spectrum against two templates.
 
     ``cross_correlate`` fills ``Corr2d`` with the RVs, amplitudes and
-    Cramer-Rao errors of both components.
+    Cramer-Rao errors of both components, and the (v1, v2) maps: the
+    two-dimensional correlation 'R' and the log-likelihood 'logL_profile'.
     '''
     # =============================================================================
     # =============================================================================
@@ -86,7 +93,8 @@ class CCF2d:
                         dv=None, vel_bound=150, dvel=None,
                         v1_grid=None, v2_grid=None, sigma=None, alpha=0.1,
                         nonneg=True, zeta_max=None, continuum='median',
-                        orders=None, keep_windows=True, velocity_convention='cz'):
+                        orders=None, keep_windows=True, velocity_convention='cz',
+                        output='ccf'):
         '''
         Fit both components of a double-lined spectrum simultaneously.
 
@@ -213,6 +221,18 @@ class CCF2d:
             order's actual ln(lambda) step. For the same spectrum the 'cz'
             RVs exceed the 'relativistic' ones by ~v^2/2c (37.5 m/s at
             150 km/s).
+        output : {'ccf', 'loglike'}
+            The primary map, Corr2d['map'], drawn by ``plot``: the
+            two-dimensional correlation R (default) or the profile
+            log-likelihood. R = sqrt(1 - chi2 / SD) is the fraction of the
+            data's (weighted) power that the best-fit amplitude pair explains
+            at each node -- Zucker & Mazeh's (1994) R with the light ratio
+            fitted -- in [0, 1] and free of the noise scale. At fixed data it
+            is monotonic in the log-likelihood, logL = -(SD/2) (1 - R^2), so
+            both maps share their argmax: the RVs, amplitudes and errors
+            (which come from the log-likelihood curvature) are identical in
+            both modes. Both maps are stored either way, as they cost one
+            element-wise operation each.
 
         Returns
         -------
@@ -220,14 +240,16 @@ class CCF2d:
             self, with these attributes:
 
             ``Corr2d``
-                dict with the coarse map: 'v1_grid', 'v2_grid' (km/s),
-                'logL_profile', 'logL_marginal', 'a1', 'a2', 'chi2' (all
-                (n1, n2) maps), 'best' (its argmax node) and 'units'; 'fine',
+                dict with the coarse map: 'v1_grid', 'v2_grid' (km/s), 'R'
+                (the two-dimensional correlation), 'logL_profile',
+                'logL_marginal', 'a1', 'a2', 'chi2' (all (n1, n2) maps),
+                'map' (whichever of 'R' / 'logL_profile' ``output`` selects)
+                and 'output', 'best' (its argmax node) and 'units'; 'fine',
                 the same for the fine local map (None if refinement was
                 skipped); and the results: 'RV1', 'RV2' (km/s, refined),
                 'eRV1', 'eRV2' (km/s), 'rho12' (v1-v2 correlation), 'cov'
                 (2x2, km^2/s^2), 'peak' (the coarse argmax node, km/s),
-                'a1_best', 'a2_best' (at the refined RVs), 'sigma' (the native
+                'a1_best', 'a2_best' and 'R_best' (at the refined RVs), 'sigma' (the native
                 per-pixel noise behind the fit and its errors: the input as
                 given, or under sigma=None an array of the per-window
                 estimates, aligned with ``windows``), 'sigma_from_fit', the
@@ -236,7 +258,8 @@ class CCF2d:
                 ~1 by construction under sigma=None), and
                 'velocity_convention' (that of every velocity above). The maps
                 ('logL_profile', 'logL_marginal', 'chi2', and those under
-                'fine') are on the same noise scale.
+                'fine') are on the same noise scale; 'R' does not depend on
+                it, only on the orders' relative weights.
             ``stats``
                 The *combined* coarse-map sufficient statistics, on that noise
                 scale, enough to re-profile (e.g. with a different
@@ -260,9 +283,10 @@ class CCF2d:
         Raises
         ------
         ValueError
-            If the grid is not uniform in ln(lambda) with the declared step,
-            ``dvel`` is not positive, a flux is not finite, a template has no lines over the fitted
-            orders, or the noise cannot be estimated.
+            If ``output`` is unknown, the grid is not uniform in ln(lambda)
+            with the declared step, ``dvel`` is not positive, a flux is not
+            finite, a template has no lines over the fitted orders, or the
+            noise cannot be estimated.
 
         Warns
         -----
@@ -270,6 +294,7 @@ class CCF2d:
             If the peak lies on the edge of the coarse or the fine map, or an
             order falls back to the common noise estimate.
         '''
+        check_output(output)
         spec = deepcopy(spectrum)
         template1 = deepcopy(template1)
         template2 = deepcopy(template2)
@@ -379,14 +404,14 @@ class CCF2d:
         # has not moved.
         fine_cache = {}
         fit = self._joint_fit(stats, None, prepared, v1_grid, v2_grid,
-                              nonneg, fine_cache)
+                              nonneg, fine_cache, output)
         noise = sigma_in
         if sigma_from_fit:
             noise, fallback = self._window_noise(fit, windows)
             for win, s_i, fb in zip(windows, noise, fallback):
                 win.update(sigma=float(s_i), sigma_fallback=bool(fb))
             fit = self._joint_fit(stats, 1.0 / noise ** 2, prepared,
-                                  v1_grid, v2_grid, nonneg, fine_cache)
+                                  v1_grid, v2_grid, nonneg, fine_cache, output)
 
         res, coarse, crlb, at_peak = fit['res'], fit['coarse'], fit['crlb'], fit['best']
         if coarse['on_edge']:
@@ -404,7 +429,7 @@ class CCF2d:
                    eRV1=crlb['sigma_v1'], eRV2=crlb['sigma_v2'],
                    rho12=crlb['rho'], cov=crlb['cov'],
                    peak=coarse['peak'],
-                   a1_best=at_peak['a1'], a2_best=at_peak['a2'],
+                   a1_best=at_peak['a1'], a2_best=at_peak['a2'], R_best=at_peak['R'],
                    chi2_best=at_peak['chi2'], chi2_red=at_peak['chi2_red'],
                    sigma=noise, sigma_from_fit=sigma_from_fit,
                    velocity_convention=velocity_convention)
@@ -458,24 +483,25 @@ class CCF2d:
 
     # =============================================================================
     # =============================================================================
-    def plot(self, levels=None, marginals=True, figsize=(6.5, 6.0)):
+    def plot(self, marginals=True, figsize=(6.5, 6.0)):
         '''
-        Plot the (v1, v2) profile log-likelihood surface as unfilled contours.
+        Plot the primary (v1, v2) map as a grey-scale image, peak black.
 
-        The map is drawn as Delta lnL below its maximum, in black contour lines
-        (``sparta.plotting.contour_map``); the best fit is a red ``+``, also
-        marked by red lines on the marginals. A legend lists the levels.
+        ``output='ccf'`` (the default of ``cross_correlate``) draws the
+        two-dimensional correlation R on a linear grey scale from the map's
+        minimum (white) to its maximum (black); ``output='loglike'`` draws the
+        profile log-likelihood as Delta lnL below its maximum, linear to -4.5
+        (3 sigma) and logarithmic beyond (``sparta.plotting.dlnl_norm``), as a
+        high-S/N map is ~1e5 deep. A thin grey colour bar gives the scale; the
+        best fit is a red ``+`` (white-edged), also marked by red lines on the
+        marginals. Add the truth with
+        ``sparta.plotting.mark_truth(fig.axes[0], v1, v2)``.
 
         Parameters
         ----------
-        levels : sequence of float, optional
-            Delta lnL contour levels (negative). Default
-            ``sparta.plotting.dlnl_levels``: -0.5, -2, -4.5 (1-3 sigma for one
-            parameter, drawn thicker), then -10, -30, -100, ... to the map's
-            depth.
         marginals : bool
-            Add the two profile cuts through the peak (Delta lnL against v1
-            and against v2, km/s), as black lines.
+            Add the two cuts through the peak (R, or Delta lnL, against v1 and
+            against v2, km/s), as black lines.
         figsize : (float, float)
             Figure size (inches).
 
@@ -484,13 +510,15 @@ class CCF2d:
         matplotlib.figure.Figure
         '''
         res = self.Corr2d
-        v1, v2, logL = res['v1_grid'], res['v2_grid'], res['logL_profile']
-        # Plot Delta-logL relative to the peak: the absolute level carries the
-        # arbitrary SD offset and swamps the structure.
-        dlogL = logL - np.nanmax(logL)
-        if levels is None:
-            levels = sp_plot.dlnl_levels(np.nanmin(dlogL))
-        levels = np.sort(np.asarray(levels, float))
+        v1, v2 = res['v1_grid'], res['v2_grid']
+        loglike = res['output'] == 'loglike'
+        if loglike:
+            # Delta lnL relative to the peak: the absolute level carries the
+            # arbitrary SD offset.
+            z = res['logL_profile'] - np.nanmax(res['logL_profile'])
+            label = sp_plot.DLNL_LABEL
+        else:
+            z, label = res['R'], '$R$'
 
         fig = plt.figure(figsize=figsize, layout='constrained')
         if marginals:
@@ -504,36 +532,33 @@ class CCF2d:
             ax = fig.add_subplot(111)
 
         # The map is indexed [v1, v2]; transpose so v1 runs along x.
-        sp_plot.contour_map(ax, v1, v2, dlogL.T, levels=levels,
-                            linewidths=sp_plot.dlnl_linewidths(levels))
-        sp_plot.mark_fit(ax, res['RV1'], res['RV2'])
+        mesh = sp_plot.map_image(ax, v1, v2, z.T, loglike=loglike)
+        (fit_marker,) = sp_plot.mark_fit(ax, res['RV1'], res['RV2'])
         ax.set_xlabel(r'$v_1$ (km s$^{-1}$)')
         ax.set_ylabel(r'$v_2$ (km s$^{-1}$)')
 
         if marginals:
-            i, j = np.unravel_index(np.argmax(logL), logL.shape)
-            sp_plot.plot_curve(ax_top, v1, dlogL[:, j])
-            sp_plot.plot_curve(ax_right, dlogL[i, :], v2)
+            i, j = np.unravel_index(np.nanargmax(z), z.shape)
+            sp_plot.plot_curve(ax_top, v1, z[:, j])
+            sp_plot.plot_curve(ax_right, z[i, :], v2)
             ax_top.axvline(res['RV1'], color=sp_plot.MODEL_COLOR, lw=0.8)
             ax_right.axhline(res['RV2'], color=sp_plot.MODEL_COLOR, lw=0.8)
             ax_top.tick_params(labelbottom=False)
             ax_right.tick_params(labelleft=False)
-            ax_top.set_ylabel(r'$\Delta\ln L$')
-            ax_right.set_xlabel(r'$\Delta\ln L$')
-            # High-S/N maps run to |Delta lnL| ~ 1e5: keep the tick labels short.
-            ax_top.ticklabel_format(axis='y', style='sci', scilimits=(-3, 3))
-            ax_right.ticklabel_format(axis='x', style='sci', scilimits=(-3, 3))
-
-        handles, labels = sp_plot.dlnl_legend_entries(levels)
-        handles.append(Line2D([], [], color=sp_plot.MODEL_COLOR, marker='+', ms=10,
-                              mew=1.6, ls='none'))
-        labels.append('best fit')
-        key = dict(title=r'$\Delta\ln L$ contours', fontsize=8, title_fontsize=8,
-                   alignment='left', borderaxespad=0)
-        if marginals:
-            ax_key.legend(handles, labels, loc='center left', **key)
+            short = r'$\Delta\ln L$' if loglike else '$R$'
+            ax_top.set_ylabel(short)
+            ax_right.set_xlabel(short)
+            if loglike:
+                # High-S/N maps run to |Delta lnL| ~ 1e5: keep the tick labels short.
+                ax_top.ticklabel_format(axis='y', style='sci', scilimits=(-3, 3))
+                ax_right.ticklabel_format(axis='x', style='sci', scilimits=(-3, 3))
+            # Beside the right marginal, so the map keeps the marginals' axes.
+            sp_plot.map_colorbar(mesh, label, ax=ax_right)
+            ax_key.legend([fit_marker], ['best fit'], loc='center left', fontsize=8,
+                          borderaxespad=0)
         else:
-            fig.legend(handles, labels, loc='outside right upper', **key)
+            sp_plot.map_colorbar(mesh, label)
+            fig.legend([fit_marker], ['best fit'], loc='outside upper left', fontsize=8)
 
         return fig
 
@@ -582,7 +607,8 @@ class CCF2d:
             v2_grid = grid
         return np.asarray(v1_grid, float), np.asarray(v2_grid, float)
 
-    def _joint_fit(self, stats, weights, prepared, v1_grid, v2_grid, nonneg, fine_cache):
+    def _joint_fit(self, stats, weights, prepared, v1_grid, v2_grid, nonneg, fine_cache,
+                   output):
         '''
         One pass of the joint fit: pool the per-window coarse statistics with
         the given weights, locate the peak on the coarse map, refine it on the
@@ -604,6 +630,8 @@ class CCF2d:
         fine_cache : dict
             Per-window fine-map statistics by coarse node, filled here and
             reused across passes.
+        output : {'ccf', 'loglike'}
+            The primary map of the profile dicts (see ``cross_correlate``).
 
         Returns
         -------
@@ -616,13 +644,13 @@ class CCF2d:
             'best' (the joint profile there).
         '''
         pooled = combine_stats(stats, weights)
-        res = profile_from_stats(pooled, v1_grid, v2_grid, nonneg=nonneg)
+        res = profile_from_stats(pooled, v1_grid, v2_grid, nonneg=nonneg, output=output)
         res['units'] = u.km / u.s
 
         coarse = crlb_from_map(res['logL_profile'], v1_grid, v2_grid,
                                half=self.crlb_half)
         res['fine'] = None if coarse['on_edge'] else self._refine(
-            prepared, res, nonneg, weights, fine_cache)
+            prepared, res, nonneg, weights, fine_cache, output)
         crlb = coarse if res['fine'] is None else crlb_from_map(
             res['fine']['logL_profile'], res['fine']['v1_grid'],
             res['fine']['v2_grid'], half=self.crlb_half)
@@ -637,7 +665,7 @@ class CCF2d:
         return dict(pooled=pooled, res=res, coarse=coarse, crlb=crlb,
                     at_peak=at_peak, best=best)
 
-    def _refine(self, prepared, res, nonneg, weights, fine_cache):
+    def _refine(self, prepared, res, nonneg, weights, fine_cache, output):
         '''
         Re-evaluate the statistics on a fine (v1, v2) grid around the coarse
         argmax and profile them -- the second, exact pass (see ``__init__``).
@@ -647,7 +675,7 @@ class CCF2d:
 
         Parameters
         ----------
-        prepared, nonneg, weights, fine_cache
+        prepared, nonneg, weights, fine_cache, output
             See ``_joint_fit``.
         res : dict
             The coarse ``profile_from_stats`` result.
@@ -673,7 +701,7 @@ class CCF2d:
             fine_cache[(i, j)] = [window_stats(d, g1, g2, dv, f1, f2, **kw)
                                   for d, g1, g2, dv, kw in prepared]
         fine = profile_from_stats(combine_stats(fine_cache[(i, j)], weights), f1, f2,
-                                  nonneg=nonneg)
+                                  nonneg=nonneg, output=output)
         fi, fj = np.unravel_index(np.argmax(fine['logL_profile']), fine['logL_profile'].shape)
         if fi in (0, len(f1) - 1) or fj in (0, len(f2) - 1):
             return None

@@ -101,6 +101,22 @@ quadratic refinement of `crlb_from_map` needs a map step that resolves the
 peak; SPARTA's `CCF2d` re-evaluates a finer local map around it instead (see
 the method notes).
 
+## Two maps: correlation or log-likelihood
+
+`todcor_map` and `profile_from_stats` return both surfaces over `(v1, v2)`:
+
+- `res["R"]` — the two-dimensional correlation of Zucker & Mazeh (1994),
+  `R² = 1 − χ²_min/SD` (the fraction of the data's power the best-fit
+  amplitude pair explains), in [0, 1] and free of the noise scale;
+- `res["logL_profile"]` (and `"logL_marginal"`) — the Gaussian log-likelihood
+  `−χ²/2`, which `crlb_from_map` needs for the errors.
+
+They are related by `logL_profile = −(SD/2)(1 − R²)` and share their peak, so
+`best` (now with `best["R"]`) is the same either way. The keyword
+`output='ccf'` (default) or `output='loglike'` only selects which of the two is
+`res["map"]`, the primary surface; any other value raises `ValueError`. The
+derivation and the reduction to the one-dimensional CCF are in the method notes.
+
 Several windows (orders) of the same epoch, evaluated on one shared velocity
 grid, pool by adding their statistics:
 
@@ -112,8 +128,8 @@ res = todcor.profile_from_stats(todcor.combine_stats(stats), v1, v2, nonneg=True
 ## Learn the method
 
 - [`docs/todcor_method.md`](https://github.com/SPARTA-dev/SPARTA/blob/master/packages/todcor/docs/todcor_method.md):
-  the derivation (sufficient statistics, the χ² quadratic form, profile vs
-  marginal amplitudes, Parseval, the even-N Nyquist drop, window combination,
+  the derivation (sufficient statistics, the χ² quadratic form, the
+  two-dimensional correlation `R`, profile vs marginal amplitudes, Parseval, the even-N Nyquist drop, window combination,
   the noise budget and its assumptions).
 - SPARTA's [`examples/todcor/`](https://github.com/SPARTA-dev/SPARTA/tree/master/examples/todcor)
   notebooks 01–03 walk through it numerically with this package alone.

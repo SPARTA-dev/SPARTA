@@ -234,6 +234,56 @@ def test_weighted_combination_refuses_bad_bin_counts(grid, bad):
         unicor.combine_ccfs(_three_order_ccfs(grid), n_eff=bad)
 
 
+# --- The log-likelihood mode (output='loglike') -------------------------------
+def test_loglike_mode_is_the_zucker_log_likelihood_of_the_ccf(grid):
+    rng = np.random.default_rng(3)
+    signal = _line_spectrum(4.2, grid) + 0.02 * rng.standard_normal(grid.size)
+    v, c = _ccf(0.0, signal, grid, vmax=20)
+    v_l, lnl = _ccf(0.0, signal, grid, vmax=20, output='loglike', n_eff=812.0)
+    np.testing.assert_array_equal(v_l, v)
+    np.testing.assert_allclose(lnl, -0.5 * 812.0 * np.log(1 - c ** 2), rtol=1e-12)
+    np.testing.assert_allclose(unicor.loglike_from_ccf(c, 812.0), lnl, rtol=0, atol=0)
+    assert np.argmax(lnl) == np.argmax(c ** 2)
+    assert np.all(lnl >= 0)
+
+
+def test_combined_loglike_is_the_sum_over_orders_and_the_ml_ccf_form(grid):
+    # Zucker (2003): sum_i -(N_i/2) ln(1 - C_i^2) = -(N_tot/2) ln(1 - ML^2).
+    ccfs = _three_order_ccfs(grid)
+    n_eff = np.array([100.0, 400.0, 1500.0])
+    total = unicor.combine_ccfs(ccfs, n_eff=n_eff, output='loglike')
+    per_order = unicor.loglike_from_ccf(ccfs, n_eff)
+    np.testing.assert_allclose(total, per_order.sum(axis=0), rtol=1e-14)
+    ml = unicor.combine_ccfs(ccfs, n_eff=n_eff)
+    np.testing.assert_allclose(total, unicor.loglike_from_ccf(ml, n_eff.sum()),
+                               rtol=1e-9, atol=1e-9)
+    assert np.argmax(total) == np.argmax(ml)
+
+
+def test_a_perfect_match_has_unbounded_log_likelihood():
+    assert unicor.loglike_from_ccf(np.array([1.0, 0.0, -1.0]), 10.0).tolist() == \
+        [np.inf, 0.0, np.inf]
+
+
+@pytest.mark.parametrize("bad", ['CCF', 'likelihood', None])
+def test_an_unknown_output_mode_is_refused(grid, bad):
+    with pytest.raises(ValueError, match="output"):
+        _ccf(0.0, _line_spectrum(1.0, grid), grid, vmax=10, output=bad)
+    with pytest.raises(ValueError, match="output"):
+        unicor.combine_ccfs(_three_order_ccfs(grid), n_eff=[1.0, 1.0, 1.0], output=bad)
+
+
+def test_loglike_needs_the_number_of_independent_bins(grid):
+    with pytest.raises(ValueError, match="n_eff"):
+        _ccf(0.0, _line_spectrum(1.0, grid), grid, vmax=10, output='loglike')
+    with pytest.raises(ValueError, match="n_eff"):
+        unicor.combine_ccfs(_three_order_ccfs(grid), output='loglike')
+    with pytest.raises(ValueError, match="n_eff"):
+        unicor.loglike_from_ccf(_three_order_ccfs(grid), [1.0, 2.0])
+    with pytest.raises(ValueError, match="n_eff"):
+        unicor.loglike_from_ccf(np.zeros(5), -1.0)
+
+
 @pytest.mark.parametrize("vmax", [10.0, 60.0])
 def test_rv_uncertainty_matches_the_closed_form_for_a_gaussian_ccf(vmax):
     # C(v) = A exp(-v^2 / 2s^2) has C'' = -A/s^2 at the peak, so Zucker's
