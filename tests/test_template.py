@@ -20,3 +20,41 @@ def test_download_url_is_https_and_correct():
     assert url.startswith("https://")
     assert "/data/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/Z-0.0/" in url
     assert url.endswith("lte05500-4.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits")
+
+
+@pytest.mark.parametrize("metal, alpha, z_dir, tail", [
+    (-1.0, 0.2, "Z-1.0.Alpha=+0.20/", "lte05500-4.50-1.0.Alpha=+0.20."),
+    (-0.5, 0.0, "Z-0.5", "lte05500-4.50-0.5."),
+    (0.5, 0.0, "Z+0.5/", "lte05500-4.50+0.5."),
+])
+def test_phoenix_names_carry_one_metallicity_sign(metal, alpha, z_dir, tail):
+    # Negative [M/H] with alpha used to produce "Z--1.0" / "-4.50--1.0".
+    p, fname = Template.__new__(Template).create_PHOENIX_fname(5500.0, 4.5, metal, alpha)
+    assert p.endswith(z_dir)
+    assert fname.startswith(tail)
+    assert "--" not in p + fname
+
+
+def test_phxreff_is_read_on_its_own():
+    # A copy-paste bug tested 'PHXMASS' before reading 'PHXREFF'.
+    import numpy as np
+    w = np.linspace(5000.0, 5100.0, 50)
+    t = Template(wavelengths=w, spectrum=np.ones_like(w), PHXREFF=7.0e10)
+    assert t.PHXREFF == 7.0e10
+
+
+def test_broadening_keeps_every_order():
+    # Both broadening methods used to keep only order 0, leaving model.wv with
+    # N orders and model.sp with one -- the next CCF then raised IndexError.
+    import numpy as np
+    from sparta.UNICOR.Spectrum import Spectrum
+    from unicor import log_lambda_grid
+    waves = [log_lambda_grid(lo, lo + 50.0, 0.5)[0] for lo in (5000.0, 5100.0)]
+    sps = [1.0 - 0.5 * np.exp(-0.5 * ((w - w.mean()) / 0.1) ** 2) for w in waves]
+    t = Template(template=Spectrum(wv=waves, sp=sps, name="two-order"))
+    t.GaussianBroadening(resolution=50_000)
+    t.RotationalBroadening(vsini=10.0, epsilon=0.6)
+    assert len(t.model.sp) == 2
+    for w, s, s0 in zip(t.model.wv, t.model.sp, sps):
+        assert len(s) == len(w)
+        assert s.min() > s0.min()          # each order was actually broadened

@@ -111,8 +111,11 @@ def common_grid(waves, velocities, reference=0, margin=0):
     Raises
     ------
     ValueError
-        If the de-shifted epochs have no wavelength range in common.
+        If ``margin`` is negative or the de-shifted epochs have no wavelength
+        range in common.
     """
+    if margin < 0:
+        raise ValueError(f'margin must be >= 0 pixels, got {margin}')
     rest = [rest_frame_wavelengths(w, v) for w, v in zip(waves, velocities)]
     lo = max(float(r.min()) for r in rest)
     hi = min(float(r.max()) for r in rest)

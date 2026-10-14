@@ -66,3 +66,51 @@ def test_subpixel_peak_rejects_bad_window(npts):
 def test_ccf_rejects_mismatched_grids():
     with pytest.raises(ValueError):
         unicor.ccf_vs_velocity(np.ones(10), np.ones(12), DV, 5)
+
+
+@pytest.mark.parametrize("argmax", [0, 1, 19, 20])
+def test_subpixel_peak_refuses_a_peak_at_the_scan_edge(argmax):
+    # Near the ends the 5-point window used to wrap to the far end of the array
+    # and return a plausible-looking velocity of the wrong sign.
+    v = np.arange(21) * 1.0
+    ccf = np.exp(-0.5 * ((v - argmax) / 2.0) ** 2)
+    with pytest.raises(ValueError, match="edge"):
+        unicor.subpixel_peak(v, ccf)
+
+
+def test_subpixel_peak_refuses_a_non_concave_ccf():
+    # A spike flanked by a W: the best 5-point parabola opens upwards.
+    v = np.arange(-5, 6) * 1.0
+    ccf = np.array([0.0, 0.0, 0.0, 0.99, 0.5, 1.0, 0.5, 0.99, 0.0, 0.0, 0.0])
+    with pytest.raises(ValueError, match="concave"):
+        unicor.subpixel_peak(v, ccf)
+
+
+def test_ccf_at_refuses_velocities_outside_the_scan():
+    v = np.arange(-5, 6) * 1.0
+    with pytest.raises(ValueError, match="outside"):
+        unicor.ccf_at(v, np.ones_like(v), 7.0)
+
+
+def test_ccf_refuses_a_flat_or_non_finite_input(grid):
+    flux = _line_spectrum(0.0, grid)
+    with pytest.raises(ValueError, match="constant"):
+        unicor.ccf_vs_velocity(np.ones_like(flux), flux, DV, 10)
+    bad = flux.copy()
+    bad[10] = np.nan
+    with pytest.raises(ValueError, match="finite"):
+        unicor.ccf_vs_velocity(flux, bad, DV, 10)
+
+
+def test_log_grid_step_verifies_the_grid(grid):
+    assert unicor.dsp.log_grid_step(grid) == pytest.approx(DV, rel=1e-9)
+    with pytest.raises(ValueError, match="uniform"):
+        unicor.dsp.log_grid_step(np.delete(grid, 100))   # a dropped pixel
+    with pytest.raises(ValueError, match="increasing"):
+        unicor.dsp.log_grid_step(grid[::-1])
+
+
+def test_resample_refuses_a_decreasing_source_axis(grid):
+    flux = _line_spectrum(0.0, grid)
+    with pytest.raises(ValueError, match="increasing"):
+        unicor.resample(grid[::-1], flux[::-1], grid)

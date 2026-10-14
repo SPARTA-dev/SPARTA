@@ -81,15 +81,14 @@ class CCF1d:
         spec = deepcopy(spec_in)
 
         if dv is None:
-            try:
-                dv = self.Info['GridDelta']
-            except (AttributeError, KeyError):
-                dv = self.default_dv
+            dv = self.default_dv
         elif type(dv) is not u.quantity.Quantity:
             dv = float(dv) << u.kilometer / u.second
 
+        # A bare number is km/s, like every other velocity in SPARTA -- not
+        # the unit dv happens to carry.
         if type(VelBound) is not u.quantity.Quantity:
-            VelBound = np.array(VelBound) << dv.unit
+            VelBound = np.array(VelBound) << u.kilometer / u.second
 
         # Symmetric velocity half-range for the CCF scan (both signs valid).
         vmax = np.max(np.abs(VelBound))
@@ -111,12 +110,20 @@ class CCF1d:
         for I, w in enumerate(spec.wv):
             s = spec.sp[I]
 
+            # The lag axis is k * dv only if this order really is velocity-even
+            # with the declared step (e.g. dropping pixels breaks it silently).
+            step = dsp.log_grid_step(w)
+            if not np.isclose(step, dv_kms, rtol=1e-3):
+                raise ValueError(
+                    f"order {I}: the wavelength grid step is {step:.6g} km/s but "
+                    f"Info['GridDelta'] declares {dv_kms:.6g} km/s")
+
             # Resample the template onto the SAME grid as the observation, so
             # the cross-correlation is equal-length and symmetric. The legacy
             # code truncated the template to a shifted sub-grid, which made
             # only negative velocities recoverable (see KNOWN_TRAPS.md).
             spT = dsp.resample(np.asarray(template.model.wv[I]),
-                                        np.asarray(template.model.sp[I]), w)
+                               np.asarray(template.model.sp[I]), w)
 
             v_kms, C = unicor_ccf.ccf_vs_velocity(spT, s, dv_kms, vmax_kms)
 
@@ -125,13 +132,15 @@ class CCF1d:
                 corr = np.full((Nord, len(v_kms)), np.nan)
 
             # Find the radial velocity by fitting a parabola to the CCF peak.
+            # An order whose peak cannot be located (e.g. at the edge of the
+            # velocity scan) is reported as NaN rather than failing the epoch.
             try:
                 if err_per_ord:
                     vPeak, vPeakErr, ccfPeak, _ = self.extract_RV(V, C, n_ord=1)
                 else:
                     vPeak, ccfPeak = self.subpixel_CCF(V, C)
                     vPeakErr = np.nan
-            except Exception:
+            except (ValueError, np.linalg.LinAlgError):
                 vPeak, vPeakErr, ccfPeak = np.nan, np.nan, np.nan
 
             corr[I, :] = C
@@ -183,7 +192,7 @@ class CCF1d:
                 'units': vUnit,
                 'peakCorr': CorrPeak}
 
-        except Exception:
+        except (ValueError, np.linalg.LinAlgError):
             self.CorrCombined = {
                 'vel': velocities,
                 'corr': CombinedCorr,

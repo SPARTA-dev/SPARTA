@@ -104,3 +104,48 @@ def test_ccf2d_best_fit_reproduces_the_data():
     # Compare in the interior, away from the apodised edges.
     sl = slice(len(wv) // 5, -len(wv) // 5)
     assert np.std(model[sl] - data[sl]) < 0.05
+
+
+def test_ccf2d_refuses_a_nan_pixel():
+    # One NaN used to turn the whole map NaN and report the grid corner.
+    spec, tmpl1, tmpl2 = _sparta_case()
+    spec.sp[0][100] = np.nan
+    with pytest.raises(ValueError, match="NaN"):
+        CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, VelBound=150, dvel=2.0)
+
+
+def test_ccf2d_refuses_a_template_with_no_lines_in_the_fitted_orders():
+    # A pure-continuum secondary template gives S22 = 0, and both amplitudes
+    # used to collapse silently to zero with the RV at the grid corner. (The
+    # emission-line secondary of _sparta_case has no lines in order 0 alone
+    # either -- the same guard fires there.)
+    spec, tmpl1, _ = _sparta_case(n_ord=1)
+    w = np.linspace(4000.0, 5000.0, 8000)
+    flat = Template(wavelengths=w, spectrum=np.ones_like(w))
+    with pytest.raises(ValueError, match="template2 has no spectral structure"):
+        CCF2d().CrossCorrelateSpec(spec, tmpl1, flat, VelBound=150, dvel=2.0)
+
+
+def test_ccf2d_refuses_a_grid_step_that_contradicts_griddelta():
+    spec, tmpl1, tmpl2 = _sparta_case(dv=1.0)
+    spec.Info['GridDelta'] = 0.8 * u.km / u.s
+    with pytest.raises(ValueError, match="GridDelta"):
+        CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, VelBound=150, dvel=2.0)
+
+
+def test_ccf2d_peak_on_the_grid_edge_warns_and_reports_no_error():
+    # Truth v1 = 60 km/s lies beyond a grid ending at 40 km/s.
+    spec, tmpl1, tmpl2 = _sparta_case()
+    grid = np.arange(-150.0, 41.0, 2.0)
+    with pytest.warns(UserWarning, match="edge of the velocity grid"):
+        ccf = CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, v1_grid=grid,
+                                         v2_grid=np.arange(-150.0, 151.0, 2.0))
+    assert ccf.Corr2d['RV1'] == 40.0           # grid-limited, not extrapolated
+    assert np.isnan(ccf.Corr2d['eRV1'])
+
+
+def test_ccf2d_accepts_velocity_grids_with_units():
+    spec, tmpl1, tmpl2 = _sparta_case()
+    grid_ms = np.arange(-150.0, 151.0, 2.0) * 1e3 * u.m / u.s
+    ccf = CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, v1_grid=grid_ms, v2_grid=grid_ms)
+    assert ccf.Corr2d['RV1'] == pytest.approx(60.0, abs=1.0)

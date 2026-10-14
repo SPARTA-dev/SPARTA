@@ -306,3 +306,18 @@ def test_timeseries_and_observations_drivers():
     assert obs.tiravel.rho > 0.9
     assert obs.tiravel_template is obs.tiravel.template
     assert len(obs.tiravel_template.model.wv[0]) > 100
+
+
+def test_build_template_refuses_a_nan_pixel():
+    # With linear resampling one NaN used to zero that epoch's weight silently.
+    velocities = [-40.0, 0.0, 30.0]
+    specs = _spectra(velocities)
+    specs[1].sp[0][50] = np.nan
+    with pytest.raises(ValueError, match="epoch 1, order 0"):
+        TIRAVEL().BuildTemplate(specs, velocities, kind='linear')
+
+
+def test_common_grid_refuses_a_negative_margin():
+    waves, _ = _epochs([0.0, 10.0])
+    with pytest.raises(ValueError, match="margin"):
+        common_grid(waves, [0.0, 10.0], margin=-5)

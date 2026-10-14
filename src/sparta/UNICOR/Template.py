@@ -46,6 +46,15 @@ TEMPLATE_FILES_PATH = os.path.join(
 )
 
 
+def _per_order(like, orders):
+    """Return per-order arrays in the container type of ``like``.
+
+    Single templates hold an (n_orders, n_pixels) ndarray; multi-order ones
+    cut to an observation may be ragged lists. Keep whichever the caller had.
+    """
+    return np.array(orders) if isinstance(like, np.ndarray) else list(orders)
+
+
 class Template:
 
     # =============================================================================
@@ -189,54 +198,50 @@ class Template:
         if 'PHXMASS' in kwargs:
             self.PHXMASS = kwargs['PHXMASS']
 
-        if 'PHXMASS' in kwargs:
+        if 'PHXREFF' in kwargs:
             self.PHXREFF = kwargs['PHXREFF']
 
 
     # =============================================================================
     def GaussianBroadening(self, **kwargs):
         '''
-        This function broadens the spectrum using a given Gaussian kernel.
-        :param: resolution - float, The spectral resolution.
-        '''
+        Broaden every order with a Gaussian instrumental profile.
 
+        :param: resolution - float, the resolving power R; the kernel FWHM is
+                             c / R (km/s).
+        :param: wv, sp     - optional external (multi-order) wavelengths
+                             (Angstrom) and normalized flux. When given, they
+                             are broadened and returned, and the template's own
+                             model is left untouched.
+        :return: the broadened flux, shape (n_orders, n_pixels) per order.
+        '''
         resolution = kwargs["resolution"]
 
-        if 'wv' in kwargs and 'sp' in kwargs:
-            wv = np.reshape(kwargs["wv"][0], (1, -1))[0]
-            sp = kwargs["sp"][0]
-        else:
-            wv = np.reshape(self.model.wv[0], (1, -1))[0]
-            sp = self.model.sp[0]
+        external = 'wv' in kwargs and 'sp' in kwargs
+        wvs, sps = (kwargs["wv"], kwargs["sp"]) if external else (self.model.wv, self.model.sp)
 
-        dv = dsp.dv_from_wave(wv)
-        flux = dsp.broaden_gaussian(sp, dv, dsp.C_KMS / resolution)
+        flux = _per_order(sps, [dsp.broaden_gaussian(s, dsp.dv_from_wave(w), dsp.C_KMS / resolution)
+                                for w, s in zip(wvs, sps)])
 
-        flux = np.reshape(flux, (1, -1))
-
-        self.model.sp = flux
-
+        if not external:
+            self.model.sp = flux
         return flux
 
     # =============================================================================
     # =============================================================================
     def RotationalBroadening(self, **kwargs):
         '''
-        This function broadens the spectrum to account for for the broadening effect of stellar rotation.
-        :param: vsini - float, rotational velocity [km/s]
-        :param: epsilon: float, limb-darkening coefficient (0-1)
-        '''
+        Broaden every order with a rotational profile (Gray 2005).
 
+        :param: vsini   - float, projected rotational velocity [km/s]
+        :param: epsilon - float, linear limb-darkening coefficient (0-1)
+        '''
         epsilon = kwargs["epsilon"]
         vsini = kwargs["vsini"]
 
-        w = np.reshape(self.model.wv[0], (1, -1))[0]
-        s = self.model.sp[0]
-
-        dv = dsp.dv_from_wave(w)
-        flux = dsp.broaden_rotational(s, dv, vsini, epsilon)
-
-        self.model.sp = np.reshape(flux, (1, -1))
+        self.model.sp = _per_order(self.model.sp,
+                                   [dsp.broaden_rotational(s, dsp.dv_from_wave(w), vsini, epsilon)
+                                    for w, s in zip(self.model.wv, self.model.sp)])
         return self
 
         # =============================================================================
@@ -247,10 +252,14 @@ class Template:
         :param: The following stellar parameters are necessary for PHOENIX spectrum definition:
                 temp, log_g, metal, alpha.
         '''
+        # PHOENIX names carry the metallicity sign explicitly ("Z-1.0", "Z+0.5"),
+        # so format its magnitude; the effective temperature is an integer.
+        temp = int(temp)
         if metal > 0:
-            p = "/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/Z+{:.1f}/".format(metal, alpha)
+            p = "/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/Z+{:.1f}/".format(metal)
             s = "lte{:05d}-{:.2f}+{:.1f}.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits".format(temp, log_g, metal)
         elif alpha != 0:
+            metal = abs(metal)
             p = "/HiResFITS/PHOENIX-ACES-AGSS-COND-2011/Z-{:.1f}.Alpha={:+.2f}/".format(metal, alpha)
             s = "lte{:05d}-{:.2f}-{:.1f}.Alpha={:+.2f}.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits".format(temp, log_g,
                                                                                                       metal, alpha)
@@ -299,7 +308,7 @@ class Template:
         This function shifts the template spectrum according to a given velocity (a Doppler shift).
         :param: vel - the velocity in which to boost.
         :param: wv - If empty, the template will be boosted.
-        :return: Boosted wavelengh array \ template model.
+        :return: Boosted wavelength array / template model.
 
         Note: This only works for a single order template, so boost before you cut.
         '''

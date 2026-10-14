@@ -37,6 +37,42 @@ def dv_from_wave(wave):
     return C_KMS * np.median(np.diff(wave) / wave[:-1])
 
 
+
+def log_grid_step(wave, rtol=1e-3):
+    """Velocity step (km/s) of a uniform log-lambda grid, after verifying it.
+
+    The CCF and the Fourier shift model are only valid on a velocity-even grid;
+    a grid that merely *claims* to be one (e.g. after pixels were dropped) must
+    be caught before correlating, not after.
+
+    Parameters
+    ----------
+    wave : ndarray
+        Wavelength grid (Angstrom).
+    rtol : float
+        Allowed relative spread of the ln(lambda) step.
+
+    Returns
+    -------
+    float
+        ``c * median(diff(ln wave))`` (km/s).
+
+    Raises
+    ------
+    ValueError
+        If ``wave`` is not strictly increasing or not uniform in ln(lambda).
+    """
+    dln = np.diff(np.log(np.asarray(wave, float)))
+    if dln.size == 0 or np.any(dln <= 0):
+        raise ValueError("wavelength grid must be strictly increasing")
+    step = np.median(dln)
+    if np.ptp(dln) > rtol * step:
+        raise ValueError(
+            f"wavelength grid is not uniform in ln(lambda): step varies by "
+            f"{np.ptp(dln) / step:.2g} (relative), tolerance {rtol:g}. "
+            "Resample it onto a log-lambda grid first.")
+    return C_KMS * step
+
 def log_lambda_grid(lam_lo, lam_hi, dv):
     """Uniform log-lambda (constant-velocity-step) wavelength grid.
 
@@ -227,12 +263,15 @@ def resample(wave, flux, wave_grid, fill=None, kind='linear'):
         template shifted off its own span does not smear its edge pixel.
     kind : {'linear', 'cubic'}
         ``'linear'`` (default) is the fast path used by the CCF engines, where
-        the grids are heavily oversampled. ``'cubic'`` uses a natural cubic
-        spline; prefer it when a spectrum is shifted by many pixels and the
+        the grids are heavily oversampled. ``'cubic'`` uses a (not-a-knot)
+        cubic spline; prefer it when a spectrum is shifted by many pixels and the
         interpolation error would otherwise show up as lost correlation.
     """
     wave = np.asarray(wave, float)
     flux = np.asarray(flux, float)
+    # np.interp silently returns garbage on a decreasing or repeated axis.
+    if np.any(np.diff(wave) <= 0):
+        raise ValueError("source wavelengths must be strictly increasing")
 
     if kind == 'linear':
         if fill is None:

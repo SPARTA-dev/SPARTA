@@ -56,3 +56,33 @@ def test_ccf_vs_velocity_recovers_shift(inj):
 def test_ccf_vs_velocity_rejects_mismatched_grids():
     with pytest.raises(ValueError):
         so.ccf_vs_velocity(np.ones(10), np.ones(12), 0.5, 5)
+
+
+def test_rv_beyond_the_scan_is_nan_not_a_wrong_sign(template):
+    # -70 km/s with a +-50 km/s scan: the legacy parabola window wrapped around
+    # the array and reported about +2.8 km/s, silently.
+    obs = Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0 * (1 - 70.0 / C))], name="o")
+    ccf = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=template,
+                                     dv=0.5, VelBound=50).CombineCCFs()
+    assert np.isnan(float(ccf.Corr["RV"][0, 0]))
+    assert np.isnan(float(np.asarray(ccf.CorrCombined["RV"])))
+
+
+def test_unitless_velbound_is_km_per_s_whatever_the_unit_of_dv(template):
+    from astropy import units as u
+    obs = Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0 * (1 + 5.0 / C))], name="o")
+    ccf = CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=template,
+                                     dv=500 * u.m / u.s, VelBound=50).CombineCCFs()
+    v = ccf.Corr["vel"].to_value(u.km / u.s)
+    assert v.max() == pytest.approx(50.0, abs=0.5)
+    assert float(ccf.CorrCombined["RV"]) == pytest.approx(5.0, abs=0.05)
+
+
+def test_a_grid_that_is_not_velocity_even_is_refused(template):
+    obs = Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0)], name="o")
+    obs.InterpolateSpectrum(delta=0.5, InterpMethod="log")
+    # Dropping pixels leaves GridType == 'log' while breaking the uniform step.
+    obs.wv[0] = np.delete(obs.wv[0], np.arange(100, 110))
+    obs.sp[0] = np.delete(obs.sp[0], np.arange(100, 110))
+    with pytest.raises(ValueError, match="uniform"):
+        CCF1d().CrossCorrelateSpec(spec_in=obs, template_in=template, VelBound=50)

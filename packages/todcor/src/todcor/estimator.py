@@ -363,11 +363,19 @@ def crlb_from_map(logL, v1_grid, v2_grid, half=3):
         ``peak_refined`` (the stationary point of the same local quadratic --
         a sub-grid peak that removes the +/- step/2 quantisation of the argmax,
         clipped to one grid step, and equal to ``peak`` when the curvature is
-        not positive definite).  The sigmas are ``nan`` if the local curvature
-        is not positive definite (e.g. a peak on a grid edge or an amplitude
-        boundary).
+        not positive definite), plus ``on_edge`` (True when the argmax sits on
+        the boundary of the velocity grid).  The sigmas are ``nan`` if the local
+        curvature is not positive definite (e.g. an amplitude boundary) or the
+        peak is on a grid edge, where the true maximum may lie outside the grid
+        and the one-sided patch would extrapolate.
     """
     i, j = np.unravel_index(np.argmax(logL), logL.shape)
+    peak = (float(v1_grid[i]), float(v2_grid[j]))
+    on_edge = i in (0, logL.shape[0] - 1) or j in (0, logL.shape[1] - 1)
+    if on_edge:
+        return dict(sigma_v1=np.nan, sigma_v2=np.nan, rho=np.nan,
+                    cov=np.full((2, 2), np.nan), peak=peak, peak_refined=peak,
+                    on_edge=True)
     i0, i1 = max(0, i - half), min(logL.shape[0], i + half + 1)
     j0, j1 = max(0, j - half), min(logL.shape[1], j + half + 1)
 
@@ -381,10 +389,10 @@ def crlb_from_map(logL, v1_grid, v2_grid, half=3):
     _, p1, p2, p3, p4, p5 = coef
 
     fisher = -np.array([[2.0 * p3, p4], [p4, 2.0 * p5]])  # = -Hessian(logL)
-    peak = (float(v1_grid[i]), float(v2_grid[j]))
     if fisher[0, 0] <= 0 or np.linalg.det(fisher) <= 0:
         return dict(sigma_v1=np.nan, sigma_v2=np.nan, rho=np.nan,
-                    cov=np.full((2, 2), np.nan), peak=peak, peak_refined=peak)
+                    cov=np.full((2, 2), np.nan), peak=peak, peak_refined=peak,
+                    on_edge=False)
 
     cov = np.linalg.inv(fisher)
     sv1, sv2 = np.sqrt(cov[0, 0]), np.sqrt(cov[1, 1])
@@ -402,7 +410,7 @@ def crlb_from_map(logL, v1_grid, v2_grid, half=3):
 
     return dict(sigma_v1=float(sv1), sigma_v2=float(sv2),
                 rho=float(cov[0, 1] / (sv1 * sv2)), cov=cov, peak=peak,
-                peak_refined=peak_refined)
+                peak_refined=peak_refined, on_edge=False)
 
 
 # =============================================================================

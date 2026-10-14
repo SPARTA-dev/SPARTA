@@ -131,6 +131,12 @@ class TIRAVEL:
         for I in orders:
             waves = [np.asarray(s.wv[I], float) for s in specs]
             fluxes = [np.asarray(s.sp[I], float) for s in specs]
+            # A single NaN would otherwise zero that epoch's norm (linear) or
+            # stop the spline with an opaque message (cubic).
+            for k, f in enumerate(fluxes):
+                if not np.all(np.isfinite(f)):
+                    raise ValueError(f'epoch {k}, order {I}: flux contains NaN/inf; '
+                                     'mask or interpolate those pixels first')
             grid = common_grid(waves, velocities, reference=reference,
                                margin=margin)
             grids.append(grid)

@@ -260,3 +260,23 @@ def test_window_stats_rejects_grid_length_mismatch():
     with pytest.raises(ValueError, match="share one grid"):
         window_stats(np.zeros(len(g1) - 1), g1, g2, dv, np.array([0.0]),
                      np.array([0.0]))
+
+
+def test_crlb_on_a_grid_edge_is_nan_and_not_extrapolated():
+    v1 = np.arange(-10.0, 11.0)
+    v2 = np.arange(-10.0, 11.0)
+    V1, V2 = np.meshgrid(v1, v2, indexing="ij")
+    logL = -0.5 * ((V1 - 14.0) ** 2 + (V2 - 2.0) ** 2)   # true peak beyond v1 = +10
+    cr = crlb_from_map(logL, v1, v2)
+    assert cr["on_edge"]
+    assert np.isnan(cr["sigma_v1"]) and np.isnan(cr["sigma_v2"])
+    assert cr["peak_refined"] == cr["peak"] == (10.0, 2.0)
+
+
+def test_crlb_interior_peak_reports_on_edge_false():
+    v1 = np.arange(-10.0, 11.0)
+    V1, V2 = np.meshgrid(v1, v1, indexing="ij")
+    cr = crlb_from_map(-0.5 * ((V1 - 0.3) ** 2 + (V2 + 0.2) ** 2 / 4.0), v1, v1)
+    assert not cr["on_edge"]
+    assert cr["sigma_v1"] == pytest.approx(1.0, rel=1e-6)
+    assert cr["sigma_v2"] == pytest.approx(2.0, rel=1e-6)

@@ -54,7 +54,13 @@ def ccf_vs_velocity(template, signal, dv, vmax):
         raise ValueError("template and signal must share the same grid/length")
     t = t - t.mean()
     s = s - s.mean()
+    if not (np.all(np.isfinite(t)) and np.all(np.isfinite(s))):
+        raise ValueError("template and signal must be finite (mask NaN pixels first)")
     norm = np.sqrt((t ** 2).sum() * (s ** 2).sum())
+    if norm == 0:
+        # A flat array has no lines to correlate -- typically a template that
+        # does not cover the observed range and was clamped to a constant.
+        raise ValueError("template or signal is constant; check wavelength coverage")
     full = _correlate(s, t, mode="full", method="fft")
     mid = len(t) - 1
     K = min(int(round(vmax / dv)), mid)
@@ -101,6 +107,13 @@ def subpixel_peak(v, ccf, npts=5):
         Velocity of the parabola vertex (km/s).
     ccf_peak : float
         CCF value at the vertex.
+
+    Raises
+    ------
+    ValueError
+        If the maximum is within ``npts // 2`` lags of either end of ``v`` (the
+        peak may lie outside the scan), the fitted parabola is not concave, or
+        the CCF is not finite.
     """
     if npts < 3:
         raise ValueError("npts must be at least 3")
@@ -109,14 +122,23 @@ def subpixel_peak(v, ccf, npts=5):
     v = np.asarray(v, float)
     ccf = np.asarray(ccf, float)
 
-    x_n = np.argmax(ccf)
-    indlist = [int(x_n - npts // 2 + k) for k in np.arange(npts)]
-    x = v[indlist]
-    y = ccf[indlist]
+    if not np.all(np.isfinite(ccf)):
+        raise ValueError("CCF contains NaN/inf")
+    x_n = int(np.argmax(ccf))
+    half = npts // 2
+    # Near the ends the window would wrap (negative indices) or overrun; the
+    # true maximum may lie outside the scanned range, so there is no peak.
+    if x_n < half or x_n > len(ccf) - 1 - half:
+        raise ValueError("CCF peak is at the edge of the velocity range; "
+                         "widen the scan")
+    x = v[x_n - half: x_n + half + 1]
+    y = ccf[x_n - half: x_n + half + 1]
 
     design = np.array([[1, xi, xi ** 2] for xi in x])
     cov = np.linalg.inv(design.T @ design)
     pars = cov @ (design.T @ y)
+    if not pars[2] < 0:
+        raise ValueError("CCF is not concave around its maximum")
     ccf_peak = pars[0] - pars[1] * pars[1] / (4 * pars[2])
     v_peak = -pars[1] / (2 * pars[2])
     return v_peak, ccf_peak
@@ -141,11 +163,12 @@ def ccf_at(v, ccf, v0):
     """
     v = np.asarray(v, float)
     ccf = np.asarray(ccf, float)
-    x_n = np.argmin(np.abs(v - v0))
-
-    indlist = [int(x_n - 1), int(x_n), int(x_n + 1)]
-    x = v[indlist]
-    y = ccf[indlist]
+    if not v[0] <= v0 <= v[-1]:
+        raise ValueError(f"v0 = {v0} km/s is outside the velocity range")
+    # Centre the 3-point stencil on the nearest lag, kept inside the array.
+    x_n = int(np.clip(np.argmin(np.abs(v - v0)), 1, len(v) - 2))
+    x = v[x_n - 1: x_n + 2]
+    y = ccf[x_n - 1: x_n + 2]
 
     return (y[0] * (v0 - x[1]) * (v0 - x[2]) / (x[0] - x[1]) / (x[0] - x[2]) +
             y[1] * (v0 - x[0]) * (v0 - x[2]) / (x[1] - x[0]) / (x[1] - x[2]) +

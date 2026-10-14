@@ -32,6 +32,7 @@
 """Two-dimensional (TODCOR) cross-correlation of an SB2 against two templates."""
 
 from copy import deepcopy
+import warnings
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -147,6 +148,12 @@ class CCF2d:
                 "'GridDelta'; set Info['GridDelta'] to its velocity step "
                 "(km/s) or let InterpolateSpectrum build the grid.")
         dv_kms = u.Quantity(spec.Info['GridDelta']).to(u.km / u.s).value
+        for I, w in enumerate(spec.wv):
+            step = dsp.log_grid_step(w)
+            if not np.isclose(step, dv_kms, rtol=1e-3):
+                raise ValueError(
+                    f"order {I}: the wavelength grid step is {step:.6g} km/s but "
+                    f"Info['GridDelta'] declares {dv_kms:.6g} km/s")
 
         v1_grid, v2_grid = self._velocity_grids(VelBound, dvel, v1_grid, v2_grid)
 
@@ -161,6 +168,10 @@ class CCF2d:
             data_g = self._residual(np.asarray(spec.sp[I], float), continuum)
             g1 = self._residual(self._template_on_grid(template1, I, w), continuum)
             g2 = self._residual(self._template_on_grid(template2, I, w), continuum)
+            for name, arr in (('spectrum', data_g), ('template1', g1), ('template2', g2)):
+                if not np.all(np.isfinite(arr)):
+                    raise ValueError(f"order {I}: {name} flux contains NaN/inf; "
+                                     "mask or interpolate those pixels first")
 
             if alpha > 0:
                 taper = dsp.tukey_window(len(w), alpha=alpha)
@@ -183,6 +194,14 @@ class CCF2d:
         # (n1, n2) array, so keeping one per order would dominate memory on a
         # many-order spectrum. The combined dict is all that re-profiling needs.
         self.stats = combine_stats(stats)
+        # A template with no lines over the fitted orders makes the 2x2 amplitude
+        # system singular, and the map collapses to a flat, meaningless argmax.
+        for k, name in (('S11', 'template1'), ('S22', 'template2')):
+            if not self.stats[k] > 0:
+                raise ValueError(
+                    f"{name} has no spectral structure over the fitted orders "
+                    f"({k} = {self.stats[k]}); check its wavelength coverage and "
+                    "air/vacuum frame against the observation")
         res = profile_from_stats(self.stats, v1_grid, v2_grid, nonneg=nonneg)
         res['units'] = u.km / u.s
 
@@ -215,6 +234,10 @@ class CCF2d:
         crlb = crlb_from_map(res['logL_profile'], res['v1_grid'], res['v2_grid'],
                              half=half)
 
+        if crlb['on_edge']:
+            warnings.warn("the TODCOR peak lies on the edge of the velocity grid; "
+                          "the RVs are grid-limited and their errors are NaN. "
+                          "Widen VelBound (or the explicit grids).")
         res.update(RV1=crlb['peak_refined'][0], RV2=crlb['peak_refined'][1],
                    eRV1=crlb['sigma_v1'], eRV2=crlb['sigma_v2'],
                    rho12=crlb['rho'], cov=crlb['cov'], peak=crlb['peak'])
@@ -303,6 +326,9 @@ class CCF2d:
         explicit grids were supplied. Both components share one grid by default,
         which is also what combine_stats requires across windows.
         '''
+        # Explicit grids may carry units; anything else is taken as km/s.
+        v1_grid, v2_grid = (g.to_value(u.km / u.s) if isinstance(g, u.Quantity) else g
+                            for g in (v1_grid, v2_grid))
         if v1_grid is not None and v2_grid is not None:
             return np.asarray(v1_grid, float), np.asarray(v2_grid, float)
 
@@ -339,8 +365,8 @@ class CCF2d:
         model = template.model
         I = order if len(model.wv) > 1 else 0
         return dsp.resample(np.asarray(model.wv[I], float),
-                                     np.asarray(model.sp[I], float),
-                                     wave, fill=1.0)
+                            np.asarray(model.sp[I], float),
+                            wave, fill=1.0)
 
     @staticmethod
     def _residual(flux, continuum):

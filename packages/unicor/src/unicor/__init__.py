@@ -24,8 +24,9 @@ from .ccf import (
 from .dsp import (
     C_KMS, broaden_gaussian, broaden_gaussian_residual, broaden_rotational,
     broaden_rotational_residual, doppler_shift_wave, dv_from_wave,
-    log_lambda_grid, normalize, parseval_weights, resample, rfft_positive,
-    rotational_kernel, shift_kms, tukey_window, zero_lag_correlation,
+    log_grid_step, log_lambda_grid, normalize, parseval_weights, resample,
+    rfft_positive, rotational_kernel, shift_kms, tukey_window,
+    zero_lag_correlation,
 )
 
 __version__ = "0.1.0"
@@ -33,7 +34,8 @@ __version__ = "0.1.0"
 __all__ = [
     'ccf_vs_velocity', 'combine_ccfs', 'subpixel_peak', 'ccf_at',
     'rv_uncertainty', 'bisector_span',
-    'C_KMS', 'dv_from_wave', 'log_lambda_grid', 'resample', 'tukey_window',
+    'C_KMS', 'dv_from_wave', 'log_lambda_grid', 'log_grid_step', 'resample',
+    'tukey_window',
     'shift_kms', 'doppler_shift_wave', 'rfft_positive', 'parseval_weights',
     'rotational_kernel', 'broaden_rotational', 'broaden_gaussian',
     'broaden_rotational_residual', 'broaden_gaussian_residual', 'normalize',
