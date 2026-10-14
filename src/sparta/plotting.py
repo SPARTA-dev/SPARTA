@@ -38,7 +38,7 @@ session; the plot methods do not call it, so they never change global state.
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import patheffects
-from matplotlib.colors import SymLogNorm
+from matplotlib.colors import PowerNorm, SymLogNorm
 
 DATA_COLOR = 'k'
 MODEL_COLOR = 'tab:red'
@@ -52,6 +52,8 @@ EXTRA_LW = 1.0
 
 # Maps: high values black (the peak), low ones white.
 MAP_CMAP = 'Greys'
+# Contrast exponent of the zero-to-peak grey scale of correlation maps.
+MAP_GAMMA = 2.0
 
 # Delta lnL = -k^2/2 is the k-sigma bound of one Gaussian parameter.
 SIGMA_LEVELS = (0.5, 2.0, 4.5)
@@ -222,13 +224,15 @@ def dlnl_norm(depth):
     return SymLogNorm(linthresh=SIGMA_LEVELS[-1], linscale=1.0, vmin=-depth, vmax=0.0)
 
 
-def map_image(ax, x, y, z, loglike=False, **kw):
+def map_image(ax, x, y, z, loglike=False, gamma=MAP_GAMMA, **kw):
     '''
-    Draw a 2-D map as a grey-scale image: white at the lowest value, black at
-    the peak (no colour).
+    Draw a 2-D map as a grey-scale image with the peak in black (no colour).
 
-    With ``loglike=False`` the grey scale is linear from ``min(z)`` to
-    ``max(z)`` (e.g. a correlation map, R in [0, 1]). With ``loglike=True``
+    With ``loglike=False`` (e.g. a correlation map, R in [0, 1]) the grey is
+    anchored to the map's own scale: white at zero, black at the peak, with a
+    power-law stretch ``(z / max z) ** gamma`` (values below zero are white).
+    ``gamma = 1`` is linear; the default 2 keeps the background white and the
+    ridges and peak legible. With ``loglike=True``
     ``z`` is a log-likelihood with any offset, drawn as Delta lnL below its
     maximum on ``dlnl_norm`` (linear to -4.5, logarithmic beyond); label the
     colour bar with ``DLNL_LABEL``.
@@ -243,6 +247,9 @@ def map_image(ax, x, y, z, loglike=False, **kw):
         Map of shape ``(len(y), len(x))``; non-finite cells are left blank.
     loglike : bool
         Read ``z`` as a log-likelihood (see above).
+    gamma : float
+        Contrast exponent of the zero-to-peak grey scale (``loglike=False``
+        only).
     **kw
         Passed to ``ax.pcolormesh`` (e.g. ``norm`` to override the scale).
 
@@ -256,7 +263,9 @@ def map_image(ax, x, y, z, loglike=False, **kw):
         z = z - z.max()
         kw = {'norm': dlnl_norm(z.min()), **kw}
     else:
-        kw = {'vmin': z.min(), 'vmax': z.max(), **kw}
+        # White at zero, black at the peak, on the map's own scale.
+        kw = {'norm': PowerNorm(gamma=gamma, vmin=0.0, vmax=float(z.max()), clip=True),
+              **kw}
     kw = {'cmap': MAP_CMAP, 'shading': 'nearest', 'rasterized': True, **kw}
     return ax.pcolormesh(x, y, z, **kw)
 

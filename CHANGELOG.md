@@ -249,7 +249,8 @@ Keys of `results_frequency` / `results_power`:
   (`plot_model`), one extra series blue (`plot_extra`), derived curves such as
   CCFs and periodograms black lines (`plot_curve`), maps as black unfilled
   maps as grey-scale images with the peak black and a thin grey colour bar
-  (`map_image`, `map_colorbar`; a correlation map shaded linearly, a
+  (`map_image`, `map_colorbar`; a correlation map shaded on its own scale,
+  white at zero and black at the peak with a gamma = 2 stretch, a
   log-likelihood map as Delta lnL on a symmetric-log scale, linear to -4.5
   and logarithmic beyond, `dlnl_norm`), best fit a red `+`, truth a blue
   `x`, both white-edged so they read on black; `apply_style()` sets the

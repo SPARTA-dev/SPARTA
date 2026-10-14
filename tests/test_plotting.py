@@ -108,11 +108,18 @@ def test_fit_and_truth_markers(ax):
         assert to_rgba(edge._gc["foreground"]) == to_rgba("white")
 
 
-def test_map_image_is_linear_grey_with_the_peak_black(ax):
+def test_map_image_is_white_at_zero_and_black_at_the_peak(ax):
+    # The grey is anchored to the map's own scale (user request): zero is
+    # white, the peak black, with a power-law contrast stretch.
+    from matplotlib.colors import PowerNorm
     x, y = np.linspace(-5, 5, 41), np.linspace(-4, 4, 31)
     r = 0.9 * np.exp(-0.1 * (x[None, :] ** 2 + y[:, None] ** 2)) + 0.05
     mesh = sp_plot.map_image(ax, x, y, r)
-    assert (mesh.norm.vmin, mesh.norm.vmax) == (r.min(), r.max())
+    assert isinstance(mesh.norm, PowerNorm)
+    assert (mesh.norm.vmin, mesh.norm.vmax) == (0.0, r.max())
+    assert mesh.norm.gamma == sp_plot.MAP_GAMMA
+    assert mesh.norm(0.0) == 0.0 and mesh.norm(r.max()) == 1.0
+    assert mesh.norm(-0.3) == 0.0                 # below zero is white
     assert not isinstance(mesh.norm, SymLogNorm)
     _assert_grey_map_peak_black(mesh, r)
     _assert_only_a_grey_image(ax.figure)
