@@ -16,7 +16,7 @@
 # 3) plotTemplate   - the co-added template over the aligned epochs.
 #
 # The alignment measure and the co-addition live in sparta.TIRAVEL.tiravel_ops;
-# the resampling/normalization primitives in sparta.spectral_ops.
+# the resampling/normalization primitives in unicor.dsp.
 #
 # Scope: this is the *fixed-velocity* half of TIRAVEL. Zucker & Mazeh's full
 # method maximises rho over the K velocities; here the velocities are supplied

@@ -1,8 +1,7 @@
 """TODCOR: two-dimensional correlation for double-lined (SB2) spectra.
 
-The two-component counterpart of UNICOR. UNICOR correlates one observation
-against one template and reads a 1-D CCF peak; TODCOR fits the velocities *and*
-relative amplitudes of both components simultaneously on a 2-D ``(v1, v2)``
+A standalone, numpy + scipy engine that fits the velocities *and* relative
+amplitudes of both components of an SB2 simultaneously on a 2-D ``(v1, v2)``
 grid -- Zucker & Mazeh (1994, ApJ 420, 806) recast as a Gaussian profile
 likelihood in the Fourier domain.
 
@@ -12,33 +11,33 @@ at every trial velocity. The amplitudes enter linearly and are solved in closed
 form (2x2 weighted least squares) at each node; profiling them out gives the
 classic TODCOR correlation map.
 
+Everything takes plain floats / arrays: velocities and the log-lambda shift in
+km/s, ``zeta`` (the Fourier conjugate) in s/km, kernel widths as FWHM in km/s.
+SPARTA's ``CCF2d`` (Spectrum + two Templates) is a layer on top.
+
 Layout
 ------
-``CCF2d``       - the SPARTA-object class (Spectrum + two Templates -> map, RVs).
-``todcor_ops``  - the estimator: sufficient statistics, profiling, CRLB.
-``simulate``    - the forward model: composites and best-fit reconstructions.
+``todcor.estimator`` - sufficient statistics, window pooling, profiling, CRLB.
+``todcor.simulate``  - the forward model: composites and best-fit reconstructions.
 
-Grid, FFT and broadening primitives are shared with UNICOR and live in
-:mod:`sparta.spectral_ops`.
+Grid, FFT and broadening primitives come from :mod:`unicor.dsp` and are
+re-exported here, so ``todcor`` is a complete namespace for the method.
 """
 
-from sparta.spectral_ops import (
+from unicor.dsp import (
     C_KMS, broaden_gaussian_residual, broaden_rotational_residual,
     log_lambda_grid, parseval_weights, resample, rfft_positive,
     rotational_kernel, shift_kms, tukey_window,
 )
 
-from .CCF2d import CCF2d
-from .simulate import composite_flux, model_flux, shift_template_flux
-from .todcor_ops import (
+from .estimator import (
     combine_stats, crlb_from_map, profile_from_stats, todcor_map, window_stats,
 )
+from .simulate import composite_flux, model_flux, shift_template_flux
 
-# The spectral_ops primitives are re-exported (not redefined) so that
-# ``sparta.TODCOR`` is a complete namespace for the method -- grid, apodisation,
-# Fourier weights, broadening, estimator -- as the examples use it.
+__version__ = "0.1.0"
+
 __all__ = [
-    'CCF2d',
     'window_stats', 'combine_stats', 'profile_from_stats', 'crlb_from_map',
     'todcor_map',
     'shift_template_flux', 'composite_flux', 'model_flux',

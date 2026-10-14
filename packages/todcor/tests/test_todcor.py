@@ -1,26 +1,22 @@
-"""Tests for the TODCOR two-component engine (:mod:`sparta.TODCOR`).
+"""Tests for the standalone TODCOR estimator (:mod:`todcor`).
 
-Two layers:
+The pure estimator (``todcor.estimator`` + ``todcor.simulate``) on synthetic
+composites -- noiseless/noisy recovery, Parseval, the exact-shift chi2, the CRLB
+against a Monte Carlo, sub-grid refinement, and window combination -- plus the
+log-lambda primitives it re-exports from ``unicor``. The SPARTA-object adapter
+``CCF2d`` is tested in SPARTA's ``tests/test_ccf2d.py``.
 
-* the pure estimator (``todcor_ops`` + ``simulate``) on synthetic composites --
-  noiseless/noisy recovery, Parseval, the exact-shift chi2, the CRLB against a
-  Monte Carlo, sub-grid refinement, and window combination;
-* the SPARTA-object adapter ``CCF2d``, driven with ``Spectrum``/``Template``.
-
-Self-contained: no external data.
+Self-contained: no external data, numpy only.
 """
 
 import numpy as np
 import pytest
-from astropy import units as u
 
-from sparta import spectral_ops as ops
-from sparta.TODCOR import (
-    CCF2d, combine_stats, composite_flux, crlb_from_map, model_flux,
+import todcor as ops
+from todcor import (
+    combine_stats, composite_flux, crlb_from_map, model_flux,
     profile_from_stats, todcor_map, window_stats,
 )
-from sparta.UNICOR.Spectrum import Spectrum
-from sparta.UNICOR.Template import Template
 
 
 def _gauss(wave, center, depth, fwhm):
@@ -264,77 +260,3 @@ def test_window_stats_rejects_grid_length_mismatch():
     with pytest.raises(ValueError, match="share one grid"):
         window_stats(np.zeros(len(g1) - 1), g1, g2, dv, np.array([0.0]),
                      np.array([0.0]))
-
-
-# =============================================================================
-# The SPARTA-object adapter
-# =============================================================================
-def _sparta_case(v1_true=60.0, v2_true=-95.0, a1_true=0.7, a2_true=0.4,
-                 n_ord=2, dv=1.0):
-    """A Spectrum + two Templates carrying a known two-component blend.
-
-    The spectrum is built directly on a log-lambda grid and declares it, so
-    CCF2d fits it as-is instead of resampling.
-    """
-    (w1, f1), (w2, f2) = _synthetic_templates()
-    wvs, sps = [], []
-    for lo, hi in [(4080.0, 4380.0), (4400.0, 4720.0)][:n_ord]:
-        grid, _ = ops.log_lambda_grid(lo, hi, dv)
-        wvs.append(grid)
-        sps.append(composite_flux(grid, [(w1, f1), (w2, f2)],
-                                  [v1_true, v2_true], [a1_true, a2_true]))
-    spec = Spectrum(wv=wvs, sp=sps, name='SB2-sim')
-    spec.Info['GridType'] = 'log'
-    spec.Info['GridDelta'] = dv * u.km / u.s
-    return (spec,
-            Template(wavelengths=w1, spectrum=f1),
-            Template(wavelengths=w2, spectrum=f2))
-
-
-def test_ccf2d_recovers_injected_velocities():
-    v1_true, v2_true, a1_true, a2_true = 60.0, -95.0, 0.7, 0.4
-    spec, tmpl1, tmpl2 = _sparta_case(v1_true, v2_true, a1_true, a2_true)
-
-    ccf = CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, VelBound=150, dvel=2.0,
-                                     sigma=0.01, alpha=0.1)
-
-    assert ccf.n_ord == 2
-    assert abs(ccf.Corr2d['RV1'] - v1_true) < 3.0
-    assert abs(ccf.Corr2d['RV2'] - v2_true) < 3.0
-    assert ccf.Corr2d['a1_best'] == pytest.approx(a1_true, abs=0.1)
-    assert ccf.Corr2d['a2_best'] == pytest.approx(a2_true, abs=0.1)
-    # Uncertainties are finite and small on a noiseless, well-resolved peak.
-    assert 0 < ccf.Corr2d['eRV1'] < 3.0
-    assert 0 < ccf.Corr2d['eRV2'] < 3.0
-
-
-def test_ccf2d_single_order_template_is_reused_per_order():
-    # Both templates are single-order while the spectrum has two: the adapter
-    # must resample order 0 of the template onto each observed order.
-    spec, tmpl1, tmpl2 = _sparta_case(n_ord=2)
-    ccf = CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, VelBound=120, dvel=4.0)
-    assert len(ccf.windows) == 2
-    assert all(len(w['g1']) == len(w['wv']) for w in ccf.windows)
-
-
-def test_ccf2d_keep_windows_false_drops_arrays_but_keeps_powers():
-    # The time-series driver turns the arrays off; the scalar per-order powers
-    # (which say what each order constrains) must survive, and the residual
-    # helper must say why it cannot run.
-    spec, tmpl1, tmpl2 = _sparta_case()
-    ccf = CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, VelBound=120, dvel=4.0,
-                                     keep_windows=False)
-    assert all('wv' not in w and w['S11'] > 0 for w in ccf.windows)
-    assert set(ccf.stats) == {'S11', 'S22', 'SD', 'b1', 'b2', 'A12'}
-    with pytest.raises(ValueError, match='keep_windows=True'):
-        ccf.BestFitSpectrum(order=0)
-
-
-def test_ccf2d_best_fit_reproduces_the_data():
-    spec, tmpl1, tmpl2 = _sparta_case()
-    ccf = CCF2d().CrossCorrelateSpec(spec, tmpl1, tmpl2, VelBound=150, dvel=2.0,
-                                     sigma=0.01)
-    wv, model, data = ccf.BestFitSpectrum(order=0)
-    # Compare in the interior, away from the apodised edges.
-    sl = slice(len(wv) // 5, -len(wv) // 5)
-    assert np.std(model[sl] - data[sl]) < 0.05

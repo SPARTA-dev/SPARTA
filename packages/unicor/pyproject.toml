@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# Distribution name is prefixed: "unicor" on PyPI is an unrelated package.
+# The import name is plain `unicor`.
+name = "sparta-unicor"
+version = "0.1.0"
+description = "Standalone 1-D cross-correlation radial-velocity engine (UNICOR, from SPARTA)."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Sahar Shahaf" }]
+requires-python = ">=3.10"
+# numpy + scipy ONLY -- enforced by tests/test_isolation.py.
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.urls]
+Source = "https://github.com/SPARTA-dev/SPARTA/tree/master/packages/unicor"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

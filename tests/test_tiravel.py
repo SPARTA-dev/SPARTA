@@ -17,7 +17,7 @@ Self-contained: no external data.
 import numpy as np
 import pytest
 
-from sparta import spectral_ops as ops
+import unicor as ops
 from sparta.TIRAVEL import (
     TIRAVEL, align_spectra, alignment, coadd, common_grid, correlation_matrix,
     normalize_rows, rest_frame_wavelengths,

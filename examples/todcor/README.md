@@ -1,12 +1,13 @@
 # TODCOR examples
 
-Four executed notebooks for `sparta.TODCOR` — the two-component (double-lined,
-SB2) velocity engine, the counterpart of UNICOR. Notebooks 1–3 build the method
-up on plain arrays; notebook 4 runs it on SPARTA `Spectrum`/`Template` objects.
+Four executed notebooks for TODCOR — the two-component (double-lined, SB2)
+velocity engine, the counterpart of UNICOR. Notebooks 1–3 build the method up on
+plain arrays using only the standalone [`todcor`](../../packages/todcor) package;
+notebook 4 runs it on SPARTA `Spectrum`/`Template` objects (`sparta.TODCOR.CCF2d`).
 Everything is synthetic, so each notebook is self-contained (no external data),
 and every quantitative claim is a live numerical check.
 
-The canonical written spec is [`todcor_method.md`](todcor_method.md).
+The canonical written spec is [`todcor_method.md`](../../packages/todcor/docs/todcor_method.md).
 
 1. **`01_method.ipynb`** — the method derived in the open: the log-λ shift
    theorem, the six **sufficient statistics** and the χ² quadratic form, the
@@ -26,8 +27,9 @@ The canonical written spec is [`todcor_method.md`](todcor_method.md).
 
 ## Running
 
-`sparta` must be importable (`pip install -e .` from the repository root). Then,
-from this directory:
+Notebooks 1–3 need only `todcor` (plus matplotlib); notebook 4 needs `sparta`.
+From the repository root, `pip install -r requirements.txt` installs all three
+(editable). Then, from this directory:
 
 ```bash
 jupyter nbconvert --to notebook --execute --inplace 01_method.ipynb

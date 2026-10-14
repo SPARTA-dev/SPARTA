@@ -1,10 +1,10 @@
 #                   ------------------------------------
-#                     todcor_ops.py (SPARTA TODCOR core)
+#                     todcor/estimator.py (TODCOR core)
 #                   ------------------------------------
 # The Fourier-domain TODCOR estimator: pure functions on plain numpy arrays,
-# no SPARTA objects, no astropy Quantity, no I/O. The Spectrum/Template
-# orchestration lives in CCF2d.py; the forward model in simulate.py; the shared
-# grid/FFT/broadening primitives in sparta.spectral_ops.
+# no astropy Quantity, no I/O. The forward model lives in simulate.py and the
+# shared grid/FFT/broadening primitives in unicor.dsp; SPARTA's Spectrum/Template
+# orchestration (sparta.TODCOR.CCF2d) is a layer on top.
 #
 # Conventions: velocities and the log-lambda shift s in km/s; zeta (the Fourier
 # conjugate) in s/km; spectra on a uniform log-lambda grid of step dv (km/s);
@@ -14,7 +14,7 @@
 # spectroscopic binaries with TODCOR. I. A new two-dimensional correlation
 # algorithm."
 #
-# Dependencies: numpy, sparta.spectral_ops.
+# Dependencies: numpy, unicor.dsp.
 """The Fourier-domain TODCOR estimator (the derivation).
 
 Method
@@ -44,7 +44,7 @@ Sufficient statistics
 For one spectral window the weighted (Parseval) chi^2 at any trial
 ``(v1, v2, a1, a2)`` is a fixed quadratic form in just **six** numbers -- the
 window's *sufficient statistics*.  With per-mode weight ``w_k`` (see
-:func:`sparta.spectral_ops.parseval_weights`) and shifts
+:func:`unicor.dsp.parseval_weights`) and shifts
 ``s_i = c*ln(1 + v_i/c)``::
 
     S11 = sum_k w_k |G1_k|^2                                   (scalar)
@@ -96,9 +96,9 @@ windows are the spectral **orders** of one observation.
 Assumptions (exact only under these)
 ------------------------------------
 * **White, homoscedastic per-pixel noise** ``sigma`` on the analysis grid.  The
-  Tukey taper (:func:`sparta.spectral_ops.tukey_window`) makes the noise
+  Tukey taper (:func:`unicor.dsp.tukey_window`) makes the noise
   heteroscedastic and interpolation in
-  :func:`sparta.spectral_ops.resample` *correlates* (colours) it; only the
+  :func:`unicor.dsp.resample` *correlates* (colours) it; only the
   overall *scale* is compensated (reduced-chi^2 rescaling,
   ``sigma *= sqrt(chi2_red)``), not the correlation -- so CRLB errors are
   mildly optimistic.
@@ -108,7 +108,7 @@ Assumptions (exact only under these)
 
 import numpy as np
 
-from sparta.spectral_ops import parseval_weights, rfft_positive, shift_kms
+from unicor.dsp import parseval_weights, rfft_positive, shift_kms
 
 
 # =============================================================================

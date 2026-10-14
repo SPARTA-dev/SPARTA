@@ -1,15 +1,15 @@
-"""Golden-master + physical tests for velocity-space broadening (spectral_ops).
+"""Golden-master + physical tests for velocity-space broadening (unicor.dsp).
 
 The PYASL_* reference values were captured 2026-07-22 from PyAstronomy
 (rotBroad, instrBroadGaussFast) on the fixed grid below, before PyAstronomy
-was removed. spectral_ops reproduces them to <1e-4 in the line interior and
+was removed. unicor.dsp reproduces them to <1e-4 in the line interior and
 conserves equivalent width exactly, so the removal is behavior-preserving.
 """
 import numpy as np
 import pytest
 from scipy.integrate import trapezoid
 
-from sparta import spectral_ops as so
+import unicor as so
 
 C = 299792.458
 WL = np.linspace(5495.0, 5505.0, 4001)

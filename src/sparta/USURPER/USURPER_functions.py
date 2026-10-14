@@ -20,11 +20,11 @@
 # and /(n-2), /(n-1) factors -- singular for n <= 3. The pairwise distance
 # matrices are vectorized (broadcasting / a BLAS Gram product).
 #
-# Dependencies: numpy, sparta.spectral_ops.
+# Dependencies: numpy, unicor.dsp.
 # Last update: Sahar Shahaf, 20220915
 
 import numpy as np
-from sparta import spectral_ops
+from unicor import dsp
 
 
 # =============================================================================
@@ -174,7 +174,7 @@ def calc_pdc_distance_matrix(periodicity_detector, calc_biased_flag, calc_unbias
         if (periodicity_detector.method.split('_')[0] == "shift") or (periodicity_detector.method.split('_')[0] == "shape"):
             for i, s in enumerate(periodicity_detector.time_series.vals):
                 vel_tmp = periodicity_detector.time_series.calculated_vrad_list[i]
-                periodicity_detector.time_series.vals[i].wv[0] = spectral_ops.doppler_shift_wave(s.wv[0], -vel_tmp)
+                periodicity_detector.time_series.vals[i].wv[0] = dsp.doppler_shift_wave(s.wv[0], -vel_tmp)
             sp_matrix =  resample_spec_to_common_grid(periodicity_detector.time_series.vals, factor=1)
 
         method = periodicity_detector.method
@@ -290,7 +290,7 @@ def resample_spec_to_common_grid(sp_list, factor):
     wv_grid   = get_wv_grid(sp_list, factor)
     sp_matrix = np.zeros((len(wv_grid), len(sp_list)))
     for i, s in enumerate(sp_list):
-        sp_tmp = spectral_ops.resample(s.wv[0], s.sp[0], wv_grid)
-        sp_matrix[:, i] = spectral_ops.normalize(sp_tmp)
+        sp_tmp = dsp.resample(s.wv[0], s.sp[0], wv_grid)
+        sp_matrix[:, i] = dsp.normalize(sp_tmp)
     return sp_matrix
 

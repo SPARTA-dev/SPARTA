@@ -4,7 +4,7 @@
 # The TIRAVEL alignment measure and optimal co-addition: pure functions on plain
 # numpy arrays, no SPARTA objects, no astropy Quantity, no I/O. The
 # Spectrum/Template orchestration lives in TIRAVEL.py; the shared resampling and
-# normalization primitives in sparta.spectral_ops.
+# normalization primitives in unicor.dsp.
 #
 # Conventions: velocities in km/s, wavelengths in Angstrom. Spectra enter as
 # rows of a (K, M) matrix -- K epochs, M pixels of one common rest-frame grid.
@@ -12,7 +12,7 @@
 # Reference: Zucker, S. & Mazeh, T. 2006, MNRAS 371, 1513 -- "TIRAVEL:
 # template-independent radial velocity measurement" (astro-ph/0607293).
 #
-# Dependencies: numpy, sparta.spectral_ops.
+# Dependencies: numpy, unicor.dsp.
 """The TIRAVEL alignment measure, optimal weights, and co-added template.
 
 Method
@@ -55,7 +55,7 @@ contribute in proportion to their information rather than their flux scale.
 
 import numpy as np
 
-from sparta.spectral_ops import C_KMS, resample
+from unicor.dsp import C_KMS, resample
 
 
 # =============================================================================

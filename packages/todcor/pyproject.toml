@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# Prefixed to match sparta-unicor and to keep the SPARTA engines grouped on PyPI.
+# The import name is plain `todcor`.
+name = "sparta-todcor"
+version = "0.1.0"
+description = "Standalone Fourier-domain two-component (TODCOR) radial-velocity engine for SB2 spectra."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Sahar Shahaf" }]
+requires-python = ">=3.10"
+# numpy + scipy + unicor's DSP layer ONLY -- enforced by tests/test_isolation.py.
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "sparta-unicor>=0.1",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+# The example notebooks plot; the library never imports matplotlib.
+notebooks = ["matplotlib>=3.6", "jupyter"]
+
+[project.urls]
+Source = "https://github.com/SPARTA-dev/SPARTA/tree/master/packages/todcor"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]

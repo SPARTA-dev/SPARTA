@@ -3,7 +3,7 @@
 The legacy CrossCorrelateSpec could not recover non-negative radial velocities
 (see KNOWN_TRAPS.md): it truncated the template to a shifted sub-grid and used
 a constant (not per-lag) normalization, so only RV <~ 0 was recoverable. The
-rewrite over spectral_ops.ccf_vs_velocity resamples template and signal onto a
+rewrite over unicor.ccf_vs_velocity resamples template and signal onto a
 common, equal-length log-lambda grid and scans symmetric velocity lags, so the
 whole axis is valid. The golden master is physical: recovered RV must equal the
 injected RV, for both signs.
@@ -11,7 +11,7 @@ injected RV, for both signs.
 import numpy as np
 import pytest
 
-from sparta import spectral_ops as so
+import unicor as so
 from sparta.UNICOR.Spectrum import Spectrum
 from sparta.UNICOR.Template import Template
 from sparta.UNICOR.CCF1d import CCF1d

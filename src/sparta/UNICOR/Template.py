@@ -30,7 +30,7 @@
 from astropy.io import fits
 from astropy.utils.data import download_file
 from sparta.UNICOR.Spectrum import Spectrum
-from sparta import spectral_ops
+from unicor import dsp
 import numpy as np
 from pathlib import Path
 import os
@@ -209,8 +209,8 @@ class Template:
             wv = np.reshape(self.model.wv[0], (1, -1))[0]
             sp = self.model.sp[0]
 
-        dv = spectral_ops.dv_from_wave(wv)
-        flux = spectral_ops.broaden_gaussian(sp, dv, spectral_ops.C_KMS / resolution)
+        dv = dsp.dv_from_wave(wv)
+        flux = dsp.broaden_gaussian(sp, dv, dsp.C_KMS / resolution)
 
         flux = np.reshape(flux, (1, -1))
 
@@ -233,8 +233,8 @@ class Template:
         w = np.reshape(self.model.wv[0], (1, -1))[0]
         s = self.model.sp[0]
 
-        dv = spectral_ops.dv_from_wave(w)
-        flux = spectral_ops.broaden_rotational(s, dv, vsini, epsilon)
+        dv = dsp.dv_from_wave(w)
+        flux = dsp.broaden_rotational(s, dv, vsini, epsilon)
 
         self.model.sp = np.reshape(flux, (1, -1))
         return self

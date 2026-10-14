@@ -1,10 +1,10 @@
-"""Reusable spectral operations for SPARTA (velocity-space primitives).
+"""Velocity-space spectral primitives on plain numpy arrays.
 
-Pure functions on plain numpy arrays: no I/O, no GUI, no network, no astropy
-Quantity in the inner loops. Shared by the UNICOR CCF/RV engine, the TODCOR
-two-component engine, and the USuRPER periodograms, so grids, broadening,
-resampling, shifting, and correlation live in one place instead of being
-tangled into Template/Spectrum.
+Log-lambda grids, resampling, apodisation, Doppler shifts, rotational and
+Gaussian broadening, and the Fourier helpers used by the correlation engines.
+No I/O, no network, no astropy: the shared numerical layer under UNICOR
+(:mod:`unicor.ccf`), TODCOR (the ``todcor`` package), and SPARTA's TIRAVEL and
+USuRPER engines.
 
 Conventions
 -----------
@@ -17,13 +17,11 @@ Provenance
 ----------
 The rotational (Gray 2005) and Gaussian broadening kernels, and the log-lambda
 grid / Parseval-weight helpers, are adapted from the author's ``specbin.todcor``
-(Binaries project) and reimplemented here to keep SPARTA self-contained
-(removes the PyAstronomy dependency).
+(Binaries project); they replace the former PyAstronomy dependency.
 """
 import numpy as np
 from scipy.interpolate import CubicSpline
 from scipy.ndimage import gaussian_filter1d
-from scipy.signal import correlate as _correlate
 from scipy.signal.windows import tukey as _tukey
 
 C_KMS = 299792.458  # speed of light, km/s
@@ -270,35 +268,3 @@ def zero_lag_correlation(a, b):
     """
     return float(np.sum(np.asarray(a, float) * np.asarray(b, float)))
 
-
-def ccf_vs_velocity(template, signal, dv, vmax):
-    """Normalized cross-correlation of ``template`` and ``signal`` vs velocity.
-
-    Both arrays must be sampled on the SAME uniform log-lambda grid with
-    velocity step ``dv`` (km/s), so a shift of k pixels is k*dv km/s. Both are
-    mean-subtracted, so this is the Pearson correlation of the line residuals
-    (no continuum-DC taper). The scan is symmetric over ``[-vmax, vmax]``, so
-    the whole axis is uniformly valid -- unlike the legacy asymmetric,
-    unequal-length correlation (see KNOWN_TRAPS.md).
-
-    Returns
-    -------
-    v : ndarray
-        Symmetric velocity lags (km/s): ``arange(-K, K+1) * dv``.
-    ccf : ndarray
-        Normalized correlation in [-1, 1]. Peaks at the velocity by which
-        ``signal`` is red-shifted relative to ``template``.
-    """
-    t = np.asarray(template, float)
-    s = np.asarray(signal, float)
-    if t.shape != s.shape:
-        raise ValueError("template and signal must share the same grid/length")
-    t = t - t.mean()
-    s = s - s.mean()
-    norm = np.sqrt((t ** 2).sum() * (s ** 2).sum())
-    full = _correlate(s, t, mode="full", method="fft")
-    mid = len(t) - 1
-    K = min(int(round(vmax / dv)), mid)
-    ccf = full[mid - K: mid + K + 1] / norm
-    v = np.arange(-K, K + 1) * dv
-    return v, ccf

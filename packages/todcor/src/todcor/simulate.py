@@ -1,11 +1,11 @@
 #                   -------------------------------------
-#                     simulate.py (SPARTA TODCOR forward)
+#                     todcor/simulate.py (TODCOR forward)
 #                   -------------------------------------
 # The forward model for the two-component (double-lined) engine: build a
 # composite spectrum from two templates at known velocities and amplitudes, and
 # reconstruct the best-fit composite for residual plots.
 #
-# Kept separate from todcor_ops.py so that "makes data" and "fits data" never
+# Kept separate from estimator.py so that "makes data" and "fits data" never
 # share a file: composite_flux shifts by physical resampling (simulating an
 # observation), while model_flux uses the Fourier phase shift (matching the fit
 # exactly).
@@ -13,12 +13,12 @@
 # Conventions: wavelengths in Angstrom, velocities in km/s, normalized flux
 # (continuum = 1).
 #
-# Dependencies: numpy, sparta.spectral_ops.
-"""Forward model for the SPARTA TODCOR engine."""
+# Dependencies: numpy, unicor.dsp.
+"""Forward model for the TODCOR engine."""
 
 import numpy as np
 
-from sparta.spectral_ops import C_KMS, resample, shift_kms
+from unicor.dsp import C_KMS, resample, shift_kms
 
 
 # =============================================================================

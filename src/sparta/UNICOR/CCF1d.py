@@ -15,23 +15,23 @@
 # 5) subpixel_CCF       - parabolic sub-pixel estimate of the CCF peak / value.
 # 6) plotCCFs           - plot the per-order and combined CCFs.
 #
-# The velocity-space cross-correlation itself lives in sparta.spectral_ops
-# (ccf_vs_velocity); this class handles multi-order orchestration, RV/error
-# extraction, combination, and BIS.
+# The array-level engine (CCF vs velocity, Zucker combination, sub-pixel peak,
+# ML uncertainty, bisector) is the standalone ``unicor`` package; this class
+# handles the Spectrum/Template orchestration and the astropy units at its
+# boundary.
 #
 # Conventions: radial velocities in km/s; the CCF is computed on a log-lambda
 # (velocity-even) grid.
 #
-# Dependencies: scipy, numpy, astropy, matplotlib and copy.
+# Dependencies: numpy, astropy, matplotlib, copy, unicor.
 # Last update: Avraham Binnenfeld, 20210510.
 
 
-from scipy import interpolate
 import numpy as np
 from astropy import constants as consts, units as u
 import matplotlib.pyplot as plt
 from copy import deepcopy
-from sparta import spectral_ops
+from unicor import ccf as unicor_ccf, dsp
 
 class CCF1d:
     # =============================================================================
@@ -115,10 +115,10 @@ class CCF1d:
             # the cross-correlation is equal-length and symmetric. The legacy
             # code truncated the template to a shifted sub-grid, which made
             # only negative velocities recoverable (see KNOWN_TRAPS.md).
-            spT = spectral_ops.resample(np.asarray(template.model.wv[I]),
+            spT = dsp.resample(np.asarray(template.model.wv[I]),
                                         np.asarray(template.model.sp[I]), w)
 
-            v_kms, C = spectral_ops.ccf_vs_velocity(spT, s, dv_kms, vmax_kms)
+            v_kms, C = unicor_ccf.ccf_vs_velocity(spT, s, dv_kms, vmax_kms)
 
             if V is None:
                 V = v_kms << (u.km / u.s)
@@ -168,17 +168,8 @@ class CCF1d:
         NOTE: the number of lags is assumed to be identical for all orders
         '''
 
-        # Arrage the correlation matrix. Clip to [-1, 1] so a per-order value
-        # that overshoots numerically cannot drive 1 - C**2 negative (which
-        # would make the combined CCF NaN).
-        CorrMat = np.clip(self.Corr['corr'], -1.0, 1.0)
         velocities = self.Corr['vel']
-
-        # Read the number of orders in the spectrum
-        Nord = self.n_ord
-
-        # Combine the CCFs according to Zucker (2003, MNRAS), section 3.1
-        CombinedCorr = np.sqrt(1-(np.prod(1-CorrMat**2, axis=0))**(1/Nord))
+        CombinedCorr = unicor_ccf.combine_ccfs(self.Corr['corr'])
 
         try:
             V, eRV, CorrPeak, vUnit = self.extract_RV(velocities, CombinedCorr)
@@ -207,124 +198,64 @@ class CCF1d:
 # =============================================================================
     def extract_RV(self, x, y, vel=None, n_ord=None):
         """
-        Get the radial velocity and its uncertainty from maximum likelihood.
-        If velocity is given, the uncertainty at this specific point is calculated.
+        Radial velocity and its maximum-likelihood uncertainty from a CCF.
+
+        :param x: velocity lags (Quantity or km/s array).
+        :param y: CCF values at ``x``.
+        :param vel: if given, the uncertainty is evaluated at this velocity
+                    (km/s) instead of at the fitted peak, and no peak value
+                    is returned.
+        :param n_ord: number of orders behind ``y``; defaults to ``self.n_ord``.
+        :return: (RV, eRV, ccf_peak, unit) -- velocities in the unit of ``x``.
         """
+        x_kms = x.value if isinstance(x, u.Quantity) else np.asarray(x, float)
         if vel is None:
-            RV, ccf_value = self.subpixel_CCF(x, y)
+            RV, ccf_value = unicor_ccf.subpixel_peak(x_kms, y)
         else:
-            RV = self.subpixel_CCF(x, y, v=vel)
-            ccf_value = np.nan
+            RV, ccf_value = vel, np.nan
 
-        if n_ord is None:
-            Nord = self.n_ord
-        else:
-            Nord = n_ord
+        Nord = self.n_ord if n_ord is None else n_ord
+        eRV = unicor_ccf.rv_uncertainty(x_kms, y, RV, Nord)
 
-        Nvels = len(x)
-
-        # Generate the second derivative from spline
-        spl = interpolate.UnivariateSpline(x.value, y, k=4, s=0)
-        spl_vv = spl.derivative(n=2)
-
-        # Calculate the uncertainty. The variance is -1 / (ml_factor*Nord*Nvels)
-        # and is only real at a true CCF maximum (ml_factor < 0); guard the
-        # degenerate cases rather than emitting a silent NaN from sqrt().
-        ml_factor = spl_vv(RV) * spl(RV) / (1 - spl(RV)**2)
-        denom = ml_factor * Nord * Nvels
-        var = -1.0 / denom if denom != 0 else np.nan
-        eRV = np.sqrt(var) if (np.isfinite(var) and var > 0) else np.nan
-
-        if type(x) is u.quantity.Quantity:
-            xUnit = x.unit
-        else:
-            xUnit = None
-
+        xUnit = x.unit if isinstance(x, u.Quantity) else None
         return RV, eRV, ccf_value, xUnit
 
 # =============================================================================
 # =============================================================================
-    def calcBIS(self, x, y, bisect_val=[0.35, 0.95], n_ord=None):
+    def calcBIS(self, x, y, bisect_val=(0.35, 0.95), n_ord=None):
         """
-        Determine full-with-half-maximum of a peaked set of points, x and y.
-        Assumes that there is only one peak present in the datasset.
-        The function uses a spline interpolation of order k.
+        Bisector span of a single-peaked CCF (see :func:`unicor.bisector_span`).
+
+        :param x: velocity lags (Quantity).
+        :param y: CCF values at ``x``.
+        :param bisect_val: lower and upper bisector levels, as fractions of the
+                           CCF maximum.
+        :param n_ord: number of orders behind ``y``; defaults to ``self.n_ord``.
+        :return: (BIS, eBIS, unit); (nan, nan, None) when a level does not cut
+                 the CCF exactly twice.
         """
-        y_low = np.max(y)*bisect_val[0]
-        y_high = np.max(y)*bisect_val[1]
-
-        s_low = interpolate.splrep(x.value, y - y_low)
-        s_high = interpolate.splrep(x.value, y - y_high)
-
-        roots_low = interpolate.sproot(s_low, mest=2)
-        roots_high = interpolate.sproot(s_high, mest=2)
-
-        if (len(roots_low) == 2) and (len(roots_high) == 2):
-            low = [self.subpixel_CCF(x, y, v=roots_low[0]),
-                   self.subpixel_CCF(x, y, v=roots_low[1])]
-            high = [self.subpixel_CCF(x, y, v=roots_high[0]),
-                    self.subpixel_CCF(x, y, v=roots_high[1])]
-
-            _, err, _, _ = self.extract_RV(x, y, n_ord=n_ord)
-
-            BIS = (low[1]+low[0])/2 - (high[1]+high[0])/2
-            eBIS = np.sqrt(2)*err
-
-            return BIS, eBIS, x.unit
-        else:
+        Nord = self.n_ord if n_ord is None else n_ord
+        BIS, eBIS = unicor_ccf.bisector_span(x.value, y, Nord, levels=bisect_val)
+        if np.isnan(BIS):
             return np.nan, np.nan, None
+        return BIS, eBIS, x.unit
 
     def subpixel_CCF(self, vels, ccf, v=None, Npts=5):
         """
-        This function is using a second order approximation to estimate the ccf
-        at a given velocity, v. If no velocity was provided, the CCFs peak velocity
-        is returned.
+        Second-order (parabolic) estimate of the CCF around its peak.
 
-        :param vels: velocity array for a CCF at a given order.
-        :param ccf: CCF values that correspond with the velocities in x.
-        :return: Tuple containing parameters:x_max, y_max
+        :param vels: velocity lags (Quantity or km/s array).
+        :param ccf: CCF values at ``vels``.
+        :param v: if given, return the interpolated CCF value at this velocity
+                  (km/s) instead of the peak.
+        :param Npts: odd number of points around the peak used in the fit.
+        :return: (v_peak, ccf_peak) in km/s, or the CCF value at ``v``.
         """
-
-        if type(vels) is u.quantity.Quantity:
+        if isinstance(vels, u.Quantity):
             vels = vels.value
-
         if v is None:
-            assert Npts >= 3, "Must have at least 3 points."
-            assert Npts % 2 == 1, "Provide an odd number of points to fit around the peak."
-
-            x_n = np.argmax(ccf)
-            indlist =[int(x_n - Npts//2 + k) for k in np.arange(Npts)]
-            x = np.array(vels[indlist])
-            y = np.array(ccf[indlist])
-
-            # Define the design matrix at the given phases.
-            DesignMatrix = np.array(
-                [[1, x, x**2]
-                 for x in x])
-
-            # Solve to obtain the parameters and uncertainties
-            C = (np.linalg.inv(
-                np.dot(DesignMatrix.transpose(), DesignMatrix)))
-
-            # Derive the parameters:
-            pars = C.dot(np.dot(DesignMatrix.transpose(), y))
-            y_max = pars[0] - pars[1] * pars[1] / (4 * pars[2])  # maximal CCF result value
-            x_max = -pars[1] / (2 * pars[2])  # velocity in maximal value
-            return x_max, y_max
-
-        else:
-            vels_diff = [i - v for i in vels]
-            x_n = np.argmin(np.abs(vels_diff))
-
-            indlist =[int(x_n - 1), int(x_n), int(x_n + 1)]
-            x = np.array(vels[indlist])
-            y = np.array(ccf[indlist])
-
-            y_interp = (y[0]*(v-x[1])*(v-x[2])/(x[0]-x[1])/(x[0]-x[2]) +
-                        y[1]*(v-x[0])*(v-x[2])/(x[1]-x[0])/(x[1]-x[2]) +
-                        y[2]*(v-x[0])*(v-x[1])/(x[2]-x[0])/(x[2]-x[1])
-                        )
-            return y_interp
+            return unicor_ccf.subpixel_peak(vels, ccf, npts=Npts)
+        return unicor_ccf.ccf_at(vels, ccf, v)
 
 
     # =============================================================================

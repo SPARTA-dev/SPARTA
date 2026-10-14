@@ -1,16 +1,16 @@
 # Fourier-domain TODCOR — method & conventions
 
 Single source of truth for the two-component (double-lined) velocity fit
-implemented in `sparta.TODCOR`. It fits the radial velocities — and relative
+implemented in the `todcor` package. It fits the radial velocities — and relative
 amplitudes — of *both* components of an SB2 by transforming the actual template
 spectra, TODCOR (Zucker & Mazeh 1994) recast as a Gaussian profile likelihood.
 
-The implementation is split into `sparta.spectral_ops` (grid / FFT / Parseval /
-broadening primitives, shared with UNICOR), `simulate` (forward model),
-`todcor_ops` (the derivation), and `CCF2d` (the `Spectrum`/`Template`
-orchestration — the double-lined counterpart of UNICOR's `CCF1d`). The
-`sparta.TODCOR` namespace re-exports the full public API, which is what the
-notebooks in this directory use. Note that `rotational_kernel` is a
+The implementation is split into `unicor.dsp` (grid / FFT / Parseval /
+broadening primitives, shared with UNICOR), `todcor.simulate` (forward model)
+and `todcor.estimator` (the derivation). SPARTA's `sparta.TODCOR.CCF2d` adds the
+`Spectrum`/`Template` orchestration on top — the double-lined counterpart of
+UNICOR's `CCF1d`. The `todcor` namespace re-exports the full public API, which
+is what the example notebooks use. Note that `rotational_kernel` is a
 *velocity-space* Gray broadening kernel — a real-space convolution kernel, not a
 Fourier-space amplitude.
 
@@ -182,23 +182,23 @@ Exact **only** under these; the first is the one to watch:
 
 ## 10. Function map
 
-All of these are reachable from the `sparta.TODCOR` namespace; the "lives in"
-column says where they are defined.
+All of these except `CCF2d` are reachable from the `todcor` namespace; the
+"lives in" column says where they are defined.
 
 | Function | Lives in | Role |
 | --- | --- | --- |
-| `log_lambda_grid`, `resample`, `tukey_window` | `spectral_ops` | grid + apodisation (auxiliary) |
-| `rfft_positive`, `parseval_weights` | `spectral_ops` | Fourier transform + Parseval weights (§2) |
-| `broaden_gaussian_residual`, `rotational_kernel`, `broaden_rotational_residual` | `spectral_ops` | template broadening |
-| `shift_kms` | `spectral_ops` | the log-λ shift `s = c·ln(1 + v/c)` |
-| `shift_template_flux`, `composite_flux` | `simulate` | forward model / simulate composites |
-| `window_stats` | `todcor_ops` | the six sufficient statistics for one window (§3) |
-| `combine_stats` | `todcor_ops` | sum statistics across windows → joint fit (§7) |
-| `profile_from_stats` | `todcor_ops` | profile/marginalise amplitudes → logL maps (§4–5) |
-| `todcor_map` | `todcor_ops` | single-window convenience wrapper (§4) |
-| `crlb_from_map` | `todcor_ops` | Cramér–Rao velocity errors from curvature (§8) |
-| `model_flux` | `simulate` | reconstruct the best-fit composite for residual plots |
-| `CCF2d` | `CCF2d` | `Spectrum` + two `Template`s → map, RVs, errors (orders as windows) |
+| `log_lambda_grid`, `resample`, `tukey_window` | `unicor.dsp` | grid + apodisation (auxiliary) |
+| `rfft_positive`, `parseval_weights` | `unicor.dsp` | Fourier transform + Parseval weights (§2) |
+| `broaden_gaussian_residual`, `rotational_kernel`, `broaden_rotational_residual` | `unicor.dsp` | template broadening |
+| `shift_kms` | `unicor.dsp` | the log-λ shift `s = c·ln(1 + v/c)` |
+| `shift_template_flux`, `composite_flux` | `todcor.simulate` | forward model / simulate composites |
+| `window_stats` | `todcor.estimator` | the six sufficient statistics for one window (§3) |
+| `combine_stats` | `todcor.estimator` | sum statistics across windows → joint fit (§7) |
+| `profile_from_stats` | `todcor.estimator` | profile/marginalise amplitudes → logL maps (§4–5) |
+| `todcor_map` | `todcor.estimator` | single-window convenience wrapper (§4) |
+| `crlb_from_map` | `todcor.estimator` | Cramér–Rao velocity errors from curvature (§8) |
+| `model_flux` | `todcor.simulate` | reconstruct the best-fit composite for residual plots |
+| `CCF2d` | `sparta.TODCOR` | `Spectrum` + two `Template`s → map, RVs, errors (orders as windows) |
 
 ## 11. Reference
 

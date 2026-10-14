@@ -2,7 +2,7 @@
 
 USuRPER's spectral distance is the zero-lag (unshifted, pointwise) correlation
 of resampled + normalized spectra -- no Fourier transform, no velocity scan.
-This pins that path across the spectral_ops refactor that removed the Template
+This pins that path across the spectral-ops refactor that removed the Template
 coupling. Golden captured 2026-07-22 before the refactor; the refactor
 reproduced it bit-for-bit.
 """
@@ -10,7 +10,7 @@ import numpy as np
 from types import SimpleNamespace
 import pytest
 
-from sparta import spectral_ops as so
+import unicor as so
 from sparta.Auxil.TimeSeries import TimeSeries
 from sparta.Auxil.PeriodicityDetector import PeriodicityDetector
 

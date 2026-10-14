@@ -43,13 +43,49 @@ TIRAVEL velocity optimization (maximise ρ over the velocities). Further 2-d CCF
 
 
 
-## Installation instructions: 
+## Repository layout
 
-SPARTA is compatible with Python 3.7. The complete requirement list is available in the requirements text file. **Download or clone** SPARTA package from GitHub. Unpack the zip file in a designated folder. 
+SPARTA is a monorepo of three installable packages. The two correlation engines
+are standalone — plain numpy arrays in, numbers out, only numpy and scipy
+required — and SPARTA builds its `Spectrum` / `Template` / `Observations` layer on
+top of them.
 
-**Install using pip:** 
+| Package (pip name) | Import | Path | Depends on |
+| --- | --- | --- | --- |
+| UNICOR engine (`sparta-unicor`) | `unicor` | [`packages/unicor`](packages/unicor) | numpy, scipy |
+| TODCOR engine (`sparta-todcor`) | `todcor` | [`packages/todcor`](packages/todcor) | numpy, scipy, `unicor` |
+| SPARTA (`SPARTA`) | `sparta` | [`src/sparta`](src/sparta) | both engines, astropy, specutils, matplotlib, pandas, tqdm |
 
+The engines carry a `sparta-` prefix on PyPI because `unicor` there is an
+unrelated project; likewise `pip install sparta` installs an unrelated RDF
+library. Install from this repository as below.
+
+## Installation
+
+Requires Python ≥ 3.10. Clone the repository, then, from its root:
+
+```bash
+# Everything, editable, for development (one pip call so the engines resolve locally):
+pip install -r requirements.txt
+
+# Or a regular install of the full package:
+pip install ./packages/unicor ./packages/todcor .
 ```
-pip install -U -r requirements.txt
-pip install -e [path to setup.py]
+
+Just one engine:
+
+```bash
+pip install ./packages/unicor                      # UNICOR only
+pip install ./packages/unicor ./packages/todcor    # TODCOR (needs unicor)
 ```
+
+Straight from GitHub, without cloning:
+
+```bash
+pip install "sparta-unicor @ git+https://github.com/SPARTA-dev/SPARTA#subdirectory=packages/unicor"
+pip install "sparta-unicor @ git+https://github.com/SPARTA-dev/SPARTA#subdirectory=packages/unicor" \
+            "sparta-todcor @ git+https://github.com/SPARTA-dev/SPARTA#subdirectory=packages/todcor"
+```
+
+Run the tests with `pytest` from the repository root (all three packages), or
+`pytest packages/todcor` for one engine.

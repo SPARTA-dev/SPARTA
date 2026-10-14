@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# Note: "sparta" on PyPI is an unrelated RDF library -- install SPARTA from this
+# repository (see README), never with a bare `pip install sparta`.
+name = "SPARTA"
+version = "0.2.0"
+description = "SPARTA - SPectroscopic vARiabiliTy Analysis"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Sahar Shahaf", email = "sahar.shahaf@gmail.com" }]
+requires-python = ">=3.10"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+# specutils 2.x itself requires Python >= 3.10 and astropy >= 6.0.
+dependencies = [
+    "sparta-unicor>=0.1",   # packages/unicor in this repo
+    "sparta-todcor>=0.1",   # packages/todcor in this repo
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "astropy>=6.0",
+    "specutils>=2.0",
+    "matplotlib>=3.6",
+    "pandas>=1.5",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.urls]
+Source = "https://github.com/SPARTA-dev/SPARTA"
+"USuRPER paper" = "https://ui.adsabs.harvard.edu/abs/2020A%26A...642A.146B/abstract"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "packages/unicor/tests", "packages/todcor/tests"]

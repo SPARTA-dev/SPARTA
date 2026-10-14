@@ -20,8 +20,8 @@
 # 4) BestFitSpectrum    - the best-fit composite of a given order, for residuals.
 #
 # The estimator itself (sufficient statistics, profiled amplitudes, CRLB) lives
-# in sparta.TODCOR.todcor_ops; the forward model in sparta.TODCOR.simulate; the
-# grid/FFT/broadening primitives in sparta.spectral_ops. This class handles the
+# in todcor.estimator; the forward model in todcor.simulate; the
+# grid/FFT/broadening primitives in unicor.dsp. This class handles the
 # SPARTA-object orchestration: log-lambda gridding, per-order preparation,
 # window combination, and reporting.
 #
@@ -37,9 +37,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from astropy import constants as consts, units as u
 
-from sparta import spectral_ops
-from sparta.TODCOR.simulate import model_flux
-from sparta.TODCOR.todcor_ops import (
+from unicor import dsp
+from todcor.simulate import model_flux
+from todcor.estimator import (
     combine_stats, crlb_from_map, profile_from_stats, window_stats,
 )
 
@@ -78,7 +78,7 @@ class CCF2d:
         sufficient statistics; the windows are then summed and profiled into a
         single joint fit with shared ``(v1, v2, a1, a2)``. Pooling orders this
         way is valid because they belong to one epoch -- see
-        :func:`sparta.TODCOR.todcor_ops.combine_stats`.
+        :func:`todcor.estimator.combine_stats`.
 
         :param: spec_in    - a Spectrum object with the observed data.
         :param: template1_in, template2_in - Template objects for the primary
@@ -163,7 +163,7 @@ class CCF2d:
             g2 = self._residual(self._template_on_grid(template2, I, w), continuum)
 
             if alpha > 0:
-                taper = spectral_ops.tukey_window(len(w), alpha=alpha)
+                taper = dsp.tukey_window(len(w), alpha=alpha)
                 data_g, g1, g2 = data_g * taper, g1 * taper, g2 * taper
 
             st = window_stats(data_g, g1, g2, dv_kms, v1_grid, v2_grid,
@@ -338,7 +338,7 @@ class CCF2d:
         '''
         model = template.model
         I = order if len(model.wv) > 1 else 0
-        return spectral_ops.resample(np.asarray(model.wv[I], float),
+        return dsp.resample(np.asarray(model.wv[I], float),
                                      np.asarray(model.sp[I], float),
                                      wave, fill=1.0)
 

@@ -1,0 +1,68 @@
+"""Tests for the array-level UNICOR engine (:mod:`unicor.ccf`).
+
+Synthetic single-line spectra on a log-lambda grid: the CCF peak lands on the
+injected shift, identical orders combine to the single-order CCF, and the
+sub-pixel parabola is exact on a parabola. No external data.
+"""
+import numpy as np
+import pytest
+
+import unicor
+
+DV = 0.5  # km/s
+
+
+def _line_spectrum(v_kms, wave):
+    """A Gaussian absorption line at 5050 A, Doppler-shifted by ``v_kms``."""
+    rest = 5050.0 * (1.0 + v_kms / unicor.C_KMS)
+    return 1.0 - 0.5 * np.exp(-0.5 * ((wave - rest) / 0.15) ** 2)
+
+
+@pytest.fixture
+def grid():
+    wave, _ = unicor.log_lambda_grid(5000.0, 5100.0, DV)
+    return wave
+
+
+@pytest.mark.parametrize("v_inj", [-12.3, 0.0, 7.7])
+def test_ccf_peak_recovers_injected_shift(grid, v_inj):
+    v, c = unicor.ccf_vs_velocity(_line_spectrum(0.0, grid),
+                                  _line_spectrum(v_inj, grid), DV, vmax=40)
+    rv, peak = unicor.subpixel_peak(v, c)
+    assert rv == pytest.approx(v_inj, abs=0.05)
+    assert peak == pytest.approx(1.0, abs=0.01)
+
+
+def test_ccf_lags_are_symmetric_and_normalized(grid):
+    flux = _line_spectrum(0.0, grid)
+    v, c = unicor.ccf_vs_velocity(flux, flux, DV, vmax=10)
+    np.testing.assert_allclose(v, -v[::-1])
+    assert v[1] - v[0] == pytest.approx(DV)
+    assert c.max() == pytest.approx(1.0) and v[np.argmax(c)] == 0.0
+
+
+def test_combining_identical_orders_returns_the_single_order_ccf(grid):
+    v, c = unicor.ccf_vs_velocity(_line_spectrum(0.0, grid),
+                                  _line_spectrum(3.0, grid), DV, vmax=20)
+    np.testing.assert_allclose(unicor.combine_ccfs(np.vstack([c, c, c])),
+                               np.abs(c), atol=1e-12)
+
+
+def test_subpixel_peak_is_exact_on_a_parabola():
+    v = np.arange(-10, 11) * 1.0
+    ccf = 0.9 - 0.01 * (v - 0.37) ** 2
+    rv, peak = unicor.subpixel_peak(v, ccf)
+    assert rv == pytest.approx(0.37, abs=1e-10)
+    assert peak == pytest.approx(0.9, abs=1e-12)
+    assert unicor.ccf_at(v, ccf, 0.37) == pytest.approx(0.9, abs=1e-12)
+
+
+@pytest.mark.parametrize("npts", [2, 4])
+def test_subpixel_peak_rejects_bad_window(npts):
+    with pytest.raises(ValueError):
+        unicor.subpixel_peak(np.arange(9.0), np.ones(9), npts=npts)
+
+
+def test_ccf_rejects_mismatched_grids():
+    with pytest.raises(ValueError):
+        unicor.ccf_vs_velocity(np.ones(10), np.ones(12), DV, 5)
