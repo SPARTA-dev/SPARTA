@@ -30,7 +30,11 @@
   in 1/Å or s/km instead of the order's span and pixel Nyquist frequency, so
   template and data are filtered alike whatever their pixel scales.
 - **A wavelength `delta` for `Spectrum.interpolate`** — read a length
-  Quantity as the step itself (a behaviour change, so a deliberate one).
+  Quantity as the step itself, or raise on one (either is a behaviour
+  change, so a deliberate one).
+- **Both broadening kernels in one call** — `broaden_rotational` and
+  `broaden_instrumental` each resample a non-ln λ template onto ln λ and back;
+  one call applying both would halve the interpolations.
 
 ## Periodograms
 
@@ -52,6 +56,10 @@
   with units on the spectral axis as the working store, replacing the `Info`
   dict.
 - **A user cache for PHOENIX downloads** outside the package directory.
+- **Shared installs**: downloaded PHOENIX files are readable only by the user
+  who fetched them (mode 0600 from the temporary file); set 0644.
+- **PHOENIX alpha with [M/H] > 0**: the file-name builder silently ignores
+  `alpha` when `feh > 0` (the grid has no such models); raise instead.
 
 ## The open surface
 
@@ -79,8 +87,15 @@ with a few lines of its own):
 - Small: `Product.load` could default `min_wv`/`max_wv` for products that
   ignore them; `unbiased_u_centering(a, n)` takes `n` although it is `len(a)`.
 
+- **Input checks on the preprocessing atoms** — `remove_cosmics` on an
+  all-NaN order or a descending axis, and `resample_to_*_grid` on 2–3 pixel
+  orders (which return empty arrays); `ccf_order` / `template_coverage` with a
+  non-integer `n_lags`.
+
 ## Packaging and infrastructure
 
+- **Import `todcor` only where needed** — `sparta.preprocess` imports it at
+  module level for `resampling_noise_psd` alone.
 - **Release the engines on PyPI** as `sparta-unicor` and `sparta-todcor`, and
   register both names first: `SPARTA` depends on them by name, and plain
   `unicor` and `sparta` on PyPI are unrelated projects.

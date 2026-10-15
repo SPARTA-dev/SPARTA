@@ -26,18 +26,17 @@ grid's actual step, `c` times its ln λ step (`todcor.log_grid_step(wave)`).
 
 ## Install
 
-The PyPI name is `sparta-todcor`, and it needs `sparta-unicor`. The import name
-is `todcor`.
+TODCOR is installed from a clone of the SPARTA repository (it is not on
+PyPI), together with UNICOR, which it needs. The package name is
+`sparta-todcor`; the import name is `todcor`.
 
 ```bash
-# from a SPARTA checkout (pass both, so pip uses the local unicor)
-pip install ./packages/unicor ./packages/todcor
-
-# straight from GitHub
-pip install \
-  "sparta-unicor @ git+https://github.com/SPARTA-dev/SPARTA#subdirectory=packages/unicor" \
-  "sparta-todcor @ git+https://github.com/SPARTA-dev/SPARTA#subdirectory=packages/todcor"
+git clone https://github.com/SPARTA-dev/SPARTA.git
+cd SPARTA
+pip install ./packages/unicor ./packages/todcor   # both in one call, so pip uses the local unicor
 ```
+
+For all of SPARTA, see the [main README](../../README.md#installation).
 
 ## Quick start
 

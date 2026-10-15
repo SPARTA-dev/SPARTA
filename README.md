@@ -56,39 +56,33 @@ spectra themselves. It is under active development; comments are welcome.
 
 ## Installation
 
-Requires Python ≥ 3.10. Clone the repository, then, from its root:
+SPARTA is installed from a clone of this repository (it is not on PyPI). It
+needs Python 3.10 or later.
 
 ```bash
-# Everything, editable, for development (one pip call so the engines resolve locally):
+git clone https://github.com/SPARTA-dev/SPARTA.git
+cd SPARTA
+python -m venv .venv            # or: conda create -n sparta python=3.10
+source .venv/bin/activate       #     conda activate sparta
 pip install -r requirements.txt
-
-# Or a regular install of the full package:
-pip install ./packages/unicor ./packages/todcor .
 ```
 
-Just one engine:
+This installs SPARTA and its two correlation engines, UNICOR and TODCOR, in
+editable mode (a `git pull` updates them), plus the tools that run the tests
+and the example notebooks. To check the installation, run `pytest` from the
+same folder (about a minute).
+
+To install only an engine, from the clone:
 
 ```bash
-pip install ./packages/unicor                      # UNICOR only
-pip install ./packages/unicor ./packages/todcor    # TODCOR (needs unicor)
+pip install ./packages/unicor                      # UNICOR
+pip install ./packages/unicor ./packages/todcor    # TODCOR (needs UNICOR)
 ```
 
-Straight from GitHub, without cloning:
-
-```bash
-R=git+https://github.com/SPARTA-dev/SPARTA
-pip install "sparta-unicor @ $R#subdirectory=packages/unicor"                 # UNICOR
-pip install "sparta-unicor @ $R#subdirectory=packages/unicor" \
-            "sparta-todcor @ $R#subdirectory=packages/todcor"                 # + TODCOR
-pip install "sparta-unicor @ $R#subdirectory=packages/unicor" \
-            "sparta-todcor @ $R#subdirectory=packages/todcor" "SPARTA @ $R"   # everything
-```
-
-The engines are not on PyPI yet, so list them in the same `pip` call as anything
-that depends on them: never `pip install .` on its own while the engines are
-unpublished — pip would look them up on PyPI. Their PyPI names carry a
-`sparta-` prefix because `unicor` there is an unrelated project; likewise
-`pip install sparta` installs an unrelated RDF library.
+Always give the engines in the same `pip` command as anything that needs
+them, and never run `pip install .` on its own: pip would then look for the
+engines on PyPI, where their names (`sparta-unicor`, `sparta-todcor`) are not
+registered yet. (`pip install sparta` installs an unrelated package.)
 
 ## Quickstart
 

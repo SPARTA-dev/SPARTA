@@ -25,16 +25,17 @@ wavelengths in Å**.
 
 ## Install
 
-The PyPI name is `sparta-unicor` (plain `unicor` on PyPI is an unrelated
-project). The import name is `unicor`.
+UNICOR is installed from a clone of the SPARTA repository (it is not on
+PyPI). The package name is `sparta-unicor` (`unicor` on PyPI is an unrelated
+project); the import name is `unicor`.
 
 ```bash
-# from a SPARTA checkout
+git clone https://github.com/SPARTA-dev/SPARTA.git
+cd SPARTA
 pip install ./packages/unicor
-
-# straight from GitHub
-pip install "sparta-unicor @ git+https://github.com/SPARTA-dev/SPARTA#subdirectory=packages/unicor"
 ```
+
+For all of SPARTA, see the [main README](../../README.md#installation).
 
 ## Quick start
 
