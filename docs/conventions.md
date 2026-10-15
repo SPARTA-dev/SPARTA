@@ -174,17 +174,28 @@ place and in this order:
    mad_std above the median) by linear interpolation between unclipped
    neighbours; the grid is kept.
 4. **`filter_spectrum`** — first-order Butterworth band-pass, run forward and
-   backward (zero phase) on the flux minus its 80th percentile; each order is
-   then standardised to zero mean and unit variance. The continuum goes to 0.
+   backward (zero phase) after removing the order's straight-line trend, with
+   Gustafsson's initial conditions (`filtfilt(method='gust')`: each pass
+   starts from the state the data themselves imply, so the order's ends are
+   filtered as cleanly as its middle); each order is then standardised to
+   zero mean and unit variance. The continuum goes to 0. It records
+   `Info['NoiseFraction']`, the share of white native noise power the filter
+   kept, which UNICOR's error bars count (see below).
    Both cuts are **velocity scales** (km/s), the periods of the band edges:
    variations broader than `continuum_scale_kms` and structure narrower than
    `noise_scale_kms` are removed (each to half its amplitude at the cut), so a
    template and the data get the same physical filter whatever their pixels.
-5. **`apply_cosine_bell`** — Tukey taper (`alpha`), bringing each order's
-   ends to 0.
+No step tapers the ends. A Tukey taper used to bring them to 0, to hide the
+filter's start-up, which spoiled ~continuum_scale/2π (~300 km/s) at each end
+when the filter was padded with 30 guessed pixels. But a taper is applied to
+the template before it is shifted, so its faded zone moves with the trial
+velocity while the data's stays put: it biased UNICOR's RVs by up to ~1 m/s
+and doubled their quoted errors. Gustafsson's start-up removes the damage
+instead of hiding it (on the bundled NRES spectra the RV scatter fell from 75
+to 70 m/s).
 
 Defaults: `n_trim=10, clean_margins=True, remove_nans=True, delta=0.5,
-cosmic_sigma=3, continuum_scale_kms=2000, noise_scale_kms=4, alpha=0.3`; the
+cosmic_sigma=3, continuum_scale_kms=2000, noise_scale_kms=4`; the
 per-product recommendations are in [instruments.md](instruments.md) (HARPS
 2000 / 4 km/s, NRES 1400 / 9.6 km/s: 1.6–1.7 times the line-spread FWHM c/R
 for the noise cut, the values the former pixel-unit settings gave on the
@@ -202,15 +213,12 @@ Why this order:
   stays even.
 - **Cosmics before the filter**, so a spike is clipped before the filter
   spreads it over its neighbours.
-- **Taper last**, on a spectrum whose continuum is already 0: tapering a
-  continuum-1 spectrum would itself create features at the order ends.
 
 Pass the template through the same `preprocess` call as the data
 ([tutorial 03](../examples/tutorials/03_unicor.ipynb)). A preprocessed
 spectrum is on a linear-λ grid, so the RV engines resample it once more, onto
-their ln λ grid. If it is already tapered, `CCF2d.cross_correlate(...,
-alpha=0)` skips TODCOR's own taper; its default `continuum='median'` is ≈ 0
-for a filtered spectrum.
+their ln λ grid. TODCOR's default `continuum='median'` is ≈ 0 for a filtered
+spectrum.
 
 ## When are the error bars calibrated?
 
@@ -231,15 +239,23 @@ honest and < 1 conservative):
 | White noise on the native grid | 1.03 | 0.94 (primary), 1.02 (secondary) | `tests/instruments/test_simulated.py` |
 | HARPS archive grid, native step seeded | 1.07 (1.25 without seeding) | — | same |
 | Photon noise (σ ∝ √flux) | 0.89 | — | same |
-| After `preprocess` (band-pass, normalisation, linear-λ resampling) | 0.85 with the noise cut at ~6.7 native pixels, 0.72 at ~1.1 (eRV/scatter 1.17, 1.38) | 0.72–0.74 | `CCF1d` / `CCF2d` docstrings |
+| After `preprocess` (band-pass, normalisation, linear-λ resampling), UNICOR counting the kept noise fraction | 0.70–0.80 (eRV/scatter 1.25 HARPS-like, 1.42 NRES-like, simulated); ~0.3 on the real HARPS TOI-193 RVs, where template mismatch adds to it | 0.72–0.74 (before the 2026-10-15 filter change) | `tests/test_ccf1d.py`; docs/roadmap.md |
 | TODCOR analysis grid 1.5× coarser than native | — | 0.82–0.91 | [todcor_method.md §9](../packages/todcor/docs/todcor_method.md) |
 
 So:
 
 - **Calibrated:** white noise on native pixels, on the raw (continuum-
   normalised) spectrum, for products whose native step is known.
-- **Conservative:** after filtering (17–38% too large for UNICOR, ~1.4× for
-  TODCOR); under photon noise (UNICOR ~10%, because line cores are quieter
+- **Conservative, approximately:** after filtering. The band-pass removes
+  most of the high-frequency noise, so a filtered spectrum looks cleaner than
+  it is and the formula, counting every native pixel, would quote errors
+  ~0.6–0.7× the real scatter. UNICOR therefore counts only the share of
+  native noise the filter kept (`Info['NoiseFraction']`,
+  `sparta.preprocess.filtered_noise_fraction`); that correction ignores the
+  share of the lines' own signal the filter removes, so the errors err high,
+  ~1.25–1.4× on simulated HARPS- and NRES-like spectra. An exact model is an
+  open item ([roadmap](roadmap.md)). TODCOR was ~1.4× before the filter
+  change and is revisited with its windowing. Also conservative: under photon noise (UNICOR ~10%, because line cores are quieter
   than the white-noise formula assumes); with template mismatch, which both
   estimators count as noise (in
   [tutorial 07](../examples/tutorials/07_usurper.ipynb) the reported errors are

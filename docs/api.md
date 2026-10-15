@@ -127,7 +127,6 @@ Spectrum.preprocess(
     cosmic_sigma=3,
     continuum_scale_kms=2000.0,
     noise_scale_kms=4.0,
-    alpha=0.3,
 )
 ```
 
@@ -139,7 +138,6 @@ Apply the standard preprocessing chain, in place.
 - `delta` (*float*): Linear resampling step, in units of each order's median wavelength step (see `interpolate`).
 - `cosmic_sigma` (*float*): Upward outlier threshold, in mad_std (see `remove_cosmics`).
 - `continuum_scale_kms, noise_scale_kms` (*float*): The band-pass edges as velocity periods (km/s; see `filter_spectrum`). The defaults, 2000 and 4 km/s, are the recommendation for HARPS (R = 120,000).
-- `alpha` (*float*): Tukey shape parameter (see `apply_cosine_bell`).
 
 **Returns**
 
@@ -211,23 +209,7 @@ Band-pass filter every order with a Butterworth filter, in place.
 
 **Returns**
 
-- *Spectrum*: self, with `sp` filtered.
-
-##### `Spectrum.apply_cosine_bell`
-
-```python
-Spectrum.apply_cosine_bell(alpha=0.1)
-```
-
-Multiply every order by a cosine bell (Tukey window), in place.
-
-**Parameters**
-
-- `alpha` (*float*): Shape parameter of the Tukey window: the tapered fraction of the order (0 = no taper, 1 = Hann window).
-
-**Returns**
-
-- *Spectrum*: self, with `sp` tapered.
+- *Spectrum*: self, with `sp` filtered and `Info['NoiseFraction']` the share of white native noise power each order kept (`sparta.preprocess.filtered_noise_fraction`), which CCF1d's error bars count.
 
 ##### `Spectrum.remove_cosmics`
 
@@ -438,6 +420,31 @@ Band-pass filter one evenly sampled order with a Butterworth filter.
 **Raises**
 
 - *ValueError*: If a scale is not positive and finite, the grid is not evenly spaced, `noise_scale_kms` spans two grid steps or fewer, or `continuum_scale_kms` does not exceed it.
+
+#### `sparta.filtered_noise_fraction`
+
+```python
+sparta.filtered_noise_fraction(
+    wave,
+    continuum_scale_kms,
+    noise_scale_kms,
+    native_step_kms,
+    order=1,
+)
+```
+
+The fraction of white native-pixel noise power that `bandpass` keeps.
+
+**Parameters**
+
+- `wave` (*ndarray*): 1-D evenly spaced wavelengths of the filtered order (Angstrom).
+- `continuum_scale_kms, noise_scale_kms` (*float or astropy.units.Quantity*): The band edges as velocity periods (km/s), as given to `bandpass`.
+- `native_step_kms` (*float*): The order's native sampling step (km/s), the coarsest it has had.
+- `order` (*int*): Order of the Butterworth filter.
+
+**Returns**
+
+- *float*: The kept fraction of the noise power, in (0, 1].
 
 #### `sparta.resampling_noise_psd`
 
@@ -1150,7 +1157,6 @@ Observations.preprocess(
     cosmic_sigma=3,
     continuum_scale_kms=2000.0,
     noise_scale_kms=4.0,
-    alpha=0.3,
     progress=False,
 )
 ```
@@ -1159,7 +1165,7 @@ Apply `Spectrum.preprocess` to every epoch, in place.
 
 **Parameters**
 
-- `n_trim, clean_margins, remove_nans, delta, cosmic_sigma, continuum_scale_kms, noise_scale_kms, alpha`: Passed through; see `Spectrum.preprocess`. The per-instrument recommendations are in docs/instruments.md.
+- `n_trim, clean_margins, remove_nans, delta, cosmic_sigma, continuum_scale_kms, noise_scale_kms`: Passed through; see `Spectrum.preprocess`. The per-instrument recommendations are in docs/instruments.md.
 - `progress` (*bool*): Show a tqdm progress bar over the epochs. Off by default; needs the optional `tqdm` package (`pip install tqdm`).
 
 **Returns**
@@ -2800,6 +2806,7 @@ unicor.ccf_order(
     native_step_kms,
     velocity_convention='cz',
     errors=False,
+    noise_fraction=1.0,
 )
 ```
 
@@ -2816,6 +2823,7 @@ Cross-correlate one order with a template and read its RV.
 - `native_step_kms` (*float*): The order's native sampling step (km/s).
 - `velocity_convention` (*{'cz', 'relativistic'}*): Doppler convention mapping lags to velocities. Default 'cz'.
 - `errors` (*bool*): Also compute the ML uncertainty of the RV (`rv_uncertainty`); otherwise `erv` is NaN.
+- `noise_fraction` (*float*): Share of the native noise power the order still holds (dimensionless, in (0, 1]): a band-pass that removed part of the noise leaves the CCF peak higher than the noise warrants, so only this share of the native bins is counted in `n_eff` (SPARTA's `filtered_noise_fraction`). Default 1: unfiltered.
 
 **Returns**
 

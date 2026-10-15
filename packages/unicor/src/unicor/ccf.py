@@ -823,7 +823,7 @@ def effective_bins(n_pix, dv_kms, native_step_kms):
 
 
 def ccf_order(wave, flux, t_wave, t_flux, n_lags, *, dv_kms, native_step_kms,
-              velocity_convention='cz', errors=False):
+              velocity_convention='cz', errors=False, noise_fraction=1.0):
     """Cross-correlate one order with a template and read its RV.
 
     The template is resampled (linearly) onto the order's log-lambda grid
@@ -858,6 +858,12 @@ def ccf_order(wave, flux, t_wave, t_flux, n_lags, *, dv_kms, native_step_kms,
     errors : bool
         Also compute the ML uncertainty of the RV (:func:`rv_uncertainty`);
         otherwise ``erv`` is NaN.
+    noise_fraction : float
+        Share of the native noise power the order still holds (dimensionless,
+        in (0, 1]): a band-pass that removed part of the noise leaves the
+        CCF peak higher than the noise warrants, so only this share of the
+        native bins is counted in ``n_eff`` (SPARTA's
+        ``filtered_noise_fraction``). Default 1: unfiltered.
 
     Returns
     -------
@@ -884,7 +890,9 @@ def ccf_order(wave, flux, t_wave, t_flux, n_lags, *, dv_kms, native_step_kms,
     lo, hi = template_coverage(w_ext, t_wave, n_lags)
     v, ccf = ccf_vs_velocity(t_ext[lo: hi + 2 * n_lags], flux[lo:hi], wave[lo:hi],
                              velocity_convention)
-    n_eff = effective_bins(hi - lo, dv_kms, native_step_kms)
+    if not (np.isfinite(noise_fraction) and 0 < noise_fraction <= 1):
+        raise ValueError(f"noise_fraction must be in (0, 1], got {noise_fraction}")
+    n_eff = effective_bins(hi - lo, dv_kms, native_step_kms) * noise_fraction
 
     # A peak that cannot be located (e.g. at the scan edge) is a NaN RV, not
     # an error: the CCF itself is valid and still enters a combination.

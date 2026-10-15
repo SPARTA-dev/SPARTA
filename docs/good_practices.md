@@ -61,7 +61,7 @@ every known limitation, with its measured size, is in
   → [correlation engines § the CCF](correlation_engines.md#the-ccf)
 - [ ] **Preprocess the template with the data's settings.** The band-pass
   cuts are velocity scales (km/s), so data and template get the same filter
-  whatever their pixels; ⚠ `n_trim` and the taper are still in pixels.
+  whatever their pixels; ⚠ `n_trim` is still in pixels.
   → [conventions](conventions.md#preprocessing-order),
   [limitations](limitations.md#spectra-and-templates)
 - [ ] **Download templates only on purpose.** Three models ship with SPARTA;
@@ -106,11 +106,12 @@ every known limitation, with its measured size, is in
 
 ## Error bars
 
-- [ ] **Calibrate the errors after preprocessing.** The ML (UNICOR) and
-  Cramér–Rao (TODCOR) errors assume white noise on the native pixels;
-  band-pass filtering correlates it. ⚠ In Monte Carlo the errors came out
-  17–38 % too large (UNICOR) and ~1.4× (TODCOR). Calibrate by simulating your
-  setup, or by the scatter of a constant star.
+- [ ] **Calibrate the errors after preprocessing.** The band-pass removes
+  most of the noise and correlates the rest; UNICOR corrects for the noise it
+  removes, approximately. ⚠ The quoted errors err high: 1.25–1.4× the scatter
+  on simulated spectra, ~3× on the real HARPS TOI-193 RVs (template mismatch
+  adds to it); TODCOR ~1.4×. Calibrate by simulating your setup, or by the
+  scatter of a constant star.
   → [conventions](conventions.md#when-are-the-error-bars-calibrated)
 - [ ] **Expect a mismatched template to inflate the errors.** ⚠ In tutorial 07
   the reported errors were about three times the scatter when the template did

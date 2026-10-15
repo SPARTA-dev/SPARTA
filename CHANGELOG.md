@@ -186,6 +186,27 @@ Keys of `results_frequency` / `results_power`:
 
 ### Numerical changes (2026-10-15)
 
+- **No taper in preprocessing; the band-pass filters the order's ends
+  cleanly.** `Spectrum.preprocess` no longer multiplies each order by a Tukey
+  window, and `apply_cosine_bell` and `alpha` are removed (`preprocess`,
+  `Observations.preprocess`, the instrument recommendations). The taper hid
+  the filter's start-up, which with 30 guessed padding pixels spoiled
+  ~continuum_scale/2π (~300 km/s) at each end; but, applied to a template
+  before it is shifted, it biased UNICOR's RVs by up to ~1 m/s and doubled
+  their quoted errors. `bandpass` now removes the order's straight-line trend
+  and filters with Gustafsson's initial conditions (`filtfilt(method='gust')`).
+  Effect: NRES TOI-677 RV scatter 75 → 70 m/s; HARPS TOI-193 14.1 → 14.2 m/s;
+  simulated HARPS-like bias +0.03 m/s, scatter 1.75 → 1.70 m/s. Goldens: NRES
+  recipe RVs +21 and +30 m/s, HARPS TIRAVEL library RVs +4.9 m/s.
+- **UNICOR's errors after the band-pass count only the noise it kept.**
+  New atom `sparta.preprocess.filtered_noise_fraction`; `filter_spectrum`
+  records it as `Info['NoiseFraction']`; `unicor.ccf_order` takes
+  `noise_fraction` and scales `n_eff` by it. Without it the quoted errors
+  were 0.6–0.7× the scatter once the taper no longer depressed the CCF peak;
+  with it they err high, 1.25–1.4× on simulated spectra (and ~3× on the real
+  HARPS TOI-193 RVs, with template mismatch). Approximate: an exact error
+  model for filtered spectra is an open item (docs/roadmap.md). NRES median
+  eRV 24 → 58 m/s, HARPS 27.8 → 46.2 m/s.
 - **The RV is the peak of the continuous CCF**, not the vertex of a 5-point
   parabola: `unicor.subpixel_peak` maximises a quintic spline through ±4 lags
   around the sampled maximum, and `rv_uncertainty` takes C and C″ from the

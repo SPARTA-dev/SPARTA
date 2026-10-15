@@ -109,8 +109,7 @@ PRODUCTS = (
         recommended=Recommended(
             dv_kms=0.05,
             preprocess=dict(n_trim=100, clean_margins=True, remove_nans=True, delta=0.5,
-                            cosmic_sigma=3, continuum_scale_kms=1400.0, noise_scale_kms=9.6,
-                            alpha=0.3),
+                            cosmic_sigma=3, continuum_scale_kms=1400.0, noise_scale_kms=9.6),
             drop_orders=tuple(range(10)) + tuple(range(50, 67))),
         verified=True,
         load=load_e91,

@@ -85,14 +85,13 @@ class CCF1d:
         the 0.01 A archive grid is ~0.60 km/s at 5000 A but ~0.44 km/s at
         6800 A), so the archive's oversampling is not counted as information.
 
-        That count assumes white noise on the native pixels. Filtering and
-        per-order normalisation (``filter_spectrum`` / ``preprocess``)
-        remove noise power and correlate it, so the uncertainty is then no
-        longer calibrated: in Monte Carlo the ratio eRV / (RV scatter) is
-        1.17 with the noise cut at ~6.7 native pixels (``noise_scale_kms``,
-        e.g. 4 km/s for HARPS) and 1.38 with it at ~1.1 native pixels, i.e.
-        the errors are 17-38% conservative. Calibrate by
-        simulation for preprocessed spectra.
+        That count assumes white noise on the native pixels. The band-pass
+        (``filter_spectrum`` / ``preprocess``) removes most of the noise and
+        correlates the rest, so only the share it kept is counted
+        (``spectrum.Info['NoiseFraction']``, 1 when absent). That correction
+        ignores the line signal the filter removes, so the errors err high:
+        in Monte Carlo eRV / (RV scatter) is 1.25 (HARPS-like) to 1.42
+        (NRES-like). Calibrate by simulation for preprocessed spectra.
 
         Parameters
         ----------
@@ -195,6 +194,9 @@ class CCF1d:
         # is the one the data arrived on (native_steps validates it against
         # the orders).
         native_steps = np.asarray(spec.native_steps(), float)
+        # A band-passed spectrum holds only part of its native noise; count
+        # that share of the native bins (1 for an unfiltered spectrum).
+        noise_fraction = np.asarray(spec.Info.get('NoiseFraction', [1.0] * len(spec.wv)), float)
 
         # Ensure the observed spectrum is on a log-lambda (velocity-even) grid.
         if spec.Info.get('GridType') != 'log':
@@ -223,7 +225,7 @@ class CCF1d:
         # Overwritten below by the pixels each order actually correlates; an
         # order that fails keeps its full count, as its NaN CCF makes the
         # combined CCF NaN anyway.
-        n_eff = effective_bins(np.array([len(w) for w in spec.wv]), dv_kms, native_steps)
+        n_eff = effective_bins(np.array([len(w) for w in spec.wv]), dv_kms, native_steps) * noise_fraction
 
         undersampled = []
         for I, w in enumerate(spec.wv):
@@ -245,6 +247,7 @@ class CCF1d:
                     warnings.simplefilter("always")
                     order = ccf_order(w, spec.sp[I], t_wave, t_flux,
                                       n_lags, dv_kms=dv_kms, native_step_kms=native_steps[I],
+                                      noise_fraction=noise_fraction[I],
                                       velocity_convention=velocity_convention,
                                       errors=errors_per_order)
             except ValueError as err:

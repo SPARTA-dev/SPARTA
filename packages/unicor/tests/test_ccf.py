@@ -883,3 +883,22 @@ def test_the_undersampling_warning_does_not_depend_on_the_phase():
                 warnings.simplefilter("always")
                 unicor.subpixel_peak(v, ccf)
             assert any("undersampled" in str(w.message) for w in caught) == should_warn
+
+
+def test_a_noise_fraction_scales_the_independent_bins_and_the_error():
+    # Preprocessing that filters away part of the noise (fraction g kept)
+    # counts g of the native bins: the error grows by 1/sqrt(g).
+    wave, observed, _, _ = _forest_ccf(3.37, 0.5)
+    rng = np.random.default_rng(0)
+    noisy = observed + rng.normal(0, 0.01, observed.size)
+    ext = unicor.extend_log_grid(wave, 40)
+    plain = unicor.ccf_order(wave, noisy, ext, _forest(ext), 40, dv_kms=0.5,
+                             native_step_kms=0.5, errors=True)
+    kept = unicor.ccf_order(wave, noisy, ext, _forest(ext), 40, dv_kms=0.5,
+                            native_step_kms=0.5, errors=True, noise_fraction=0.25)
+    assert kept.n_eff == pytest.approx(0.25 * plain.n_eff)
+    assert kept.erv == pytest.approx(2.0 * plain.erv, rel=1e-12)
+    assert kept.rv == plain.rv
+    with pytest.raises(ValueError, match="noise_fraction"):
+        unicor.ccf_order(wave, noisy, ext, _forest(ext), 40, dv_kms=0.5,
+                         native_step_kms=0.5, noise_fraction=1.5)

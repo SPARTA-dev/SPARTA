@@ -102,6 +102,8 @@ def _rebuild(spec, template, dv=None, vel_bound=150, errors_per_order=False,
              velocity_convention="cz"):
     '''CCF1d.cross_correlate(...).combine() from the atoms, on plain arrays.'''
     native = np.asarray(spec.native_steps(), float)
+    # A band-passed spectrum carries the share of native noise it kept.
+    noise = np.asarray(spec.Info.get("NoiseFraction", [1.0] * len(spec.wv)), float)
     if spec.Info.get("GridType") == "log":
         waves, fluxes = spec.wv, spec.sp
         dv_kms = u.Quantity(spec.Info["GridDelta"]).to_value(u.km / u.s)
@@ -116,7 +118,7 @@ def _rebuild(spec, template, dv=None, vel_bound=150, errors_per_order=False,
     corr = np.full((n_ord, v.size), np.nan)
     loglike = np.full((n_ord, v.size), np.nan)
     rv, erv, peak = (np.full((n_ord, 1), np.nan) for _ in range(3))
-    n_eff = effective_bins(np.array([len(w) for w in waves]), dv_kms, native)
+    n_eff = effective_bins(np.array([len(w) for w in waves]), dv_kms, native) * noise
     single = len(template.model.wv) == 1
     for I, (w, s) in enumerate(zip(waves, fluxes)):
         It = 0 if single else I
@@ -124,7 +126,7 @@ def _rebuild(spec, template, dv=None, vel_bound=150, errors_per_order=False,
             order = ccf_order(w, s, template.model.wv[It], template.model.sp[It], n_lags,
                               dv_kms=dv_kms, native_step_kms=native[I],
                               velocity_convention=velocity_convention,
-                              errors=errors_per_order)
+                              errors=errors_per_order, noise_fraction=noise[I])
         except ValueError:
             continue
         corr[I], loglike[I], n_eff[I] = order.ccf, order.loglike, order.n_eff

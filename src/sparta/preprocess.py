@@ -4,8 +4,9 @@ Each function takes one order's wavelength and flux arrays and returns plain
 arrays (or a tuple of them); no ``Spectrum`` objects. ``Spectrum.trim``,
 ``interpolate``, ``remove_cosmics``, ``filter_spectrum`` and ``preprocess``
 are loops over these, so chaining them by hand reproduces the object's
-result exactly. The taper of ``apply_cosine_bell`` is
-``flux * unicor.tukey_window(len(flux), alpha)``.
+result exactly. No step tapers the order's ends: a fade there biased the
+CCF and inflated its error bars, and the band-pass filter's start-up, which
+it used to hide, is handled inside ``bandpass``.
 
 ``resampling_noise_psd`` and ``native_phases`` model what that resampling
 does to white native noise -- the noise budget of ``CCF2d``, which feeds
@@ -28,7 +29,7 @@ from unicor import dsp
 
 __all__ = ["resample_flux", "trim_margins", "resample_to_linear_grid",
            "resample_to_log_grid", "coarsest_native_step", "remove_cosmics", "bandpass",
-           "resampling_noise_psd", "native_phases"]
+           "filtered_noise_fraction", "resampling_noise_psd", "native_phases"]
 
 
 def resample_flux(wave, flux, new_wave, unit=u.Angstrom):
@@ -279,7 +280,9 @@ def bandpass(wave, flux, continuum_scale_kms, noise_scale_kms, order=1):
     fractional span: ~2% over 100 Angstrom at 5000 Angstrom, but ~30% at the
     ends of a 3800-6900 Angstrom single-order spectrum). The filter runs
     forward and backward (zero phase), which squares its response (1/2 at each
-    cut), on the flux minus its 80th percentile, and the result is
+    cut), after removing the order's straight-line trend, with Gustafsson's
+    (1996) initial conditions so that the order's ends are filtered as
+    cleanly as its middle (no taper is needed), and the result is
     standardized (``unicor.dsp.standardize``). The grid step is taken from the
     first two wavelengths.
 
@@ -312,6 +315,44 @@ def bandpass(wave, flux, continuum_scale_kms, noise_scale_kms, order=1):
         spaced, ``noise_scale_kms`` spans two grid steps or fewer, or
         ``continuum_scale_kms`` does not exceed it.
     '''
+    w = np.asarray(wave, float)
+    b, a = _bandpass_coefficients(w, continuum_scale_kms, noise_scale_kms, order)
+    # Remove the order's straight-line trend, then filter with Gustafsson's
+    # initial conditions (method='gust'): each pass starts from the state the
+    # data themselves imply, so the ends are filtered as cleanly as the middle.
+    # The default short padding started the filter on guessed edge values and
+    # spoiled ~continuum_scale/(2 pi) at each end, which a wide taper used to
+    # hide (biasing the CCF); Gustafsson alone would keep a straight continuum
+    # slope as if it were signal, hence the line removal first.
+    s = np.asarray(flux, float)
+    t = np.linspace(-1.0, 1.0, s.size)
+    s = s - np.polyval(np.polyfit(t, s, 1), t)
+    s = signal.filtfilt(b, a, s, method='gust')
+    return dsp.standardize(s)
+
+
+def _bandpass_coefficients(wave, continuum_scale_kms, noise_scale_kms, order=1):
+    """The Butterworth band-pass of ``bandpass`` for one evenly spaced order.
+
+    Parameters
+    ----------
+    wave : ndarray
+        1-D evenly spaced wavelengths (Angstrom).
+    continuum_scale_kms, noise_scale_kms : float or astropy.units.Quantity
+        The band edges as velocity periods (km/s if plain numbers).
+    order : int
+        Order of the Butterworth filter.
+
+    Returns
+    -------
+    b, a : ndarray
+        The filter's numerator and denominator coefficients.
+
+    Raises
+    ------
+    ValueError
+        See ``bandpass``.
+    """
     scales = {}
     for name, scale in (('continuum_scale_kms', continuum_scale_kms),
                         ('noise_scale_kms', noise_scale_kms)):
@@ -321,7 +362,6 @@ def bandpass(wave, flux, continuum_scale_kms, noise_scale_kms, order=1):
         scales[name] = scale
     continuum_scale_kms, noise_scale_kms = scales['continuum_scale_kms'], scales['noise_scale_kms']
     w = np.asarray(wave, float)
-    s = np.asarray(flux, float)
     step = np.abs(w[1]-w[0])                                  # Angstrom
     if not np.allclose(np.diff(w), w[1]-w[0], rtol=1e-6, atol=0):
         raise ValueError("bandpass needs an evenly spaced wavelength grid (its Nyquist "
@@ -340,13 +380,49 @@ def bandpass(wave, flux, continuum_scale_kms, noise_scale_kms, order=1):
     if not low < high:
         raise ValueError(f"continuum_scale_kms={continuum_scale_kms} km/s must exceed "
                          f"noise_scale_kms={noise_scale_kms} km/s")
+    return signal.butter(order, [low, high], btype='band')
 
-    b, a = signal.butter(order, [low, high], btype='band')
 
-    # Subtract a continuum-like level (the 80th percentile) so the filter's
-    # edge transients start near zero.
-    s = signal.filtfilt(b, a, s-np.percentile(s, 80), padlen=10*max(len(b), len(a)))
-    return dsp.standardize(s)
+def filtered_noise_fraction(wave, continuum_scale_kms, noise_scale_kms, native_step_kms,
+                            order=1):
+    """The fraction of white native-pixel noise power that ``bandpass`` keeps.
+
+    The band-pass removes most of the high-frequency noise, so a filtered
+    spectrum looks cleaner than it is, and an error bar that counts every
+    native pixel as independent comes out too small (~0.6-0.7x the scatter on
+    simulated HARPS and NRES spectra). Counting only this fraction of the
+    native bins (``unicor.ccf_order(..., noise_fraction=)``) corrects it, but
+    approximately: it ignores the part of the lines' own signal the filter
+    removes, so the errors then err high (~1.25-1.4x). An exact error model
+    for filtered spectra is an open item (docs/roadmap.md).
+
+    It is the mean of the zero-phase filter's power response, |H|^4 (the
+    filter runs forward and backward), over the frequencies the native pixels
+    sample: up to the native Nyquist frequency, which on an analysis grid
+    finer than the native one is below the grid's.
+
+    Parameters
+    ----------
+    wave : ndarray
+        1-D evenly spaced wavelengths of the filtered order (Angstrom).
+    continuum_scale_kms, noise_scale_kms : float or astropy.units.Quantity
+        The band edges as velocity periods (km/s), as given to ``bandpass``.
+    native_step_kms : float
+        The order's native sampling step (km/s), the coarsest it has had.
+    order : int
+        Order of the Butterworth filter.
+
+    Returns
+    -------
+    float
+        The kept fraction of the noise power, in (0, 1].
+    """
+    w = np.asarray(wave, float)
+    b, a = _bandpass_coefficients(w, continuum_scale_kms, noise_scale_kms, order)
+    pixel_kms = dsp.C_KMS * np.abs(w[1] - w[0]) / np.median(w)
+    native_band = min(1.0, pixel_kms / native_step_kms)       # fraction of the grid's Nyquist
+    freq, response = signal.freqz(b, a, worN=np.linspace(0.0, native_band * np.pi, 4096))
+    return float(np.mean(np.abs(response) ** 4))
 
 
 def resampling_noise_psd(n, dv_native, dv, phases=None, n_phase=32):

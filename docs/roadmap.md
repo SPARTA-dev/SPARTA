@@ -6,6 +6,18 @@
 
 ## Radial velocities
 
+- **An exact error model for filtered spectra (open issue, 2026-10-15)** —
+  after the band-pass, UNICOR counts only the share of native noise the
+  filter kept (`filtered_noise_fraction`), which turns errors that were
+  0.6–0.7× the scatter into 1.25–1.4× on simulated HARPS- and NRES-like
+  spectra. The remaining excess is the share of the lines' own signal the
+  filter removes (the noise cut sits at ~1.6× the line FWHM), which this
+  correction ignores; on the real HARPS TOI-193 RVs template mismatch adds to
+  it (quoted 46 m/s for a 14 m/s scatter). Derive the error of a CCF of
+  filtered spectra from the filter's response to both signal and noise, test
+  it by Monte Carlo across instruments and noise cuts, and extend it to
+  TODCOR.
+
 - **TIRAVEL velocity optimiser** — maximise the alignment measure ρ over the
   epochs' velocities, the half of Zucker & Mazeh (2006) that is still missing;
   today ρ is only evaluated at supplied velocities. The plan and what it

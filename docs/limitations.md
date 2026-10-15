@@ -86,8 +86,11 @@ The calibration of UNICOR's and TODCOR's errors is summarised in
 [conventions.md](conventions.md#when-are-the-error-bars-calibrated). In short:
 
 - calibrated for white noise on the native pixels of an unfiltered spectrum;
-- conservative after `preprocess`: UNICOR eRV/scatter 1.17–1.38 depending on
-  the noise cut (`noise_scale_kms`), TODCOR ~1.4×;
+- after `preprocess`, UNICOR's errors count only the noise the band-pass
+  kept, an approximate correction that errs high: eRV/scatter 1.25–1.4 on
+  simulated spectra, and ~3 on the real HARPS TOI-193 RVs, where template
+  mismatch adds to it; an exact error model for filtered spectra is open
+  ([roadmap](roadmap.md)); TODCOR ~1.4× (to be re-measured);
 - conservative under photon noise: UNICOR scatter/eRV ≈ 0.89 (~10%);
 - conservative with template mismatch, which is counted as noise;
 - TODCOR: conservative on analysis grids coarser than native whose nodes fall
@@ -151,10 +154,9 @@ The calibration of UNICOR's and TODCOR's errors is summarised in
 - **The band-pass cuts are converted at each order's median wavelength**, so
   on a very wide single order (a whole 3800–6900 Å 1-D spectrum) they are off
   by up to ~30% at its ends; use a window (`window_A`) or echelle orders.
-- **Trimming and the taper are set in pixels.** The band-pass cuts are
-  velocity scales, but `n_trim` and the taper length (`alpha`, a fraction of
-  the order) are not, so on a template with finer pixels or wider orders they
-  cut a different stretch of spectrum.
+- **Trimming is set in pixels.** The band-pass cuts are velocity scales, but
+  `n_trim` is not, so on a template with finer pixels it cuts a different
+  stretch of spectrum.
 - **`Template.integrate_spec`** bins only the first order, drops the trailing
   pixels and the last complete group, and sums (rather than averages) each
   group.

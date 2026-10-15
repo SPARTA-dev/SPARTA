@@ -121,7 +121,7 @@ def _record_unicor(directory):
     obs = Observations(survey="NRES", target_visits_lib=str(directory))
     obs.select_orders([10 + i for i in np.arange(40)], remove=False)
     obs.preprocess(n_trim=100, clean_margins=True, remove_nans=True, delta=0.5,
-                   cosmic_sigma=3, continuum_scale_kms=1400.0, noise_scale_kms=9.6, alpha=0.3)
+                   cosmic_sigma=3, continuum_scale_kms=1400.0, noise_scale_kms=9.6)
     # The template covers every selected order (4560-7600 A) with margin.
     template = Template.from_phoenix(5800, 3.5, 0.5, 0.0, wave_range=(4500, 7700),
                                      air=False, allow_download=False)
@@ -131,8 +131,7 @@ def _record_unicor(directory):
     template.broaden_instrumental(resolution=53000)
     template.cut_multiorder_like(obs.spec_list[0], margins=150)
     template.model.preprocess(n_trim=10, clean_margins=False, remove_nans=False, delta=1,
-                              cosmic_sigma=3, continuum_scale_kms=1400.0, noise_scale_kms=9.6,
-                              alpha=0.3)
+                              cosmic_sigma=3, continuum_scale_kms=1400.0, noise_scale_kms=9.6)
     obs.calc_rv_against_template(template, dv=0.05, vel_bound=[-50, 100], errors_per_order=False,
                                  combine_ccfs=True)
     return {os.path.basename(p): {"rv": float(v), "erv": float(e)}

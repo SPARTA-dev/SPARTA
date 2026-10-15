@@ -31,7 +31,8 @@ _PATH = os.pathsep.join(str(ROOT / p) for p in ("src", "packages/unicor/src",
 ALL = ["Spectrum", "Template", "Observations", "TimeSeries", "CCF1d", "CCF2d",
        "TIRAVEL", "PeriodicityDetector", "instruments", "plotting",
        "resample_flux", "trim_margins", "resample_to_linear_grid", "resample_to_log_grid",
-       "coarsest_native_step", "remove_cosmics", "bandpass", "resampling_noise_psd",
+       "coarsest_native_step", "remove_cosmics", "bandpass", "filtered_noise_fraction",
+       "resampling_noise_psd",
        "native_phases", "phoenix_spectrum",
        "rest_frame_wavelengths", "common_grid", "align_spectra", "normalize_rows",
        "correlation_matrix", "alignment", "coadd", "TiravelResult", "build_tiravel",
@@ -55,7 +56,7 @@ TOP_LEVEL = {
     **{n: f"function sparta.preprocess.{n}"
        for n in ("resample_flux", "trim_margins", "resample_to_linear_grid",
                  "resample_to_log_grid", "coarsest_native_step", "remove_cosmics", "bandpass",
-                 "resampling_noise_psd", "native_phases")},
+                 "filtered_noise_fraction", "resampling_noise_psd", "native_phases")},
     "phoenix_spectrum": "function sparta.template.phoenix_spectrum",
     **{n: f"function sparta.tiravel_ops.{n}"
        for n in ("rest_frame_wavelengths", "common_grid", "align_spectra", "normalize_rows",
@@ -73,7 +74,8 @@ TOP_LEVEL = {
 # resolve there (existence, not an exhaustive list).
 DEEP = {
     "sparta.spectrum": ["Spectrum", "resample_flux"],
-    "sparta.preprocess": ["bandpass", "coarsest_native_step", "native_phases",
+    "sparta.preprocess": ["bandpass", "coarsest_native_step", "filtered_noise_fraction",
+                          "native_phases",
                           "remove_cosmics", "resample_flux", "resample_to_linear_grid",
                           "resample_to_log_grid", "resampling_noise_psd", "trim_margins"],
     "sparta.template": ["Template", "phoenix_spectrum"],
@@ -106,7 +108,6 @@ DEEP = {
 # class -> public method -> its parameter names (without self/cls).
 METHODS = {
     "Spectrum": {
-        "apply_cosine_bell": ["alpha"],
         "barycentric_correction": [],
         "filter_spectrum": ["continuum_scale_kms", "noise_scale_kms", "order"],
         "from_spectrum1d": ["spectra", "bjd", "bcv", "name"],
@@ -114,7 +115,7 @@ METHODS = {
         "native_steps": [],
         "orders": "property",
         "preprocess": ["n_trim", "clean_margins", "remove_nans", "delta", "cosmic_sigma",
-                       "continuum_scale_kms", "noise_scale_kms", "alpha"],
+                       "continuum_scale_kms", "noise_scale_kms"],
         "remove_cosmics": ["sigma_upper"],
         "select_orders": ["orders", "remove"],
         "trim": ["n_trim", "n_trim_left", "n_trim_right", "clean_margins", "remove_nans",
@@ -168,7 +169,7 @@ METHODS = {
         "clean_time_series": ["max_vel", "min_vel", "max_time", "nan_flag", "sample_rate"],
         "init_periodicity_detector": ["freq_range", "periodogram_grid_resolution"],
         "preprocess": ["n_trim", "clean_margins", "remove_nans", "delta", "cosmic_sigma",
-                       "continuum_scale_kms", "noise_scale_kms", "alpha", "progress"],
+                       "continuum_scale_kms", "noise_scale_kms", "progress"],
         "select_orders": ["orders", "remove"],
     },
     "TimeSeries": {

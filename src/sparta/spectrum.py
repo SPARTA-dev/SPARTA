@@ -19,8 +19,8 @@ from astropy import constants as consts, units as u
 from unicor import dsp
 
 from sparta.preprocess import (
-    bandpass, coarsest_native_step, remove_cosmics, resample_flux, resample_to_linear_grid,
-    resample_to_log_grid, trim_margins,
+    bandpass, coarsest_native_step, filtered_noise_fraction, remove_cosmics, resample_flux,
+    resample_to_linear_grid, resample_to_log_grid, trim_margins,
 )
 
 
@@ -230,14 +230,14 @@ class Spectrum:
 # =============================================================================
     def preprocess(self, n_trim=10, clean_margins=True, remove_nans=True,
                    delta=0.5, cosmic_sigma=3, continuum_scale_kms=2000.0,
-                   noise_scale_kms=4.0, alpha=0.3):
+                   noise_scale_kms=4.0):
         '''
         Apply the standard preprocessing chain, in place.
 
         In the recommended order: ``trim``, a linear-wavelength
-        ``interpolate``, ``remove_cosmics``, ``filter_spectrum``
-        (first-order Butterworth band-pass) and ``apply_cosine_bell``. The
-        filter standardizes each order (zero mean, unit variance), so the
+        ``interpolate``, ``remove_cosmics`` and ``filter_spectrum``
+        (first-order Butterworth band-pass). No step tapers the ends: a fade
+        biases the CCF and inflates its error bars. The filter standardizes each order (zero mean, unit variance), so the
         flux is no longer continuum-normalized, and the error estimates of
         UNICOR and TODCOR are no longer calibrated afterwards (see
         ``CCF1d.cross_correlate``).
@@ -255,8 +255,6 @@ class Spectrum:
             The band-pass edges as velocity periods (km/s; see
             ``filter_spectrum``). The defaults, 2000 and 4 km/s, are the
             recommendation for HARPS (R = 120,000).
-        alpha : float
-            Tukey shape parameter (see ``apply_cosine_bell``).
 
         Returns
         -------
@@ -269,7 +267,6 @@ class Spectrum:
         self.remove_cosmics(sigma_upper=cosmic_sigma)
         self.filter_spectrum(continuum_scale_kms=continuum_scale_kms,
                              noise_scale_kms=noise_scale_kms, order=1)
-        self.apply_cosine_bell(alpha=alpha)
 
         return self
 
@@ -463,36 +460,22 @@ class Spectrum:
         Returns
         -------
         Spectrum
-            self, with ``sp`` filtered.
+            self, with ``sp`` filtered and ``Info['NoiseFraction']`` the share
+            of white native noise power each order kept
+            (``sparta.preprocess.filtered_noise_fraction``), which CCF1d's
+            error bars count.
         '''
+        natives = self.native_steps()
         spF = [bandpass(w, s, continuum_scale_kms, noise_scale_kms, order=order)
                for w, s in zip(self.wv, self.sp)]
         self.sp = spF
+        # The noise power the filter kept, per order: UNICOR counts only that
+        # share of the native bins when it computes the error bars.
+        self.Info['NoiseFraction'] = [
+            filtered_noise_fraction(w, continuum_scale_kms, noise_scale_kms, n, order=order)
+            for w, n in zip(self.wv, natives)]
         return self
 
-    # =============================================================================
-    # =============================================================================
-    def apply_cosine_bell(self, alpha=0.1):
-        '''
-        Multiply every order by a cosine bell (Tukey window), in place.
-
-        The taper brings the order's ends to zero, so it suits a filtered
-        (zero-mean) spectrum.
-
-        Parameters
-        ----------
-        alpha : float
-            Shape parameter of the Tukey window: the tapered fraction of the
-            order (0 = no taper, 1 = Hann window).
-
-        Returns
-        -------
-        Spectrum
-            self, with ``sp`` tapered.
-        '''
-        spC = [s * dsp.tukey_window(len(w), alpha) for w, s in zip(self.wv, self.sp)]
-        self.sp = spC
-        return self
 
 # =============================================================================
 # =============================================================================

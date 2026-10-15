@@ -465,3 +465,28 @@ def test_an_unknown_output_mode_is_refused(template, bad):
     obs = Spectrum(wv=[WAVE.copy()], sp=[_line(5500.0)], name="o")
     with pytest.raises(ValueError, match="output"):
         CCF1d().cross_correlate(obs, template, dv=0.5, vel_bound=20, output=bad)
+
+
+def test_preprocessed_error_bars_are_conservative_and_unbiased():
+    # After the band-pass the quoted errors count only the noise the filter
+    # keeps (Info['NoiseFraction']). That correction is approximate and errs
+    # high: on simulated HARPS-like spectra the quoted error is 1.25x the RV
+    # scatter (0.6x without it, which would understate the errors).
+    from sparta import Observations, Template, instruments
+    from sparta.instruments import Simulation
+    times = np.linspace(0, 30, 40)
+    rv = 12.0 + 25.0 * np.sin(2 * np.pi * times / 4.3)
+    sim = Simulation(like="HARPS", components=[dict(teff=5800, logg=3.5, feh=0.5)], times=times,
+                     rv_kms=rv, windows_A=[(4990.0, 5090.0)], snr=80, seed=3, as_product=True)
+    obs = Observations(survey="SIMULATED", simulation=sim)
+    pp = instruments.get("HARPS").recommended.preprocess
+    obs.preprocess(**pp)
+    t = Template.from_phoenix(5800, 3.5, 0.5, wave_range=(4950, 5130), air=True)
+    t.broaden_instrumental(resolution=120000)
+    t.cut_multiorder_like(obs.spec_list[0], margins=150)
+    t.model.preprocess(**pp)
+    obs.calc_rv_against_template(t, dv=0.1, vel_bound=100)
+    residual = obs.vels - obs.truth.rv_kms[:, 0]
+    ratio = np.median(obs.evels) / np.std(residual)
+    assert 1.0 < ratio < 1.7
+    assert abs(np.mean(residual)) < 3 * np.std(residual) / np.sqrt(residual.size)

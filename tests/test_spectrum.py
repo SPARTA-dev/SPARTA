@@ -26,10 +26,8 @@ def test_select_orders_remove():
     assert len(sp.wv) == 2 and len(sp.sp) == 2  # orders 0 and 2 kept
 
 
-def test_cosine_bell_and_cosmics_run():
+def test_cosmics_run():
     sp = _three_order_spec()
-    sp.apply_cosine_bell(alpha=0.3)              # signal.windows.tukey
-    assert len(sp.sp) == 3
     sp.remove_cosmics(sigma_upper=3)            # sigma_clip(sigma_lower=np.inf)
     assert len(sp.sp) == 3
 

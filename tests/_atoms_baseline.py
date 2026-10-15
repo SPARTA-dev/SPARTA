@@ -6,7 +6,7 @@ sum beside it so a failure says roughly how far it moved:
 
 * ``spectrum.*``: the Spectrum after each preprocessing step -- trim (with and
   without margins), interpolate (linear and log, units, chained, seeded native
-  step), remove_cosmics, filter_spectrum, apply_cosine_bell and the full
+  step), remove_cosmics, filter_spectrum and the full
   preprocess -- with ``native_steps()`` after each;
 * ``nres.*``, ``harps.*``, ``sim.*``: the bundled files and a simulated
   archive product, through the readers, ``Observations`` ingestion (the
@@ -204,15 +204,11 @@ def _record_spectrum(out):
     _spectrum_cases(out, "spectrum.filter.o2",
                     fresh(clean).filter_spectrum(continuum_scale_kms=900.0, noise_scale_kms=4.0,
                                                  order=2))
-    _spectrum_cases(out, "spectrum.bell.0.3", fresh(filtered).apply_cosine_bell(alpha=0.3))
-    _spectrum_cases(out, "spectrum.bell.default", fresh(filtered).apply_cosine_bell())
-    _spectrum_cases(out, "spectrum.bell.raw_0.5", fresh(linear).apply_cosine_bell(alpha=0.5))
 
     _spectrum_cases(out, "spectrum.preprocess.default", fresh().preprocess())
     _spectrum_cases(out, "spectrum.preprocess.custom",
                     fresh().preprocess(n_trim=20, clean_margins=False, delta=1.2,
-                                       cosmic_sigma=4, continuum_scale_kms=700.0, noise_scale_kms=9.5,
-                                       alpha=0.2))
+                                       cosmic_sigma=4, continuum_scale_kms=700.0, noise_scale_kms=9.5))
     _spectrum_cases(out, "spectrum.preprocess.then_log",
                     fresh().preprocess().interpolate(delta=0.5, method="log"))
     _spectrum_cases(out, "spectrum.barycentric", fresh(trimmed).barycentric_correction())

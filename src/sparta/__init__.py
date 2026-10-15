@@ -78,6 +78,7 @@ _LAZY_EXPORTS = {
     "coarsest_native_step": "sparta.preprocess",
     "remove_cosmics": "sparta.preprocess",
     "bandpass": "sparta.preprocess",
+    "filtered_noise_fraction": "sparta.preprocess",
     "resampling_noise_psd": "sparta.preprocess",
     "native_phases": "sparta.preprocess",
     "phoenix_spectrum": "sparta.template",

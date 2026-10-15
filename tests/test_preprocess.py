@@ -26,8 +26,8 @@ from sparta import template as template_module
 from sparta.instruments import Simulation
 from sparta.observations import Observations
 from sparta.preprocess import (
-    bandpass, coarsest_native_step, remove_cosmics, resample_flux, resample_to_linear_grid,
-    resample_to_log_grid, trim_margins,
+    bandpass, coarsest_native_step, filtered_noise_fraction, remove_cosmics, resample_flux,
+    resample_to_linear_grid, resample_to_log_grid, trim_margins,
 )
 from sparta.spectrum import Spectrum
 from sparta.template import Template
@@ -208,12 +208,28 @@ def test_bandpass_standardizes_and_removes_the_slow_trend():
     assert np.corrcoef(out, lines_only)[0, 1] > 0.95
 
 
-def test_the_taper_is_unicors_tukey_window_bit_for_bit():
-    flux = np.random.default_rng(2).normal(size=1001)
-    for alpha in (0.0, 0.1, 0.3, 1.0):
-        window = dsp.tukey_window(flux.size, alpha)
-        np.testing.assert_array_equal(window, signal.windows.tukey(flux.size, alpha))
-        np.testing.assert_array_equal(flux * window, np.multiply(flux, window))
+def test_the_filter_edges_match_the_same_spectrum_filtered_inside_a_longer_one():
+    # An order filtered on its own must agree, right up to its ends, with the
+    # same stretch filtered as part of a longer spectrum, where those pixels
+    # are far from any edge. With 30 padding pixels the filter started up on
+    # badly guessed edge values and spoiled ~300 km/s at each end (the taper
+    # used to hide it); Gustafsson's initial conditions remove that.
+    rng = np.random.default_rng(5)
+    centres, depths = rng.uniform(4800.0, 5300.0, 600), rng.uniform(0.1, 0.6, 600)
+
+    def spectrum(wave):
+        lines = np.sum(depths * np.exp(-0.5 * ((wave[:, None] - centres) / 0.05) ** 2), axis=1)
+        return (1.0 + 0.3 * (wave - 5050.0) / 250.0) * (1.0 - lines)
+
+    step = 0.01
+    long_wave = np.arange(4800.0, 5300.0, step)
+    order = (long_wave >= 5000.0) & (long_wave < 5100.0)
+    kw = dict(continuum_scale_kms=2000.0, noise_scale_kms=4.0)
+    alone = bandpass(long_wave[order], spectrum(long_wave[order]), **kw)
+    inside = bandpass(long_wave, spectrum(long_wave), **kw)[order]
+    edge = int(round(300.0 / (C_KMS * step / 5050.0)))                # 300 km/s of pixels
+    for part in (slice(0, edge), slice(-edge, None)):
+        assert np.corrcoef(alone[part], inside[part])[0, 1] > 0.999
 
 
 # =============================================================================
@@ -253,13 +269,13 @@ def test_spectrum_methods_call_each_atom_once_per_order(monkeypatch, method, kwa
     assert {name: len(c) for name, c in calls.items()} == {name: 3 for name in atoms}
 
 
-@pytest.mark.parametrize("method, kwargs", [("apply_cosine_bell", dict(alpha=0.3)),
-                                            ("preprocess", {})])
-def test_the_taper_is_one_tukey_window_per_order(monkeypatch, method, kwargs):
-    spec = _raw_spectrum()
-    calls = _spy(monkeypatch, spectrum_module.dsp, "tukey_window")
-    getattr(spec, method)(**kwargs)
-    assert [c[0] for c in calls] == [len(w) for w in spec.wv]
+def test_preprocess_does_not_fade_the_ends():
+    # No taper: a Tukey window forces the first and last pixel of every order
+    # to exactly 0; preprocess leaves them as the filter made them.
+    spec = _raw_spectrum().preprocess()
+    for s in spec.sp:
+        assert abs(s[0]) > 1e-3 and abs(s[-1]) > 1e-3
+    assert not hasattr(spec, "apply_cosine_bell")
 
 
 def test_ingest_and_integrate_spec_use_coarsest_native_step(monkeypatch):
@@ -295,7 +311,6 @@ def test_atoms_rebuild_the_full_preprocess_chain_exactly():
         native = coarsest_native_step(native, w)
         s = remove_cosmics(w, s, sigma_upper=3)
         s = bandpass(w, s, continuum_scale_kms=2000.0, noise_scale_kms=4.0, order=1)
-        s = s * dsp.tukey_window(len(s), 0.3)
         assert np.array_equal(w, obj.wv[I])
         assert np.array_equal(s, obj.sp[I])
         assert native == obj.native_steps()[I]
@@ -398,3 +413,44 @@ def test_bandpass_refuses_an_uneven_grid():
     wave = dsp.log_lambda_grid(5000.0, 5200.0, 0.5)[0]
     with pytest.raises(ValueError, match="evenly spaced"):
         bandpass(wave, 1.0 + 0.0 * wave, continuum_scale_kms=2000.0, noise_scale_kms=4.0)
+
+
+# --- the noise the band-pass keeps: the error bars of filtered spectra -------
+
+@pytest.mark.parametrize("noise_scale_kms", [4.0, 10.0])
+def test_filtered_noise_fraction_is_the_variance_the_filter_leaves_of_white_noise(noise_scale_kms):
+    # On a grid at the native sampling, white noise filtered exactly as
+    # bandpass does keeps this fraction of its variance.
+    from scipy import signal
+    from sparta.preprocess import _bandpass_coefficients
+    wave = 5000.0 * np.exp(np.arange(200_000) * 0.6 / C_KMS)            # 0.6 km/s pixels
+    wave = np.linspace(wave[0], wave[-1], wave.size)                    # evenly spaced, as bandpass needs
+    b, a = _bandpass_coefficients(wave, 2000.0, noise_scale_kms)
+    x = np.random.default_rng(0).standard_normal(wave.size)
+    kept = np.var(signal.filtfilt(b, a, x, method="gust")) / np.var(x)
+    fraction = filtered_noise_fraction(wave, 2000.0, noise_scale_kms, native_step_kms=0.6)
+    assert fraction == pytest.approx(kept, rel=0.03)
+    assert 0.0 < fraction < 1.0
+
+
+def test_filtered_noise_fraction_counts_only_the_native_band():
+    # The same physical filter keeps the same share of the native noise on a
+    # grid at the native sampling and on one 4x finer: the finer grid's extra
+    # frequencies hold no native noise.
+    native = 0.6                                                        # km/s
+    step = native / C_KMS * 5050.0                                      # Angstrom
+    coarse = np.arange(5000.0, 5100.0, step)
+    fine = np.arange(5000.0, 5100.0, step / 4)
+    on_native = filtered_noise_fraction(coarse, 2000.0, 4.0, native)
+    on_fine = filtered_noise_fraction(fine, 2000.0, 4.0, native)
+    # A digital filter's response is warped near its own Nyquist frequency,
+    # differently on the two grids: 3% here, 1.5% in an error bar.
+    assert on_fine == pytest.approx(on_native, rel=0.05)
+
+
+def test_filter_spectrum_records_the_noise_fraction_of_each_order():
+    spec = _raw_spectrum().trim(clean_margins=True).interpolate()
+    natives = spec.native_steps()
+    spec.filter_spectrum(continuum_scale_kms=2000.0, noise_scale_kms=4.0, order=1)
+    expected = [filtered_noise_fraction(w, 2000.0, 4.0, n) for w, n in zip(spec.wv, natives)]
+    assert spec.Info["NoiseFraction"] == pytest.approx(expected, rel=1e-12)
