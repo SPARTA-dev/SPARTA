@@ -209,7 +209,7 @@ Band-pass filter every order with a Butterworth filter, in place.
 
 **Returns**
 
-- *Spectrum*: self, with `sp` filtered and `Info['NoiseFraction']` the share of white native noise power each order kept (`sparta.preprocess.filtered_noise_fraction`), which CCF1d's error bars count.
+- *Spectrum*: self, with `sp` filtered and `Info['NoiseFraction']` the share of white native noise power each order kept (`sparta.preprocess.filtered_noise_fraction`), which the error bars of CCF1d and CCF2d count.
 
 ##### `Spectrum.remove_cosmics`
 

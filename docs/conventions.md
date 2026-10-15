@@ -167,11 +167,39 @@ share f of white native-pixel noise power the filter keeps
 - The cuts are converted to frequencies at the order's median wavelength (a
   period of v km/s spans λv/c Å).
 
-At the recommended settings f = 0.234 (HARPS) and 0.227 (NRES), almost all
-set by the noise cut: the noise cut alone gives 0.234 / 0.229, the continuum
-cut alone 0.999 / 0.995. f assumes white noise on the native pixels and that
-resampling leaves the noise spectrum unchanged below ν_native (the spline's
-slight high-frequency loss is ignored).
+**In practice.** f is what filtering pure noise would show: white noise on a
+HARPS-like order's native pixels keeps 0.228 of its variance through the
+filter (200 draws), against f = 0.229 from the formula. Think of the noise as
+wiggles of every period, from two native pixels (1.218 km/s for HARPS) up to
+the whole order, each frequency carrying the same share of the power. The
+filter keeps this share of each wiggle's power (HARPS, cuts 2000 / 4 km/s):
+
+| period (km/s) | 2000 | 500 | 50 | 20 | 10 | 6 | 4 | 3 | 2 | 1.218 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| \|H\|⁴ | 0.25 | 0.89 | 0.99 | 0.93 | 0.75 | 0.49 | 0.25 | 0.13 | 0.03 | 0.003 |
+
+and f is its average taken evenly in *frequency*. Most frequencies are short
+periods (between the 4 km/s cut and 1.218 km/s lies 70% of the range), where
+the filter keeps almost nothing; so f = 0.234 (HARPS) and 0.227 (NRES) at the
+recommended settings, almost all set by the noise cut: the noise cut alone
+gives 0.234 / 0.229, the continuum cut alone 0.999 / 0.995.
+
+**Computed, not measured.** `bandpass` rescales every order to unit variance
+afterwards, so the filtered spectrum no longer shows how much noise was
+removed; `filter_spectrum` computes f from the filter instead, per order of
+each spectrum, from that order's wavelengths (median λ and grid step), its
+native step (`native_steps()`) and the two cuts. There is no table per
+instrument: the instrument enters through its native step and recommended
+cuts, and f follows mostly the ratio of the noise cut to the native step. On
+the bundled NRES spectra f runs 0.228–0.249 over the 67 orders (native steps
+1.43–1.57 km/s against the fixed 9.6 km/s cut), and one order's f differs by
+up to 0.013 between epochs (each epoch is trimmed separately); the errors
+scale as 1/√f, so by a few per cent at most. Each f costs ~0.7 ms (4096
+frequencies, independent of the order's length).
+
+f assumes white noise on the native pixels and that resampling leaves the
+noise spectrum unchanged below ν_native (the spline's slight high-frequency
+loss is ignored).
 
 f is about noise only, so the correction is approximate. The velocity
 information sits in the line slopes, which the filter mostly keeps; most of

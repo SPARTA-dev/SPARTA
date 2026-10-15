@@ -462,15 +462,16 @@ class Spectrum:
         Spectrum
             self, with ``sp`` filtered and ``Info['NoiseFraction']`` the share
             of white native noise power each order kept
-            (``sparta.preprocess.filtered_noise_fraction``), which CCF1d's
-            error bars count.
+            (``sparta.preprocess.filtered_noise_fraction``), which the error
+            bars of CCF1d and CCF2d count.
         '''
         natives = self.native_steps()
         spF = [bandpass(w, s, continuum_scale_kms, noise_scale_kms, order=order)
                for w, s in zip(self.wv, self.sp)]
         self.sp = spF
-        # The noise power the filter kept, per order: UNICOR counts only that
-        # share of the native bins when it computes the error bars.
+        # The noise power the filter kept, per order: computed from the filter,
+        # since bandpass rescales its output; CCF1d and CCF2d count only that
+        # share of the native pixels in their error bars.
         self.Info['NoiseFraction'] = [
             filtered_noise_fraction(w, continuum_scale_kms, noise_scale_kms, n, order=order)
             for w, n in zip(self.wv, natives)]
