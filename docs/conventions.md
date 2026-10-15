@@ -101,7 +101,7 @@ document it). The rules:
   vacuum otherwise (`Simulation.wavelength_frame`).
 - Match the template to the data. A frame mismatch shifts every RV by
   roughly 80 km/s in the optical (83.58 km/s for the bundled HARPS TOI-193
-  spectra, [notebook 04](../examples/04_template_from_data_tiravel.ipynb)).
+  spectra, [tutorial 05](../examples/tutorials/05_tiravel.ipynb)).
   Relative RVs are unaffected, absolute ones are wrong.
 - `Observations` refuses a directory whose visits disagree on
   `(time_system, wavelength_frame)`.
@@ -184,7 +184,7 @@ Why this order:
   continuum-1 spectrum would itself create features at the order ends.
 
 Pass the template through the same `preprocess` call as the data
-([notebook 02](../examples/02_radial_velocity_unicor.ipynb)). A preprocessed
+([tutorial 03](../examples/tutorials/03_unicor.ipynb)). A preprocessed
 spectrum is on a linear-λ grid, so the RV engines resample it once more, onto
 their ln λ grid. If it is already tapered, `CCF2d.cross_correlate(...,
 alpha=0)` skips TODCOR's own taper; its default `continuum='median'` is ≈ 0
@@ -220,7 +220,7 @@ So:
   TODCOR); under photon noise (UNICOR ~10%, because line cores are quieter
   than the white-noise formula assumes); with template mismatch, which both
   estimators count as noise (in
-  [notebook 07](../examples/07_usurper_concept.ipynb) the reported errors are
+  [tutorial 07](../examples/tutorials/07_usurper.ipynb) the reported errors are
   about three times the scatter for a star whose temperature changes); on
   TODCOR grids whose nodes fall between native pixels.
 - **Optimistic:** an archive-resampled product without a documented native

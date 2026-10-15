@@ -1,16 +1,16 @@
-# TODCOR deep dives
+# TODCOR in detail
 
 Three executed notebooks on TODCOR, the two-component (double-lined, SB2)
 velocity engine, the counterpart of UNICOR. They build the method up on plain
-arrays using only the standalone [`todcor`](../../packages/todcor) package.
+arrays using only the standalone [`todcor`](../../../packages/todcor) package.
 Everything is synthetic, so each notebook is self-contained (no external data),
 and every quantitative claim is a live numerical check.
 
 For TODCOR on SPARTA objects (`CCF2d` with `Spectrum` and `Template`, and a
 whole SB2 orbit through `Observations.calc_rv_against_two_templates`), start
-with [`../03_double_lined_todcor.ipynb`](../03_double_lined_todcor.ipynb).
+with tutorial [`04_todcor`](../../tutorials/04_todcor.ipynb).
 
-The canonical written spec is [`todcor_method.md`](../../packages/todcor/docs/todcor_method.md).
+The canonical written spec is [`todcor_method.md`](../../../packages/todcor/docs/todcor_method.md).
 
 1. **`01_method.ipynb`**: the method derived in the open: the log-λ shift
    theorem, the six **sufficient statistics** and the χ² quadratic form, the

@@ -142,12 +142,13 @@ survey keys are listed in
 
 ## Learn
 
-The tutorial series in
-[`examples/`](https://github.com/SPARTA-dev/SPARTA/blob/master/examples/README.md)
-starts from this quickstart and works through spectra and the log-λ grid,
-UNICOR, TODCOR, TIRAVEL and the periodograms, as numbered notebooks. The
-[`examples/todcor/`](https://github.com/SPARTA-dev/SPARTA/tree/master/examples/todcor)
-notebooks derive the TODCOR method step by step on plain arrays.
+The [`examples/`](https://github.com/SPARTA-dev/SPARTA/blob/master/examples/README.md)
+notebooks come in two kinds. The **how-tos** (`examples/howto/`) carry on
+from this quickstart: real NRES and HARPS data, a double-lined binary,
+TIRAVEL, the periodograms and simulated data, each a short recipe. The
+**tutorials** (`examples/tutorials/`) build every method from its atoms and
+show why it works: spectra and the log-λ grid, UNICOR, TODCOR, TIRAVEL and the
+periodograms.
 
 ## Conventions
 

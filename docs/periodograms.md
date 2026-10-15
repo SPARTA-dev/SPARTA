@@ -4,9 +4,9 @@
 It holds the series and the results; the distance-correlation math is a set of
 pure array functions in `sparta.pdc`. Times are in days and frequencies in
 1/day. The tutorials are
-[notebook 05](../examples/05_finding_periods.ipynb) (all the periodograms),
-[07](../examples/07_usurper_concept.ipynb) (USuRPER) and
-[08](../examples/08_partial_pdc_concept.ipynb) (the partial periodograms).
+[tutorial 06](../examples/tutorials/06_pdc.ipynb) (GLS, PDC and error-aware PDC),
+[07](../examples/tutorials/07_usurper.ipynb) (USuRPER) and
+[08](../examples/tutorials/08_partial_pdc.ipynb) (the partial periodograms).
 
 ## Setting up
 
@@ -85,7 +85,7 @@ $$\mathrm{PDC}(f) = \frac{\sum_{ij} A_{ij}B_{ij}}{\sqrt{\sum_{ij}A_{ij}^2\,\sum_
   `ValueError`**.
 
 A PDC-type periodogram also responds, weakly, at twice the true period: in
-notebook 08 the noiseless RVs of a 7.3-day planet give PDC 0.66 at P and 0.24
+tutorial 08 the noiseless RVs of a 7.3-day planet give PDC 0.66 at P and 0.24
 at 2P. Check P against 2P before believing a long period.
 
 ## Error-aware PDC (Binnenfeld, Shahaf & Zucker 2024)
@@ -103,7 +103,7 @@ x·erf(x) term: an energy-distance derivation suggests one, but the authors
 confirmed that the published form is the intended one, and a golden test pins
 it. In the limit of vanishing errors d_ij → (|y_i − y_j|/√2)^{1/2}, a monotone
 function of |y_i − y_j| but not |y_i − y_j| itself, so the error-aware PDC does
-not reduce exactly to the plain PDC. In notebook 05, with exponentially
+not reduce exactly to the plain PDC. In tutorial 06, with exponentially
 distributed error bars, it found the true period in 26 of 30 simulated data
 sets against 23 for the plain PDC.
 
@@ -122,7 +122,7 @@ themselves (`calc_usurper`, `spectral_distance_matrix`):
 No template and no RV enter, and a change of flux scale or offset moves
 nothing on the sphere, so USuRPER responds to any periodic change of the
 spectrum: Doppler shifts and line-shape changes alike
-([notebook 07](../examples/07_usurper_concept.ipynb): a moving star, a
+([tutorial 07](../examples/tutorials/07_usurper.ipynb): a moving star, a
 temperature change with no motion, an unresolved twin binary found at half its
 period). It needs **single-order** spectra (a multi-order spectrum raises;
 select one order with `Observations.select_orders`) that **overlap** in
@@ -161,11 +161,11 @@ control with the biased statistic raises). What it can and cannot tell:
   the U-centred control*. A pdCor of 0 is not conditional independence
   (Székely & Rizzo 2014), and a non-zero pdCor does not by itself prove a
   dependence beyond the control: part of an RV leak that follows the shape
-  can survive. In notebook 08's star with activity and no planet, the plain PDC
+  can survive. In tutorial 08's star with activity and no planet, the plain PDC
   of the RVs has 0.61 at the activity period and the shift periodogram still
   0.22 (local p = 2·10⁻³).
 - When the RVs are nothing but a leak of the shape change, the control also
-  removes part of the shape signal (notebook 08: 0.37 against 0.64 with a
+  removes part of the shape signal (tutorial 08: 0.37 against 0.64 with a
   planet present).
 - Signals at the same period cannot be separated, and a shape change outside
   the chosen order cannot be controlled for.
@@ -182,12 +182,12 @@ n the number of epochs; `inverse_sf=True` returns the power level of each
 p-value instead. This is a **local, single-frequency** p-value, not a
 false-alarm probability over the grid. Searching many frequencies needs a
 look-elsewhere correction; a rough factor is the number of independent
-frequencies, T·(f_max − f_min) (notebook 05).
+frequencies, T·(f_max − f_min) (tutorial 06).
 
 The approximation is derived for the distance correlation. SPARTA applies the
 same formula to USuRPER and to the partial periodograms (`plot_periodograms`
 draws the levels on those panels too), but it is **not established for the
-partial statistic**. Notebook 08 checks it by permuting the epochs' times at
+partial statistic**. Tutorial 08 checks it by permuting the epochs' times at
 one frequency: over 4000 permutations the p = 0.05 level was exceeded in 4.5%
 (shift) and 4.7% (shape) of them, and the p = 0.01 level in 0.43% and 0.60%.
 Treat partial p-values as a guide and confirm a candidate by a permutation

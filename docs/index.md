@@ -20,5 +20,9 @@
 - [roadmap.md](roadmap.md) — a proposed roadmap, for the maintainers to edit.
 
 The TODCOR derivation is in
-[packages/todcor/docs/todcor_method.md](../packages/todcor/docs/todcor_method.md);
-the tutorials are the notebooks in [examples/](../examples/README.md).
+[packages/todcor/docs/todcor_method.md](../packages/todcor/docs/todcor_method.md).
+
+These pages are the reference: each convention, formula and limitation is
+stated here once. The notebooks in [examples/](../examples/README.md) link to
+them: the how-tos (`examples/howto/`) are short recipes with the objects, and
+the tutorials (`examples/tutorials/`) build each method from the atoms.

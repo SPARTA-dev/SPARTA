@@ -24,14 +24,14 @@ with the details. Proposed fixes are collected in [roadmap.md](roadmap.md).
   spectra.
 - **Shape changes leak into the RVs.** A CCF peak moves when the line
   shapes change, not only when the star moves. In
-  [notebook 07](../examples/07_usurper_concept.ipynb) a star whose temperature
+  [tutorial 07](../examples/tutorials/07_usurper.ipynb) a star whose temperature
   swings with no motion at all shows an 11.4 m/s RV signal at the
-  temperature's period; in [notebook 08](../examples/08_partial_pdc_concept.ipynb)
+  temperature's period; in [tutorial 08](../examples/tutorials/08_partial_pdc.ipynb)
   the same leak (11.8 m/s) sits next to a 15 m/s planet. Use USuRPER and the
   partial periodograms to tell shifts from shapes
   ([periodograms.md](periodograms.md)).
 - **One template per spectrum.** A blended double-lined spectrum biases a
-  single-template CCF: −270 m/s on the primary of the notebook 03 binary when
+  single-template CCF: −270 m/s on the primary of the tutorial 04 binary when
   the two stars are 11 km/s apart. Use TODCOR.
 
 ## TODCOR
@@ -39,7 +39,7 @@ with the details. Proposed fixes are collected in [roadmap.md](roadmap.md).
 - **Bias on short, line-crowded windows.** The Fourier shift is circular: a
   line pushed past one end of a window re-enters at the other, and the taper
   only damps the ends. On noiseless simulated SB2 spectra
-  ([notebook 03](../examples/03_double_lined_todcor.ipynb)) the largest
+  ([tutorial 04](../examples/tutorials/04_todcor.ipynb)) the largest
   velocity bias was 15.6 m/s on a 50 Å window (`alpha=0.1`,
   `continuum='median'`) and 3.1 m/s on a 200 Å window (`alpha=0.3`,
   `continuum=1.0`); the test suite quotes ~10 m/s at |v| ≈ 45 km/s over 50 Å
@@ -51,7 +51,7 @@ with the details. Proposed fixes are collected in [roadmap.md](roadmap.md).
   ([todcor_method.md §7](../packages/todcor/docs/todcor_method.md)).
 - **`continuum='median'` biases the amplitudes.** The median of an
   absorption spectrum lies below its continuum. The test suite quotes the
-  amplitudes ~0.5% low; in notebook 03 (50 Å window) they came out 0.696 and
+  amplitudes ~0.5% low; in tutorial 04 (50 Å window) they came out 0.696 and
   0.297 for 0.7 and 0.3. For continuum-normalised spectra pass
   `continuum=1.0`; for filtered spectra the median (≈ 0) is right.
 - **Twin templates have no component labels.** With the same template for
@@ -76,7 +76,7 @@ with the details. Proposed fixes are collected in [roadmap.md](roadmap.md).
   measure ρ and builds the co-added template at the velocities you supply.
   The optimisation of ρ over the velocities, which is the rest of the method
   (Zucker & Mazeh 2006), is not implemented: bootstrap from RVs measured with
-  any reasonable template ([notebook 04](../examples/04_template_from_data_tiravel.ipynb)).
+  any reasonable template ([tutorial 05](../examples/tutorials/05_tiravel.ipynb)).
 - **Relative velocities.** Only velocity differences enter ρ; the template's
   rest frame inherits the zero point of the supplied velocities.
 
@@ -102,12 +102,12 @@ The calibration of UNICOR's and TODCOR's errors is summarised in
 - **p-values are local.** `calc_pdc_pval` gives a single-frequency p-value
   (Shen et al. 2019), not a false-alarm probability over the grid. For the
   partial periodograms the formula is borrowed from the distance correlation
-  and not established; a permutation check in notebook 08 held at one
+  and not established; a permutation check in tutorial 08 held at one
   frequency ([periodograms.md](periodograms.md#p-values)).
 - **A partial periodogram is not a conditional-independence test.** The
   control is removed only as far as it is linear in the U-centred distances,
   so part of an RV leak can survive (shift power 0.22 at the activity period
-  of notebook 08's planet-free active star, against 0.61 for the plain PDC); a
+  of tutorial 08's planet-free active star, against 0.61 for the plain PDC); a
   pdCor of 0 does not mean conditional independence, nor a non-zero one a
   dependence beyond the control. Signals at the same period cannot be
   separated.

@@ -153,7 +153,7 @@ come from ln L). Both maps are always stored (`Corr2d['R']`,
 `CCF2d.plot` draws it. R is the default because on a high-S/N spectrum ln L
 spans ~10⁵ across the map and hides everything but the peak, while R keeps
 the ridges where one template matches one star
-([notebook 03](../examples/03_double_lined_todcor.ipynb)). `logL_marginal`
+([tutorial 04](../examples/tutorials/04_todcor.ipynb)). `logL_marginal`
 (amplitudes marginalised under a flat prior; equal to `logL_profile` when
 `nonneg=True`) is stored as well.
 

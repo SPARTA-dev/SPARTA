@@ -188,7 +188,7 @@ it lives in SPARTA because it probes SPARTA's spline resampler.
   the derivation (sufficient statistics, the χ² quadratic form, the
   two-dimensional correlation `R`, profile vs marginal amplitudes, Parseval, the even-N Nyquist drop, window combination,
   the noise budget and its assumptions).
-- SPARTA's [`examples/todcor/`](https://github.com/SPARTA-dev/SPARTA/tree/master/examples/todcor)
+- SPARTA's [`examples/howto/todcor_detailed/`](https://github.com/SPARTA-dev/SPARTA/tree/master/examples/howto/todcor_detailed)
   notebooks 01–03 walk through it numerically with this package alone.
   SPARTA's `CCF2d` and `Observations.calc_rv_against_two_templates` run it on
   multi-order spectra.

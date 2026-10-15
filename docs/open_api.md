@@ -31,7 +31,7 @@ assume white noise on them.
 `Observations`, `TimeSeries`, `CCF1d`, `CCF2d`, `TIRAVEL` and
 `PeriodicityDetector`. They import from `sparta` too, but they are
 conveniences built from the atoms below, for the common recipes; the
-quickstarts (`examples/quickstart/`) use them. Also off it:
+how-tos ([`examples/howto/`](../examples/howto/)) use them. Also off it:
 `unicor.bisector_span` (known to be incorrect, under review) and
 `unicor.check_output` (argument validation).
 

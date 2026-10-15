@@ -16,7 +16,7 @@ The repository holds three installable packages:
 Each engine has its own `README.md`, `pyproject.toml` and `tests/`. SPARTA's
 tests are in `tests/` (with `tests/instruments/` for the loaders and
 `tests/golden/` for the pinned reference values); `docs/instruments.md` and
-`docs/api.md` are generated; the tutorials are in `examples/`.
+`docs/api.md` are generated; the how-tos and tutorials are in `examples/`.
 
 ## Development install
 

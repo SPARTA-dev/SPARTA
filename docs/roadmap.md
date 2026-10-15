@@ -11,7 +11,7 @@
   today ρ is only evaluated at supplied velocities.
 - **TODCOR beyond the window edges** — extend the templates past each window
   (or zero-pad) so the circular Fourier shift stops biasing short,
-  line-crowded windows (15.6 m/s at 50 Å in notebook 03).
+  line-crowded windows (15.6 m/s at 50 Å in tutorial 04).
 - **Per-window TODCOR amplitudes** — profile (a1, a2) per order and sum the
   log-likelihood maps, for light ratios that change with wavelength.
 - **A better sub-pixel peak** — a spline or other non-parabolic peak estimate
@@ -39,7 +39,7 @@
 ## Periodograms
 
 - **Significance for the partial periodograms** — a built-in permutation test
-  (as in notebook 08), since the χ² p-value is not established there; a global
+  (as in tutorial 08), since the χ² p-value is not established there; a global
   false-alarm estimate for all PDC-type periodograms.
 - **Exact rest-frame shift** in the shape distance, λ/(1 + v/c).
 - **Error-weighted GLS** — pass the RV errors to `LombScargle`.
