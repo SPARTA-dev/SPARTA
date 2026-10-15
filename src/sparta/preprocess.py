@@ -391,10 +391,12 @@ def filtered_noise_fraction(wave, continuum_scale_kms, noise_scale_kms, native_s
     spectrum looks cleaner than it is, and an error bar that counts every
     native pixel as independent comes out too small (~0.6-0.7x the scatter on
     simulated HARPS and NRES spectra). Counting only this fraction of the
-    native bins (``unicor.ccf_order(..., noise_fraction=)``) corrects it, but
-    approximately: it ignores the part of the lines' own signal the filter
-    removes, so the errors then err high (~1.25-1.4x). An exact error model
-    for filtered spectra is an open item (docs/roadmap.md).
+    native bins (``unicor.ccf_order(..., noise_fraction=)``; CCF2d divides
+    its weights by it) corrects it, but approximately: one average counts
+    noise only, while the velocity information sits in the line slopes,
+    which the filter mostly keeps, so the errors then err high
+    (~1.25-1.4x). An exact error model for filtered spectra is an open item
+    (docs/roadmap.md).
 
     It is the mean of the zero-phase filter's power response, |H|^4 (the
     filter runs forward and backward), over the frequencies the native pixels

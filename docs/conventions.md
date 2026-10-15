@@ -135,13 +135,49 @@ therefore count *native* pixels.
   max(detector step, archive step) per order, by the same coarsest-step rule.
   Products without a documented native step count their archive pixels (see
   [limitations.md](limitations.md#instruments-and-data)).
-- UNICOR counts, per order, n_eff = n_pix · min(1, dv/native), where n_pix is
-  the number of pixels actually correlated and dv the analysis step
-  (`CCF1d.Corr['n_eff']`).
+- UNICOR counts, per order, n_eff = n_pix · min(1, dv/native) · f, where n_pix
+  is the number of pixels actually correlated, dv the analysis step and f the
+  kept noise fraction below (`CCF1d.Corr['n_eff']`).
 - TODCOR divides each order's pixel weights by the oversampling
-  M = max(1, native/dv) (`CCF2d.windows[i]['oversampling']`, `['n_eff']` =
+  M = max(1, native/dv) / f (`CCF2d.windows[i]['oversampling']`, `['n_eff']` =
   n_pix/M), and models the colour of the resampled noise (see
   [correlation_engines.md](correlation_engines.md#noise-oversampling-and-n_eff)).
+
+### After a band-pass: the kept noise fraction f
+
+The band-pass of `filter_spectrum` removes most of the noise, so a filtered
+spectrum looks cleaner than it is; counting every native pixel would then
+quote errors ~0.6× the real scatter. Both engines therefore count only the
+share f of white native-pixel noise power the filter keeps
+(`sparta.preprocess.filtered_noise_fraction`, recorded per order as
+`Info['NoiseFraction']`; 1 for an unfiltered spectrum):
+
+    f = mean of |H(ν)|⁴ over 0 ≤ ν ≤ ν_native
+
+- **H** is the filter's frequency response (`scipy.signal.freqz` of the same
+  first-order Butterworth band-pass, on the order's linear-λ grid, at 4096
+  frequencies). The filter runs forward and backward, so a frequency's power
+  is multiplied by |H|² twice: |H|⁴.
+- **ν_native** is the native Nyquist frequency, one cycle per two native
+  pixels. A grid finer than native holds no noise above it (only values
+  interpolated between native pixels); on the HARPS 0.005 Å grid it is 49% of
+  the grid's Nyquist frequency (0.30 / 0.609 km/s).
+- **The mean** is the surviving share because white noise has equal power at
+  every frequency.
+- The cuts are converted to frequencies at the order's median wavelength (a
+  period of v km/s spans λv/c Å).
+
+At the recommended settings f = 0.234 (HARPS) and 0.227 (NRES), almost all
+set by the noise cut: the noise cut alone gives 0.234 / 0.229, the continuum
+cut alone 0.999 / 0.995. f assumes white noise on the native pixels and that
+resampling leaves the noise spectrum unchanged below ν_native (the spline's
+slight high-frequency loss is ignored).
+
+f is about noise only, so the correction is approximate. The velocity
+information sits in the line slopes, which the filter mostly keeps; most of
+what it removes is pixel-scale noise with little velocity information.
+Scaling every pixel by the same average f discounts the information more
+than the filter does, so the errors err high (next section).
 
 ## Normalised flux
 
@@ -179,7 +215,8 @@ place and in this order:
    filtered as cleanly as its middle); each order is then standardised to
    zero mean and unit variance. The continuum goes to 0. It records
    `Info['NoiseFraction']`, the share of white native noise power the filter
-   kept, which UNICOR's error bars count (see below).
+   kept, which both engines' error bars count
+   ([above](#after-a-band-pass-the-kept-noise-fraction-f)).
    Both cuts are **velocity scales** (km/s), the periods of the band edges:
    variations broader than `continuum_scale_kms` and structure narrower than
    `noise_scale_kms` are removed (each to half its amplitude at the cut), so a
@@ -248,11 +285,11 @@ So:
 - **Conservative, approximately:** after filtering. The band-pass removes
   most of the high-frequency noise, so a filtered spectrum looks cleaner than
   it is and the formula, counting every native pixel, would quote errors
-  ~0.6–0.7× the real scatter. UNICOR therefore counts only the share of
-  native noise the filter kept (`Info['NoiseFraction']`,
-  `sparta.preprocess.filtered_noise_fraction`); that correction ignores the
-  share of the lines' own signal the filter removes, so the errors err high,
-  ~1.25–1.4× on simulated HARPS- and NRES-like spectra. An exact model is an
+  ~0.6–0.7× the real scatter. Both engines therefore count only the share f
+  of native noise the filter kept
+  ([above](#after-a-band-pass-the-kept-noise-fraction-f)); one average f
+  discounts the line slopes' information more than the filter does, so the
+  errors err high, ~1.25–1.4× on simulated HARPS- and NRES-like spectra. An exact model is an
   open item ([roadmap](roadmap.md)). TODCOR applies the same correction
   and errs high by 1.1–1.2×. Also conservative: under photon noise (UNICOR ~10%, because line cores are quieter
   than the white-noise formula assumes); with template mismatch, which both

@@ -10,9 +10,12 @@
   after the band-pass, UNICOR and TODCOR count only the share of native noise
   the filter kept (`filtered_noise_fraction`), which turns errors that were
   0.6–0.7× the scatter into 1.25–1.4× on simulated HARPS- and NRES-like
-  spectra (UNICOR), and ~0.55× into 1.1–1.2× on simulated SB2s (TODCOR). The remaining excess is the share of the lines' own signal the
-  filter removes (the noise cut sits at ~1.6× the line FWHM), which this
-  correction ignores; on the real HARPS TOI-193 RVs template mismatch adds to
+  spectra (UNICOR), and ~0.55× into 1.1–1.2× on simulated SB2s (TODCOR). The remaining excess comes from using one average:
+  f counts noise only, while the velocity information sits in the line slopes,
+  which the filter mostly keeps (the noise cut sits at ~1.6× the line FWHM),
+  so the correction discounts the information more than the filter does
+  ([conventions](conventions.md#after-a-band-pass-the-kept-noise-fraction-f));
+  on the real HARPS TOI-193 RVs template mismatch adds to
   it (quoted 46 m/s for a 14 m/s scatter). Derive the error of a CCF of
   filtered spectra from the filter's response to both signal and noise, test
   it by Monte Carlo across instruments and noise cuts, and extend it to
