@@ -14,7 +14,7 @@ recipe.
 | --- | --- |
 | **Implemented** | The fixed-velocity step: given one trial velocity per epoch, the alignment measure ρ, the co-addition weights and the template. Multi-order epochs, pooled into one correlation matrix. |
 | **Not implemented** | The optimisation of ρ over the velocities, which is the rest of the method: SPARTA does not *measure* velocities with TIRAVEL (see [Development](#development)). No uncertainties on TIRAVEL velocities. No relativistic velocity convention ('cz' only). |
-| **Verified** | Against Zucker & Mazeh (2006) in the 2026-07-23 rewrite and the 2026-10-14 scientific review: the exact de-shift, ρ, the principal eigenpair (`eigh`), unsquared weights ([KNOWN_TRAPS.md](../KNOWN_TRAPS.md), "TIRAVEL" and "Verified correct"). |
+| **Verified** | Against Zucker & Mazeh (2006) in the 2026-07-23 rewrite and the 2026-10-14 scientific review: the exact de-shift, ρ, the principal eigenpair (`eigh`), unsquared weights. Each defect the rewrite fixed has a regression test (e.g. `test_alignment_picks_the_principal_eigenpair`, `test_weights_favour_the_higher_snr_epochs`, `test_rho_is_invariant_to_a_global_velocity_offset`). |
 | **Tests** | `tests/test_tiravel.py`, `tests/test_atoms_tiravel.py` (atoms = class, bit for bit), `tests/test_tiravel_ops_isolation.py`; golden values in `tests/test_golden_pipeline.py`. |
 
 The pieces:
@@ -116,8 +116,7 @@ rms of 14.1 m/s.
 ### The velocity optimiser
 
 The missing half of the method: find the velocities that maximise ρ. The plan
-in [KNOWN_TRAPS.md](../KNOWN_TRAPS.md) ("No velocity optimization") is a
-fixed-point iteration:
+is a fixed-point iteration:
 
 1. build the template at the current velocities;
 2. measure every epoch's RV against it (K correlations);
