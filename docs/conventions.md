@@ -15,7 +15,6 @@ in [instruments.md](instruments.md).
 | Times | days | in the time system the product records, see below |
 | Periodogram frequencies | 1/day | must be > 0 |
 | Template-broadening widths | km/s (FWHM) | instrumental FWHM = c/R |
-| TODCOR Fourier conjugate ζ | s/km | |
 
 Plain numbers are read in these units. Where a parameter accepts an astropy
 `Quantity` (e.g. `dv`, `vel_bound`, `bcv`, the `Simulation` fields) it is
@@ -139,7 +138,7 @@ therefore count *native* pixels.
 - UNICOR counts, per order, n_eff = n_pix · min(1, dv/native), where n_pix is
   the number of pixels actually correlated and dv the analysis step
   (`CCF1d.Corr['n_eff']`).
-- TODCOR divides each order's Parseval weights by the oversampling
+- TODCOR divides each order's pixel weights by the oversampling
   M = max(1, native/dv) (`CCF2d.windows[i]['oversampling']`, `['n_eff']` =
   n_pix/M), and models the colour of the resampled noise (see
   [correlation_engines.md](correlation_engines.md#noise-oversampling-and-n_eff)).
@@ -217,8 +216,8 @@ Why this order:
 Pass the template through the same `preprocess` call as the data
 ([tutorial 03](../examples/tutorials/03_unicor.ipynb)). A preprocessed
 spectrum is on a linear-λ grid, so the RV engines resample it once more, onto
-their ln λ grid. TODCOR's default `continuum='median'` is ≈ 0 for a filtered
-spectrum.
+their ln λ grid. TODCOR fits a free continuum offset per order, so the
+filtered spectrum's zero level needs no special handling.
 
 ## When are the error bars calibrated?
 
@@ -236,11 +235,11 @@ honest and < 1 conservative):
 
 | Setup | UNICOR | TODCOR | Source |
 | --- | --- | --- | --- |
-| White noise on the native grid | 1.03 | 0.94 (primary), 1.02 (secondary) | `tests/instruments/test_simulated.py` |
+| White noise on the native grid | 1.03 | 0.97 (primary), 1.06 (secondary) | `tests/instruments/test_simulated.py` |
 | HARPS archive grid, native step seeded | 1.07 (1.25 without seeding) | — | same |
 | Photon noise (σ ∝ √flux) | 0.89 | — | same |
-| After `preprocess` (band-pass, normalisation, linear-λ resampling), UNICOR counting the kept noise fraction | 0.70–0.80 (eRV/scatter 1.25 HARPS-like, 1.42 NRES-like, simulated); ~0.3 on the real HARPS TOI-193 RVs, where template mismatch adds to it | 0.72–0.74 (before the 2026-10-15 filter change) | `tests/test_ccf1d.py`; docs/roadmap.md |
-| TODCOR analysis grid 1.5× coarser than native | — | 0.82–0.91 | [todcor_method.md §9](../packages/todcor/docs/todcor_method.md) |
+| After `preprocess` (band-pass, normalisation, linear-λ resampling), both engines counting the kept noise fraction | 0.70–0.80 (eRV/scatter 1.25 HARPS-like, 1.42 NRES-like, simulated); ~0.3 on the real HARPS TOI-193 RVs, where template mismatch adds to it | 0.86 (primary), 0.90 (secondary); 1.8 without the correction | `tests/test_ccf1d.py`, `tests/instruments/test_simulated.py`; docs/roadmap.md |
+| TODCOR analysis grid 1.5× coarser than native | — | 0.79 (primary), 0.87 (secondary) | [todcor_method.md §9](../packages/todcor/docs/todcor_method.md) |
 
 So:
 
@@ -254,8 +253,8 @@ So:
   `sparta.preprocess.filtered_noise_fraction`); that correction ignores the
   share of the lines' own signal the filter removes, so the errors err high,
   ~1.25–1.4× on simulated HARPS- and NRES-like spectra. An exact model is an
-  open item ([roadmap](roadmap.md)). TODCOR was ~1.4× before the filter
-  change and is revisited with its windowing. Also conservative: under photon noise (UNICOR ~10%, because line cores are quieter
+  open item ([roadmap](roadmap.md)). TODCOR applies the same correction
+  and errs high by 1.1–1.2×. Also conservative: under photon noise (UNICOR ~10%, because line cores are quieter
   than the white-noise formula assumes); with template mismatch, which both
   estimators count as noise (in
   [tutorial 07](../examples/tutorials/07_usurper.ipynb) the reported errors are
@@ -264,7 +263,8 @@ So:
 - **Optimistic:** an archive-resampled product without a documented native
   step, since its archive pixels are counted as independent.
 
-TODCOR with an explicit `sigma` takes it at face value; `chi2_red` is then a
+TODCOR with an explicit `sigma` takes it at face value (so pass none after
+`preprocess`, which normalises and filters the flux); `chi2_red` is then a
 consistency check, and the errors are not rescaled by it. With
 `sigma=None` (default) the noise is estimated per order from the fit (see
 [correlation_engines.md](correlation_engines.md#todcor-ccf2d)). When the

@@ -105,9 +105,10 @@ rms of 14.1 m/s.
 
 - **With UNICOR**, the template works as it is: UNICOR drops the pixels a
   template does not cover.
-- **With TODCOR**, cut the observed orders to the template's coverage first.
-  The template's continuum is near 0, and `CCF2d` fills uncovered pixels with
-  1 ([limitations.md](limitations.md#todcor)).
+- **With TODCOR**, the template also works as it is: `CCF2d` removes each
+  template's median and fits a free offset per order, so the template's
+  continuum level does not matter, and it drops the pixels a template does
+  not cover.
 - **Check** `rho`, `diagnostics['n_eff']` against K, and the weights, before
   trusting the template ([good practices](good_practices.md#tiravel)).
 
@@ -135,8 +136,6 @@ This costs K correlations per pass, against the K² of a direct maximisation of
 
 ### Other open items
 
-- **Templates with any continuum in TODCOR**, so TIRAVEL templates feed
-  `CCF2d` without cutting orders ([roadmap.md](roadmap.md)).
 - **Weighting epochs of different S/N** beyond the rank-1, equal-noise
   approximation of the weights.
 - **The relativistic convention**, if the RV engines' option is to carry

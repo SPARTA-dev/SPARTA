@@ -64,7 +64,7 @@ def test_ccf2d_recovers_injected_velocities():
     spec, tmpl1, tmpl2 = _sparta_case(v1_true, v2_true, a1_true, a2_true)
 
     ccf = CCF2d().cross_correlate(spec, tmpl1, tmpl2, vel_bound=150, dvel=2.0,
-                                  sigma=0.01, alpha=0.1)
+                                  sigma=0.01)
 
     assert ccf.n_ord == 2
     assert abs(ccf.Corr2d['RV1'] - v1_true) < 3.0
@@ -78,11 +78,16 @@ def test_ccf2d_recovers_injected_velocities():
 
 def test_ccf2d_single_order_template_is_reused_per_order():
     # Both templates are single-order while the spectrum has two: the adapter
-    # must resample order 0 of the template onto each observed order.
+    # must resample order 0 of the template onto each observed order, extended
+    # by the same whole number of pixels on each side.
     spec, tmpl1, tmpl2 = _sparta_case(n_ord=2)
     ccf = CCF2d().cross_correlate(spec, tmpl1, tmpl2, vel_bound=120, dvel=4.0)
     assert len(ccf.windows) == 2
-    assert all(len(w['g1']) == len(w['wv']) for w in ccf.windows)
+    for w, observed in zip(ccf.windows, spec.wv):
+        excess = len(w['g1']) - len(w['wv'])
+        assert excess > 0 and excess % 2 == 0 and len(w['g2']) == len(w['g1'])
+        # The templates cover the order and +-v_max: no observed pixel dropped.
+        assert np.array_equal(w['wv'], observed)
 
 
 def test_ccf2d_keep_windows_false_drops_arrays_but_keeps_powers():
@@ -103,9 +108,8 @@ def test_ccf2d_best_fit_reproduces_the_data():
     ccf = CCF2d().cross_correlate(spec, tmpl1, tmpl2, vel_bound=150, dvel=2.0,
                                   sigma=0.01)
     wv, model, data = ccf.best_fit_spectrum(order=0)
-    # Compare in the interior, away from the apodised edges.
-    sl = slice(len(wv) // 5, -len(wv) // 5)
-    assert np.std(model[sl] - data[sl]) < 0.05
+    # Every observed pixel is fitted (no tapered ends to skip).
+    assert np.std(model - data) < 0.05
 
 
 def test_ccf2d_refuses_a_nan_pixel():
@@ -229,9 +233,9 @@ def test_ccf2d_records_effective_pixel_counts():
     win = ccf.windows[0]
     assert win['oversampling'] == pytest.approx(10.0, rel=1e-3)
     assert win['n_eff'] == pytest.approx(len(win['wv']) / 10.0, rel=1e-3)
-    # The noise dof: n_eff times the spline's noise-variance factor (~0.87)
-    # times the taper's mean square (~0.94).
-    assert 0.75 * win['n_eff'] < win['nu'] < 0.9 * win['n_eff']
+    # The noise dof: n_eff times the spline's noise-variance factor (~0.87),
+    # less one for the window's offset.
+    assert 0.8 * win['n_eff'] < win['nu'] < 0.9 * win['n_eff']
 
 
 def test_ccf2d_sigma_none_estimates_the_noise_from_the_fit():
@@ -255,6 +259,28 @@ def test_ccf2d_sigma_none_estimates_the_noise_from_the_fit():
         assert est['RV1'] == pytest.approx(ref['RV1'], abs=1e-9)
         assert est['eRV1'] / ref['eRV1'] == pytest.approx(1.0, abs=0.15)
         assert est['eRV2'] / ref['eRV2'] == pytest.approx(1.0, abs=0.15)
+
+
+def test_ccf2d_counts_the_noise_fraction_a_band_pass_kept():
+    # After a band-pass only Info['NoiseFraction'] f of the native noise (and
+    # pixels' information) is left: the oversampling is divided by f, so at a
+    # given sigma the errors grow by 1/sqrt(f) and the RVs do not move.
+    v1, v2, sigma = 37.3, -52.6, 0.01
+    wave, flux0, tmpl1, tmpl2 = _narrow_case(v1, v2)
+    g1, g2 = _local_grids(v1, v2)
+    flux = flux0 + np.random.default_rng(2).normal(0.0, sigma, wave.size)
+    fits = []
+    for f in (1.0, 0.25):
+        spec = Spectrum(wv=[wave], sp=[flux.copy()])
+        spec.Info['NoiseFraction'] = [f]
+        fits.append(CCF2d().cross_correlate(spec, tmpl1, tmpl2, v1_grid=g1, v2_grid=g2,
+                                            sigma=sigma))
+    full, kept = fits
+    assert kept.windows[0]['oversampling'] == pytest.approx(full.windows[0]['oversampling'] / 0.25)
+    assert kept.Corr2d['RV1'] == pytest.approx(full.Corr2d['RV1'], abs=1e-9)
+    assert kept.Corr2d['RV2'] == pytest.approx(full.Corr2d['RV2'], abs=1e-9)
+    for key in ('eRV1', 'eRV2'):
+        assert kept.Corr2d[key] / full.Corr2d[key] == pytest.approx(2.0, rel=1e-6)
 
 
 def test_ccf2d_explicit_sigma_is_taken_at_face_value():
@@ -555,8 +581,7 @@ def _fit_convention_case(v1, v2, fit_convention, inject_convention=None):
     grid = np.arange(-15, 16) * 0.01
     return CCF2d().cross_correlate(
         spec, tmpl1, tmpl2, v1_grid=v1 + 0.0037 + grid, v2_grid=v2 - 0.0042 + grid,
-        sigma=0.01, alpha=0.0, continuum=1.0,
-        velocity_convention=fit_convention).Corr2d
+        sigma=0.01, velocity_convention=fit_convention).Corr2d
 
 
 @pytest.mark.parametrize('conv', _CONVENTIONS)
@@ -618,7 +643,7 @@ def _noisy_sparta_case(seed=2, noise=0.01):
 
 def test_output_modes_store_both_maps_and_identical_fits():
     spec, tmpl1, tmpl2 = _noisy_sparta_case()
-    kw = dict(vel_bound=150, dvel=2.0, alpha=0.1)           # sigma=None: two passes
+    kw = dict(vel_bound=150, dvel=2.0)                      # sigma=None: two passes
     as_ccf = CCF2d().cross_correlate(spec, tmpl1, tmpl2, **kw)
     as_lnl = CCF2d().cross_correlate(spec, tmpl1, tmpl2, output='loglike', **kw)
     a, b = as_ccf.Corr2d, as_lnl.Corr2d
@@ -635,7 +660,7 @@ def test_output_modes_store_both_maps_and_identical_fits():
 
 def test_r_map_is_the_explained_power_fraction_of_the_pooled_orders():
     spec, tmpl1, tmpl2 = _noisy_sparta_case()
-    fit = CCF2d().cross_correlate(spec, tmpl1, tmpl2, vel_bound=150, dvel=2.0, alpha=0.1)
+    fit = CCF2d().cross_correlate(spec, tmpl1, tmpl2, vel_bound=150, dvel=2.0)
     r, sd = fit.Corr2d, fit.stats['SD']
     assert np.all((r['R'] >= 0) & (r['R'] <= 1))
     np.testing.assert_allclose(r['logL_profile'], -0.5 * sd * (1 - r['R'] ** 2),
@@ -651,3 +676,84 @@ def test_r_map_is_the_explained_power_fraction_of_the_pooled_orders():
 def test_ccf2d_refuses_an_unknown_output_mode(bad):
     with pytest.raises(ValueError, match="output"):
         CCF2d().cross_correlate(*_sparta_case(), vel_bound=60, dvel=4.0, output=bad)
+
+
+# =============================================================================
+# The extended-template window: API, per-order amplitudes, residuals
+# =============================================================================
+@pytest.mark.parametrize('removed', [dict(alpha=0.1), dict(continuum='median'),
+                                     dict(continuum=1.0), dict(zeta_max=0.02)])
+def test_ccf2d_rejects_the_removed_window_arguments(removed):
+    # The taper, the continuum choice and the Fourier low-pass went with the
+    # circular window; passing them must fail loudly, not be ignored.
+    with pytest.raises(TypeError):
+        CCF2d().cross_correlate(*_sparta_case(), vel_bound=60, dvel=4.0, **removed)
+
+
+@pytest.mark.parametrize('bad', ['per_window', 'Shared', None])
+def test_ccf2d_refuses_an_unknown_amplitudes_mode(bad):
+    with pytest.raises(ValueError, match="amplitudes must be 'shared' or 'per_order'"):
+        CCF2d().cross_correlate(*_sparta_case(), vel_bound=60, dvel=4.0, amplitudes=bad)
+
+
+def _per_order_case(amps, sigma, seed=0):
+    """Two orders on declared 1 km/s log grids (no resampling: white noise on
+    the analysis pixels), both components' lines in each, with amplitudes
+    ``amps[i]`` in order i; plus rest-frame templates covering both."""
+    v1, v2 = 37.3, -52.6
+    lines = (_order_lines(1), _order_lines(2))
+    waves = [log_lambda_grid(lo, hi, 1.0)[0] for lo, hi in _ORDERS]
+    rng = np.random.default_rng(seed)
+    fluxes = [1.0 + a1 * (_narrow_flux(w, lines[0], v1) - 1.0)
+              + a2 * (_narrow_flux(w, lines[1], v2) - 1.0) + rng.normal(0.0, sigma, w.size)
+              for w, (a1, a2) in zip(waves, amps)]
+    spec = Spectrum(wv=waves, sp=fluxes, name='SB2-orders')
+    spec.Info['GridType'], spec.Info['GridDelta'] = 'log', 1.0 * u.km / u.s
+    wt, _ = log_lambda_grid(_ORDERS[0][0] - 5.0, _ORDERS[-1][1] + 5.0, 0.05)
+    return (spec, Template.from_arrays(wt, _narrow_flux(wt, lines[0])),
+            Template.from_arrays(wt, _narrow_flux(wt, lines[1])), _local_grids(v1, v2))
+
+
+def test_ccf2d_per_order_amplitudes_follow_each_orders_light_ratio():
+    # a2/a1 = 0.25 in order 0 and 0.6 in order 1. Per-order amplitudes give
+    # each order its own pair (one value per window in Corr2d), chi2_red ~ 1
+    # and residuals at the noise; one shared pair misfits both orders.
+    amps, sigma = np.array([[0.7, 0.175], [0.5, 0.3]]), 0.005
+    spec, tmpl1, tmpl2, (g1, g2) = _per_order_case(amps, sigma)
+    kw = dict(v1_grid=g1, v2_grid=g2, sigma=sigma)
+    po = CCF2d().cross_correlate(spec, tmpl1, tmpl2, amplitudes='per_order', **kw)
+    sh = CCF2d().cross_correlate(spec, tmpl1, tmpl2, **kw)
+    r = po.Corr2d
+    assert r['amplitudes'] == 'per_order' and sh.Corr2d['amplitudes'] == 'shared'
+    assert np.shape(r['a1_best']) == np.shape(r['a2_best']) == (2,)
+    assert np.ndim(sh.Corr2d['a1_best']) == 0
+    np.testing.assert_allclose(np.column_stack([r['a1_best'], r['a2_best']]), amps, atol=0.01)
+    assert abs(r['RV1'] - 37.3) < 3 * r['eRV1'] and abs(r['RV2'] + 52.6) < 3 * r['eRV2']
+    assert r['chi2_red'] == pytest.approx(1.0, abs=0.06)
+    assert sh.Corr2d['chi2_red'] > 1.5
+    for order in (0, 1):
+        _, model, data = po.best_fit_spectrum(order=order)
+        assert np.std(data - model) == pytest.approx(sigma, rel=0.06)
+        _, model, data = sh.best_fit_spectrum(order=order)
+        assert np.std(data - model) > 1.1 * sigma
+    # sigma=None charges each order its own two amplitudes and finds the noise.
+    est = CCF2d().cross_correlate(spec, tmpl1, tmpl2, amplitudes='per_order',
+                                  v1_grid=g1, v2_grid=g2).Corr2d
+    np.testing.assert_allclose(est['sigma'], sigma, rtol=0.03)
+
+
+def test_ccf2d_best_fit_residuals_are_the_noise():
+    # The fit's own model (extended templates at the refined RVs, the fitted
+    # amplitudes and continuum offset) leaves only the noise, over every
+    # observed pixel -- no apodised edges to skip -- with zero mean.
+    sigma = 0.01
+    spec, tmpl1, tmpl2 = _sparta_case()
+    rng = np.random.default_rng(13)
+    spec.sp = [s + rng.normal(0.0, sigma, s.size) for s in spec.sp]
+    ccf = CCF2d().cross_correlate(spec, tmpl1, tmpl2, vel_bound=150, dvel=2.0, sigma=sigma)
+    for order in (0, 1):
+        wv, model, data = ccf.best_fit_spectrum(order=order)
+        assert np.array_equal(wv, spec.wv[order])
+        resid = data - model
+        assert abs(resid.mean()) < 1e-12
+        assert np.std(resid) == pytest.approx(sigma, rel=0.05)

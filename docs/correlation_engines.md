@@ -111,33 +111,42 @@ this section states what the code computes and what it returns.
 
 ### Model and sufficient statistics
 
-TODCOR (Zucker & Mazeh 1994) is recast as a Gaussian profile likelihood in the
-Fourier domain. With residuals g = flux − continuum on the ln λ grid, the
-model of the data residual is
+TODCOR (Zucker & Mazeh 1994) is recast as a Gaussian profile likelihood over
+the observed pixels of each window (one order). On the ln λ grid the data are
+modelled as
 
-$$g(u) = a_1\,g_1(u - s_1) + a_2\,g_2(u - s_2),\qquad s_i = c\ln\frac{\lambda_\mathrm{obs}}{\lambda_\mathrm{rest}}(v_i),$$
+$$d(u) = a_1\,g_1(u - s_1) + a_2\,g_2(u - s_2) + c_0,\qquad s_i = c\ln\frac{\lambda_\mathrm{obs}}{\lambda_\mathrm{rest}}(v_i),$$
 
-and a shift is a phase factor exp(−2πiζs), so the templates are transformed
-once and reused at every trial (v1, v2). For one window (one order), the
-weighted χ² at any (v1, v2, a1, a2) is a quadratic form in six numbers, the
-sufficient statistics of `todcor.window_stats`: S11, S22, S_D (scalars), b1(v1),
-b2(v2) (data–template cross terms) and A12(v1, v2) (template–template):
+with a free continuum offset c₀ per window. The templates g_i are given on the
+window's grid extended past both ends by the largest trial shift (see
+[Preparing the windows](#preparing-the-windows)) and shifted by a Fourier
+phase factor exp(−2πi f s/dv) (f in cycles per pixel), then read on the
+window's pixels: every shift reads the template's real neighbouring
+spectrum. For one window, the χ² at any (v1, v2, a1, a2), with the offset
+profiled out, is a quadratic form in six numbers, the sufficient statistics of
+`todcor.window_stats`: S_D (scalar), S11(v1), S22(v2) (template powers over the
+window), b1(v1), b2(v2) (data–template cross terms) and A12(v1, v2)
+(template–template):
 
 $$\chi^2 = S_D - 2(a_1 b_1 + a_2 b_2) + a_1^2 S_{11} + 2a_1a_2A_{12} + a_2^2 S_{22}.$$
 
-The weights are Parseval weights, so χ² equals the real-space χ² at noise σ
-per pixel; the DC mode (and, for an even number of pixels, the Nyquist mode)
-is dropped.
+Each is a weighted inner product over the window's n pixels of mean-subtracted
+arrays (the offset projected out), with the pixel weight w = 1/(σ² M), σ the
+native per-pixel noise and M the oversampling; e.g.
+b1 = w Σ d G1 − (w Σ d)(w Σ G1)/(w n).
 
 ### Amplitudes in closed form
 
 At every (v1, v2) node the amplitudes solve the 2×2 normal equations
 N a = b, N = [[S11, A12], [A12, S22]], b = (b1, b2):
 a1 = (S22 b1 − A12 b2)/det, a2 = (S11 b2 − A12 b1)/det,
-det = S11 S22 − A12² (`todcor.profile_from_stats`). With `nonneg=True` (the
-`CCF2d` default) both amplitudes are constrained to be ≥ 0 by a per-node
-two-variable NNLS: a node whose unconstrained solution has a negative
-amplitude takes the better of the two one-template edge solutions.
+det = S11 S22 − A12² (`todcor.profile_from_stats`). A template with no lines
+in an order (flat there; `prepare_window` sets it to zero) gets amplitude 0, and
+a node where the pair is degenerate (det < 10⁻¹⁰ S11 S22) takes the better
+one-template solution. With `nonneg=True` (the `CCF2d`
+default) both amplitudes are constrained to be ≥ 0 by a per-node two-variable
+NNLS: a node whose unconstrained solution has a negative amplitude takes the
+better of the two one-template edge solutions.
 
 ### Two maps, one peak
 
@@ -161,38 +170,51 @@ come from ln L). Both maps are always stored (`Corr2d['R']`,
 spans ~10⁶ across the map and hides everything but the peak, while R keeps
 the ridges where one template matches one star
 ([tutorial 04](../examples/tutorials/04_todcor.ipynb)). `logL_marginal`
-(amplitudes marginalised under a flat prior; equal to `logL_profile` when
-`nonneg=True`) is stored as well.
+(amplitudes marginalised under a flat prior; equal to `logL_profile` under
+`nonneg=True` or `amplitudes='per_order'`) is stored as well.
 
 ### Pooling orders
 
-χ² is additive over windows with independent noise and linear in the six
-statistics, so orders combine by **adding their statistics**
-(`todcor.combine_stats`) into one joint fit with shared (v1, v2, a1, a2).
+χ² is additive over windows with independent noise, so the orders of one
+epoch combine into one joint fit with shared (v1, v2), in one of two ways
+(`amplitudes=`):
+
+- `'shared'` (default): one (a1, a2) for all orders. χ² is linear in the six
+  statistics, so the orders combine by **adding their statistics**
+  (`todcor.combine_stats`).
+- `'per_order'`: each order keeps its own (a1, a2), i.e. its own light ratio,
+  and the orders' profiled χ² maps are summed (`todcor.profile_per_window`);
+  `'a1_best'`, `'a2_best'` then hold one value per order. Use it when the
+  light ratio changes across the spectrum (stars of different temperature);
+  it costs two parameters per order, so with a constant ratio `'shared'` is
+  tighter.
+
 Two constraints: every window must be evaluated on the same velocity grid
 (checked), and all pooled windows must belong to **one epoch** (not
 checkable: orbital motion changes the velocities between epochs).
-`Observations.calc_rv_against_two_templates` fits each epoch separately. One
-amplitude pair is shared by all orders, which is an approximation when the
-light ratio changes with wavelength ([limitations.md](limitations.md#todcor)).
+`Observations.calc_rv_against_two_templates` fits each epoch separately
+(`amplitudes` and the other `CCF2d.cross_correlate` keywords pass through).
 
 ### Noise, oversampling and n_eff
 
-- **Oversampling.** Each order's Parseval weights are divided by
+- **Oversampling.** Each order's pixel weight is divided by
   M = max(1, native/dv), so a native pixel's information is counted once
   (`windows[i]['oversampling']`, `windows[i]['n_eff']` = n_pix/M).
-- **Noise budget.** Each window also reports ν, the expected χ² of its pure
-  noise. Resampled noise is smoother than native noise, so `CCF2d` builds
-  the noise power spectrum from the resampler's impulse responses at the
-  sub-pixel phases of the native pixels (`todcor.resampled_noise_psd`), times
-  the taper's mean square. Then χ²_red = χ²_best/(Σν − 4) (four fitted
-  parameters) is ≈ 1 for honest noise on any analysis step, finer or coarser
-  than native.
+- **Noise budget.** Each window also reports ν = n_pix κ/M − 1, the expected
+  χ² of its pure noise (one dof for its offset). Resampled noise is smoother
+  than native noise (κ < 1), so `CCF2d` builds the noise power spectrum from
+  the resampler's impulse responses at the sub-pixel phases of the native
+  pixels (`todcor.resampled_noise_psd`; κ is its mean). Then
+  χ²_red = χ²_best/(Σν − 4) (two velocities and two shared amplitudes; Σν − 2
+  − 2 n_orders under `'per_order'`) is ≈ 1 for honest noise on any analysis
+  step, finer or coarser than native.
 - **`sigma=None` (default): per-order noise, two passes.** Pass 1 fits all
   orders at unit noise and locates the joint peak. Each order's share of the
   joint χ² there gives its own noise,
-  σ_i² = χ²_i / (ν_i (1 − 4/Σν)). Pass 2 re-weights each order's statistics
-  by 1/σ_i² (no new Fourier transforms) and re-fits; the RVs, amplitudes and
+  σ_i² = χ²_i / dof_i, with dof_i = ν_i (1 − 4/Σν) (`'shared'`) or
+  ν_i (1 − 2/Σν) − 2 (`'per_order'`) (`todcor.window_noise`). Pass 2
+  re-weights each order's statistics by 1/σ_i² (no template is shifted
+  again) and re-fits; the RVs, amplitudes and
   errors come from pass 2. An order with fewer than `min_noise_dof` = 50
   noise degrees of freedom, or no residual, gets the common estimate instead
   (warning; `windows[i]['sigma_fallback']`). `Corr2d['sigma']` holds the
@@ -207,15 +229,18 @@ light ratio changes with wavelength ([limitations.md](limitations.md#todcor)).
    301 × 301 nodes) only locates the peak.
 2. The statistics are re-evaluated exactly on a fine local map: ±2 coarse
    steps around the coarse argmax at a tenth of the step (41 × 41 nodes;
-   `refine_span`, `refine_factor`). A quadratic fit to the coarse map would
-   be biased, because ln L follows the squared correlation and its peak is
-   only ~σ_ccf/√2 wide.
-3. `todcor.crlb_from_map` fits a 2-D quadratic to ln L over ±3 fine nodes
-   (`crlb_half`). The Fisher matrix is −Hessian(ln L); its inverse is the
+   `refine_span`, `refine_factor`).
+3. `todcor.crlb_from_map` fits a 2-D polynomial of total degree 6 to ln L
+   over ±4 fine nodes (`crlb_half`) and takes its maximum (`'RV1'`, `'RV2'`;
+   NaN errors if it lies more than one fine step from the argmax). ln L
+   follows the squared correlation, so its peak is narrow (~σ_ccf/√2) and not
+   quadratic over the patch: a quadratic misread it by up to 6.2 m/s; with
+   degree 6 the pipeline is within 0.023 m/s of the truth (noise-free simulations;
+   [method §2, §7](../packages/todcor/docs/todcor_method.md#7-peak-refinement-and-the-cramérrao-errors)).
+   The Fisher matrix is −Hessian(ln L) at the maximum; its inverse is the
    (v1, v2) covariance (`Corr2d['cov']`, `'eRV1'`, `'eRV2'`, `'rho12'`).
    Because ln L is profiled over the linear amplitudes this is the full,
-   local Cramér–Rao bound. The refined peak is the quadratic's stationary
-   point, clipped to one fine step (`'RV1'`, `'RV2'`).
+   local Cramér–Rao bound.
 4. The amplitudes, χ² and R are evaluated exactly at the refined velocities
    (`'a1_best'`, `'a2_best'`, `'chi2_best'`, `'chi2_red'`, `'R_best'`).
 
@@ -226,29 +251,32 @@ estimate is reported.
 
 ### Preparing the windows
 
-For each order `CCF2d` removes the continuum from data and templates alike
-(`continuum='median'`, the default, or a fixed level such as 1.0), resamples
-each template linearly onto the observed grid (filling uncovered pixels with
-1.0, the normalised continuum), and applies a Tukey taper (`alpha`, default
-0.1). The Fourier shift is circular, so lines shifted across a window edge
-re-enter at the other end; keep windows long and the taper firm
-([limitations.md](limitations.md#todcor)).
+For each order `CCF2d` calls `todcor.prepare_window` with v_max = the largest
+|trial velocity| plus the fine map's reach (`refine_span` coarse steps). Both
+templates are resampled linearly onto the order's ln λ grid extended past each
+end by v_max plus a 20-pixel ramp to zero, so a shifted template is read from
+its real spectrum: nothing wraps around, no line goes missing at the order's
+edges, and no taper is applied. Observed pixels whose templates do not reach
+v_max beyond them are dropped (as in UNICOR), never filled; an order with
+fewer than 2 covered pixels raises. The continuum level of the data and of
+the templates does not matter: each order's offset is a free parameter.
+`CCF2d.best_fit_spectrum` returns the model with that fitted offset.
 
 ## Side by side
 
 | | UNICOR — `CCF1d` | TODCOR — `CCF2d` |
 | --- | --- | --- |
 | Model | one template, scaled (Pearson C per order) | two templates at (v1, v2), amplitudes a1, a2 fitted |
-| Orders | per-order CCFs combined by Zucker's ML rule; each order has its own scale | statistics summed; one (v1, v2, a1, a2) for all orders |
+| Orders | per-order CCFs combined by Zucker's ML rule; each order has its own scale | one (v1, v2) for all orders; (a1, a2) shared (statistics summed) or per order (`amplitudes='per_order'`); a free offset per order |
 | Velocity grid | lags of the ln λ grid, ±`vel_bound` (default 150 km/s, dv 0.1 km/s) | coarse (v1, v2) map, `dvel` 1 km/s, then a fine 41 × 41 map |
 | `output='ccf'` | `Corr['corr']` per order, `CorrCombined['corr']` = ML(v) | `Corr2d['map']` = `Corr2d['R']` (R ∈ [0, 1]) |
 | `output='loglike'` | Zucker ln L, `Corr['loglike']`, `CorrCombined['loglike']` | Gaussian ln L = −χ²/2, `Corr2d['map']` = `Corr2d['logL_profile']` |
 | Always stored | both `'corr'` and `'loglike'` | `'R'`, `'logL_profile'`, `'logL_marginal'`, `'a1'`, `'a2'`, `'chi2'` maps; the same under `'fine'` |
-| RV | maximum of a quintic spline through the combined CCF's lags: `CorrCombined['RV']` | stationary point of a quadratic on the fine ln L map: `Corr2d['RV1']`, `['RV2']` |
+| RV | maximum of a quintic spline through the combined CCF's lags: `CorrCombined['RV']` | maximum of a degree-6 polynomial fitted to the fine ln L map: `Corr2d['RV1']`, `['RV2']` |
 | Error | Zucker ML error from the CCF curvature, N = native pixels: `CorrCombined['eRV']` | local Cramér–Rao bound from the ln L Hessian: `'eRV1'`, `'eRV2'`, `'rho12'`, `'cov'` |
 | Noise level | not needed (implicit in C) | `sigma` per order, estimated by default; `'sigma'`, `'chi2_red'` |
 | Peak value | `CorrCombined['peakCorr']` (CCF at the vertex) | `'R_best'` (R at the refined RVs) |
-| Amplitudes | — | `'a1_best'`, `'a2_best'` |
+| Amplitudes | — | `'a1_best'`, `'a2_best'` (one per order under `'per_order'`) |
 | Bookkeeping | `'n_eff'`, `'vel'`, `'units'`, `'velocity_convention'`, `'output'` | `windows[i]` (`'n_eff'`, `'oversampling'`, `'nu'`, `'sigma'`, ...), `stats`, `crlb`, `'velocity_convention'`, `'output'` |
 | Time-series driver | `Observations.calc_rv_against_template` → `vels`, `evels`, `ccf_peaks` (and `time_series.calculated_vrad_list`, `errors`) | `Observations.calc_rv_against_two_templates` → `vels1/2`, `evels1/2`, `amps1/2` |
 

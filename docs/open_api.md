@@ -66,10 +66,10 @@ The steps of `Spectrum.trim`, `interpolate`, `remove_cosmics`,
 | `doppler_factor`, `doppler_shift_wave` | `unicor` | λ_obs/λ_rest for a velocity, and shifted wavelengths | km/s; Å | `'cz'` (1 + v/c) by default, `'relativistic'` on request; the two differ by ≈ v²/2c |
 | `shift_kms`, `velocity_from_log_shift` | `unicor` | velocity ↔ ln λ shift (as c ln(λ_obs/λ_rest)) | km/s; dimensionless | same conventions; computed with `log1p`/`expm1`, full precision for small v |
 | `C_KMS` | `unicor` | the speed of light | km/s (299792.458) | — |
-| `tukey_window` | `unicor` | Tukey (tapered-cosine) apodisation window | pixels | the taper makes the noise heteroscedastic, which the white-noise weighting does not model |
+| `tukey_window` | `unicor` | Tukey (tapered-cosine) apodisation window | pixels | not used by SPARTA's engines (no taper anywhere); the taper makes the noise heteroscedastic, which the white-noise weighting does not model |
 | `rotational_kernel`, `broaden_rotational`, `broaden_gaussian` | `unicor` | rotational (Gray 2005) and Gaussian broadening of normalized flux | km/s (`vsini`, FWHM = c/R) | uniform velocity (ln λ) grid; continuum 1 beyond the ends; linear limb darkening `epsilon`; a `vsini` below the grid step gives a one-tap kernel, i.e. no broadening |
 | `broaden_rotational_residual`, `broaden_gaussian_residual` | `unicor` | the same on residual flux (continuum 0) | km/s | zero-padded ends; a width ≤ 0 returns the input |
-| `rfft_positive`, `parseval_weights` | `unicor` | positive-frequency FFT (DC dropped) and the weights that make a Fourier χ² equal the real-space χ² | ζ in s/km; weights 1/flux² | white, homoscedastic per-pixel noise |
+| `rfft_positive`, `parseval_weights` | `unicor` | positive-frequency FFT (DC dropped) and the weights that make a Fourier χ² equal the real-space χ² | ζ in s/km; weights 1/flux² | white, homoscedastic per-pixel noise; not used by SPARTA's engines |
 | `standardize`, `zero_lag_correlation` | `unicor` | zero mean and unit variance, SPARTA's one normalisation ([conventions](conventions.md#normalised-flux)); the unshifted inner product | dimensionless | a flat vector stays zero |
 
 ## UNICOR — the per-order CCF (`unicor.ccf`)
@@ -96,19 +96,20 @@ per window, then `joint_fit` (and `window_noise` for per-window noise).
 
 | name | import from | what it does | units | assumptions |
 |---|---|---|---|---|
-| `prepare_window`, `TodcorWindow` | `todcor` | data and both templates as tapered residuals on one ln λ window | Å; `dv` km/s | templates at rest, resampled linearly, uncovered pixels filled with continuum 1; continuum (median by default) removed before the taper |
-| `window_stats` | `todcor` | the six weighted sufficient statistics of one window on a (v1, v2) grid | km/s; ζ s/km; `sigma` flux units | residuals on a uniform ln λ grid of actual step `dv`; white homoscedastic native noise; `oversampling` = dv_native/dv ≥ 1; `noise_psd` enters the noise budget ν only |
+| `prepare_window`, `TodcorWindow` | `todcor` | the data's residual on its observed ln λ pixels, and both templates on that grid extended by the largest shift (`v_max`) plus a ramp to zero | Å; `dv` km/s; `v_max` km/s | templates at rest, resampled linearly, each minus its median; observed pixels the templates do not cover at ±`v_max` are dropped, never filled; no taper |
+| `window_stats` | `todcor` | the six weighted sufficient statistics of one window on a (v1, v2) grid, with the window's free offset profiled out | km/s; `sigma` flux units | templates extended as `prepare_window` makes them; χ² over the observed pixels only; white homoscedastic native noise; `oversampling` = dv_native/dv ≥ 1; `noise_psd` enters the noise budget ν only |
 | `combine_stats` | `todcor` | pool windows by summing (optionally weighted) statistics | weights dimensionless, e.g. 1/σ² | the same velocity grid and the same epoch for every window; one (a1, a2) shared by all |
 | `profile_from_stats` | `todcor` | profile out the amplitudes: correlation R and log-likelihood maps, best node | km/s; R in [0, 1]; ln L in nats | R and ln L share their argmax; `nonneg=True` sets the marginal equal to the profile |
+| `profile_per_window` | `todcor` | as `profile_from_stats`, with one (a1, a2) per window | km/s; R in [0, 1]; ln L in nats | the same velocity grid and epoch for every window; a light ratio that changes across the spectrum |
 | `chi2_from_stats` | `todcor` | χ² at given amplitudes on every (v1, v2) node | dimensionless | at the noise the statistics carry |
-| `crlb_from_map` | `todcor` | Cramér–Rao errors from a local quadratic fit to ln L, and the sub-grid peak | km/s; covariance km²/s² | an isolated, well-resolved peak; a patch small next to the peak width (use a fine map); NaN on a grid edge or for non-positive-definite curvature; scale by √χ²_red when it is not 1 |
+| `crlb_from_map` | `todcor` | Cramér–Rao errors and the sub-grid peak from a degree-6 2-D polynomial fitted to ln L over ±4 nodes | km/s; covariance km²/s² | an isolated, well-resolved peak sampled by a fine map; NaN on a grid edge, for non-negative-definite curvature, or a maximum more than one step from the argmax; scale by √χ²_red when it is not 1 |
 | `refine_grid` | `todcor` | the fine local (v1, v2) grid around a coarse node | km/s | an interior node |
-| `joint_fit`, `TodcorFit` | `todcor` | coarse map, fine map, CRLB and every value at the refined peak of pooled windows | km/s | as `combine_stats`; fine statistics cached by coarse node for re-weighting |
-| `window_noise` | `todcor` | each window's noise from its share of a unit-noise joint χ² | flux units | the four shared parameters charged to windows ∝ ν_i; windows with fewer than `min_dof` dof take the common estimate |
+| `joint_fit`, `TodcorFit` | `todcor` | coarse map, fine map, CRLB and every value at the refined peak of pooled windows | km/s | as `combine_stats`, or one (a1, a2) per window with `amplitudes='per_order'`; fine statistics cached by coarse node for re-weighting |
+| `window_noise` | `todcor` | each window's noise from its share of a unit-noise joint χ² | flux units | shared parameters charged to windows ∝ ν_i (four, or the two velocities plus each window's own two amplitudes under `'per_order'`); windows with fewer than `min_dof` dof take the common estimate |
 | `todcor_map` | `todcor` | one window's maps: `profile_from_stats(window_stats(...))` | as `window_stats` | one window of one epoch |
 | `resampled_noise_psd` | `todcor` | relative noise power per mode from a resampler's impulse responses | dimensionless (white = 1) | any resampler linear in the flux (e.g. `resample_flux`'s cubic spline); responses at representative sub-pixel phases, weighted by their frequency |
 | `shift_template_flux`, `composite_flux` | `todcor` | a template Doppler-shifted onto a grid, and a noiseless composite of shifted templates | Å; km/s; amplitudes dimensionless | rest-frame templates with continuum 1; `'cz'` by default; `kind='cubic'` for coarsely sampled templates (PHOENIX) |
-| `model_flux` | `todcor` | the best-fit composite by the fit's own Fourier phase-shift model | km/s; amplitudes dimensionless | the circular shift the estimator assumes, not a resampling |
+| `model_flux` | `todcor` | the best-fit composite a1·G1(v1) + a2·G2(v2) on a window's pixels, by the fit's own shift of the extended templates | km/s; amplitudes dimensionless | templates as `prepare_window` makes them; the window's offset is the caller's (the mean residual) |
 
 ## TIRAVEL — a template from the observations (`sparta.tiravel_ops`)
 

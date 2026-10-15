@@ -83,7 +83,6 @@ def test_noiseless_sb2_through_ccf2d_recovers_both_components(convention):
     for k, sp in enumerate(obs.spec_list):
         g1, g2 = (np.arange(round(v) - 5.0, round(v) + 6.0) for v in rv[k])
         fit = CCF2d().cross_correlate(sp, t1, t2, dv=0.3, v1_grid=g1, v2_grid=g2,
-                                      continuum=1.0, alpha=0.3,
                                       velocity_convention=convention).Corr2d
         np.testing.assert_allclose([fit["RV1"], fit["RV2"]], rv[k], rtol=0, atol=5e-3)
         np.testing.assert_allclose([fit["a1_best"], fit["a2_best"]], obs.truth.amplitudes,
@@ -158,13 +157,42 @@ def test_todcor_scatter_matches_its_uncertainty_with_sigma_none():
     residual, erv = [], []
     for k, sp in enumerate(obs.spec_list):
         g1, g2 = (np.arange(round(v) - 5.0, round(v) + 6.0) for v in rv[k])
-        fit = CCF2d().cross_correlate(sp, t1, t2, dv=0.3, v1_grid=g1, v2_grid=g2, continuum=1.0,
-                                      alpha=0.3, keep_windows=False).Corr2d
+        fit = CCF2d().cross_correlate(sp, t1, t2, dv=0.3, v1_grid=g1, v2_grid=g2,
+                                      keep_windows=False).Corr2d
         residual.append([fit["RV1"], fit["RV2"]] - rv[k])
         erv.append([fit["eRV1"], fit["eRV2"]])
     ratio = np.std(residual, axis=0, ddof=1) / np.mean(erv, axis=0)
-    # Over 7 seeds: mean 0.94 (primary) and 1.02 (secondary).
+    # Over 7 seeds: mean 0.97 (primary) and 1.06 (secondary).
     assert np.all((0.8 < ratio) & (ratio < 1.25)), ratio
+
+
+def test_todcor_preprocessed_error_bars_count_the_kept_noise():
+    # After preprocess, CCF2d counts only the noise fraction the band-pass
+    # kept (Info['NoiseFraction']), as CCF1d does. Approximate and slightly
+    # conservative: over 7 seeds std/eRV is 0.86 (primary) and 0.90
+    # (secondary); without the correction it was 1.8 (errors too small).
+    n_epochs, seed = 50, 1
+    draw = np.random.default_rng(seed)
+    rv = np.column_stack([draw.uniform(-30.0, 30.0, n_epochs), draw.uniform(-30.0, 30.0, n_epochs)])
+    sim = Simulation(like="HARPS", windows_A=[(5000.0, 5200.0)], times=np.arange(float(n_epochs)),
+                     rv_kms=rv, snr=25.0, noise="constant", seed=seed,
+                     components=[dict(SUN_LIKE, vsini=4.0, amplitude=0.7),
+                                 dict(K_DWARF, amplitude=0.3)])
+    obs = Observations(survey="SIMULATED", simulation=sim)
+    t1, t2 = component_templates(sim)
+    pp = instruments.get("HARPS").recommended.preprocess
+    obs.preprocess(**pp)
+    t1.model.preprocess(**pp)
+    t2.model.preprocess(**pp)
+    residual, erv = [], []
+    for k, sp in enumerate(obs.spec_list):
+        g1, g2 = (np.arange(round(v) - 5.0, round(v) + 6.0) for v in rv[k])
+        fit = CCF2d().cross_correlate(sp, t1, t2, dv=0.3, v1_grid=g1, v2_grid=g2,
+                                      keep_windows=False).Corr2d
+        residual.append([fit["RV1"], fit["RV2"]] - rv[k])
+        erv.append([fit["eRV1"], fit["eRV2"]])
+    ratio = np.std(residual, axis=0, ddof=1) / np.mean(erv, axis=0)
+    assert np.all((0.6 < ratio) & (ratio < 1.2)), ratio
 
 
 def test_a_fixed_seed_reproduces_the_noise():

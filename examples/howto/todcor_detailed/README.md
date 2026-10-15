@@ -13,16 +13,18 @@ with tutorial [`04_todcor`](../../tutorials/04_todcor.ipynb).
 The canonical written spec is [`todcor_method.md`](../../../packages/todcor/docs/todcor_method.md).
 
 1. **`01_method.ipynb`**: the method derived in the open: the log-λ shift
-   theorem, the six **sufficient statistics** and the χ² quadratic form, the
-   closed-form 2×2 weighted-least-squares amplitude fit, profile vs marginal
-   likelihood, the Parseval identity, and why the even-N Nyquist mode is dropped.
+   theorem, why each template is extended past the window (no wrap-around),
+   the free offset per window, the six **sufficient statistics** and the χ²
+   quadratic form, the closed-form 2×2 weighted-least-squares amplitude fit,
+   and profile vs marginal likelihood.
 2. **`02_single_window_fit.ipynb`**: one window end-to-end: `composite_flux` →
    `todcor_map` → read the peak → `model_flux` reconstruction → `crlb_from_map`
    errors, with the CRLB validated against a Monte Carlo.
 3. **`03_multiwindow_combination.ipynb`**: the sufficient-statistic **addition**:
    pooling windows of one epoch via `combine_stats` (shared velocities /
-   amplitudes) tightens and de-correlates the joint fit, and the boundary
-   (within one epoch, shared velocity grid, **not** across epochs).
+   amplitudes) tightens and de-correlates the joint fit, one light ratio per
+   window with `profile_per_window`, and the boundary (within one epoch,
+   shared velocity grid, **not** across epochs).
 
 ## Running
 
@@ -36,10 +38,9 @@ jupyter nbconvert --to notebook --execute --inplace 01_method.ipynb
 
 ## Conventions
 
-- Velocities and the log-λ shift `s` in km/s; ζ in s/km; wavelengths in Angstrom;
-  kernel widths as FWHM.
-- Uniform log-λ (constant velocity step `dv`) grid; `np.fft.rfftfreq(N, d=dv)[1:]`
-  (DC bin dropped, which also removes the continuum), positive frequencies only.
+- Velocities in km/s; wavelengths in Angstrom; kernel widths as FWHM.
+- Uniform log-λ (constant velocity step `dv`) grid. The χ² is a sum over the
+  window's observed pixels; each window's continuum level is a free offset.
 - Build-by-hand first, library call second, printed agreement check third; fixed
   seeds throughout.
 

@@ -11,9 +11,10 @@ aliases or shims**: every old name below is gone and raises `ImportError`,
 `AttributeError` or `TypeError`. Numerical results are unchanged except where
 "Numerical changes" below says otherwise, with how far the golden master
 moved; otherwise it (UNICOR, TODCOR, TIRAVEL, periodograms, instrument
-readers) passes bit-for-bit or at 1e-9 relative. The `unicor` and `todcor` engine APIs changed
-only additively: the `output` modes and the per-order / per-window atoms (see
-"Other changes").
+readers) passes bit-for-bit or at 1e-9 relative. The `unicor` engine API
+changed only additively: the `output` modes and the per-order atoms (see
+"Other changes"). The `todcor` API changed with its windowing (see "Numerical
+changes"): the taper and continuum options are gone.
 
 ### Modules
 
@@ -186,6 +187,58 @@ Keys of `results_frequency` / `results_power`:
 
 ### Numerical changes (2026-10-15)
 
+- **TODCOR fits each order on its observed pixels, with templates that
+  reach past them.** The templates were shifted circularly within the order
+  and both data and templates were tapered (`alpha`); a line shifted off one
+  end re-entered at the other, and the taper, moving with the shifted
+  template but not with the data, pulled |v| inward. Now `prepare_window`
+  resamples each template onto the order's grid *extended* by the largest
+  trial shift (`v_max`, fine map included) plus a 20-pixel ramp to zero
+  (odd total length), the χ² runs over the observed pixels only, there is no
+  taper, and each order has a free continuum offset, profiled out. Observed
+  pixels the templates do not reach are dropped, never filled with 1.
+  Removed: `alpha`, `continuum` and `zeta_max` (`CCF2d.cross_correlate`,
+  `todcor.window_stats`, `todcor_map`, `prepare_window`) and
+  `TodcorWindow.taper_power` (now `extension`); `window_stats` returns S11
+  and S22 per trial velocity and a genuinely 2-D A12; `model_flux(g1, g2, n,
+  dv, v1, v2, a1, a2)` works on the extended templates; `todcor` no longer
+  re-exports `tukey_window`, `rfft_positive` or `parseval_weights` (they stay
+  in `unicor`). A template's continuum level no longer matters, so TIRAVEL
+  templates feed `CCF2d` as they are. `TodcorWindow.reach` (pixels, both
+  signs and conventions of ±`v_max`) passed to `window_stats(reach=)`
+  refuses a trial shift that would read the ramp.
+- **TODCOR's peak is read by a degree-6 polynomial**, not a quadratic patch:
+  `crlb_from_map` fits ±4 fine-map nodes (`CCF2d.crlb_half` 3 → 4) and takes
+  the maximum by Newton steps and the covariance from the analytic Hessian.
+  The quadratic patch misread the narrow ln L peak by up to 6.2 m/s.
+  Noise-free bias, analytic line forests at R = 60,000: up to 11.8 m/s (50 Å
+  orders) and 1.9 m/s (200 Å) with the old windowing, ≤ 0.023 m/s and
+  ≤ 0.016 m/s now; amplitudes exact.
+- **Per-order TODCOR amplitudes.** `CCF2d.cross_correlate(amplitudes=
+  'per_order')` (and `todcor.profile_per_window`, `joint_fit(amplitudes=)`,
+  `window_noise(amplitudes=)`) fits one (a1, a2) per order with shared
+  velocities, for a light ratio that changes across the spectrum; `'shared'`
+  stays the default. `a1_best` / `a2_best` (and `Observations.amps1/2`) then
+  have one value per order, and the per-order amplitude maps are kept only
+  with `keep_windows`; χ²_red divides by Σν − 2 − 2·n_orders. A template flat
+  to 10⁻⁹ of its own scale in an order is set to zero there and its
+  component gets amplitude 0 (it used to fit round-off with an absurd
+  amplitude and a spurious velocity); the rule does not depend on the
+  templates' units.
+- **TODCOR's errors after the band-pass count only the noise it kept**, as
+  UNICOR's do: `CCF2d` divides each order's `oversampling` by
+  `Info['NoiseFraction']`. On simulated HARPS-like SB2s (7 × 50 epochs) the
+  RV scatter over the quoted error was 1.8 after `preprocess` (errors too
+  small) and is now 0.86 (primary) / 0.90 (secondary); unfiltered spectra
+  are unaffected (0.97 / 1.06).
+- Effect of the TODCOR changes: the SB2 golden RVs moved by up to 1.2 m/s
+  (primary) and 5.7 m/s (secondary), and their errors fell by ~10% (the
+  orders' ends are no longer faded out); against the truth the rms went
+  8.1 → 7.5 m/s and 11.7 → 7.6 m/s. The atoms-baseline SB2 moved by +2.2 m/s
+  and −28 m/s (truth offsets +8.5 → +10.6 m/s and +47.5 → +19.6 m/s), and
+  with `sigma=None` its errors fell from 8.3 to 5.1 m/s, now equal to those
+  at the true sigma: the old residual carried misfit. Tutorial 04's orbit
+  residuals: primary 4.5 → 3.5 m/s, secondary 8.2 → 6.5 m/s.
 - **No taper in preprocessing; the band-pass filters the order's ends
   cleanly.** `Spectrum.preprocess` no longer multiplies each order by a Tukey
   window, and `apply_cosine_bell` and `alpha` are removed (`preprocess`,
@@ -366,13 +419,13 @@ Keys of `results_frequency` / `results_power`:
   `measure_rv`, bit-for-bit as before (pinned by `tests/test_atoms_baseline.py`).
   A malformed template (wavelengths not strictly increasing, or not one per flux
   value) raises `ValueError` naming the template order.
-- **Per-window TODCOR atoms** (additive; `sparta-todcor` 0.2.0): `prepare_window`
-  (returns `TodcorWindow`: continuum removal, template resampling with continuum
-  fill, Tukey taper), `refine_grid` (the fine local map), `joint_fit` (returns
+- **Per-window TODCOR atoms** (`sparta-todcor` 0.2.0): `prepare_window`
+  (returns `TodcorWindow`: the data residual and the two templates on the
+  window's grid extended by the largest shift), `refine_grid` (the fine local map), `joint_fit` (returns
   `TodcorFit`: pool, coarse map, fine map, CRLB and the values at the refined
   peak; `fine_cache` shares the fine statistics between passes) and
   `window_noise` (each window's noise from its share of the joint chi2).
-  `CCF2d.cross_correlate` is a composition of them, bit-for-bit as before; the
+  `CCF2d.cross_correlate` is a composition of them; the
   resampled-noise model is public as `sparta.preprocess.resampling_noise_psd` and
   `native_phases`. `CCF2d` prefixes `order {I}: ` to window-preparation errors.
 - **TIRAVEL and PDC p-value atoms** (additive): `sparta.tiravel_ops.build_tiravel(waves,

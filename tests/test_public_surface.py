@@ -146,9 +146,8 @@ METHODS = {
     "CCF2d": {
         "best_fit_spectrum": ["order"],
         "cross_correlate": ["spectrum", "template1", "template2", "dv", "vel_bound", "dvel",
-                            "v1_grid", "v2_grid", "sigma", "alpha", "nonneg", "zeta_max",
-                            "continuum", "orders", "keep_windows", "velocity_convention",
-                            "output"],
+                            "v1_grid", "v2_grid", "sigma", "nonneg", "amplitudes",
+                            "orders", "keep_windows", "velocity_convention", "output"],
         "plot": ["marginals", "figsize"],
     },
     "TIRAVEL": {

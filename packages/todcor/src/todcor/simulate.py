@@ -7,19 +7,21 @@
 #
 # Kept separate from estimator.py so that "makes data" and "fits data" never
 # share a file: composite_flux shifts by physical resampling (simulating an
-# observation), while model_flux uses the Fourier phase shift (matching the fit
-# exactly).
+# observation), while model_flux uses the fit's own Fourier shift of the
+# extended templates (matching the fit exactly).
 #
 # Conventions: wavelengths in Angstrom, velocities in km/s ('cz' Doppler
 # convention unless velocity_convention='relativistic'), normalized flux
 # (continuum = 1).
 #
-# Dependencies: numpy, unicor.dsp.
+# Dependencies: numpy, unicor.dsp, the estimator's shift.
 """Forward model for the TODCOR engine."""
 
 import numpy as np
 
-from unicor.dsp import doppler_factor, resample, shift_kms
+from unicor.dsp import doppler_factor, resample
+
+from .estimator import _shifted_rows
 
 
 # =============================================================================
@@ -99,22 +101,26 @@ def composite_flux(wave_grid, templates, velocities, amplitudes, velocity_conven
 
 # =============================================================================
 # =============================================================================
-def model_flux(wave_grid, dv, g1, g2, v1, v2, a1, a2, velocity_convention='cz'):
-    """Reconstruct the best-fit composite flux on the grid (for residual plots).
+def model_flux(g1, g2, n, dv, v1, v2, a1, a2, velocity_convention='cz'):
+    """The best-fit composite on a window's pixels, as the fit models it.
 
-    Uses the same Fourier phase-shift model as the fit, so the returned flux is
-    exactly ``1 + a1*shift(g1, v1) + a2*shift(g2, v2)`` evaluated via FFT --
-    the circular shift the estimator actually assumes, not a resampled one.
+    The two templates, given on the window's grid extended on each side (as
+    :func:`todcor.estimator.prepare_window` makes them), are shifted with the
+    same Fourier phase factors as :func:`todcor.estimator.window_stats` and
+    read on the window's ``n`` pixels. The window's free offset (its
+    continuum level) is the caller's: for the fitted one, add the mean of
+    ``data - model``.
 
     Parameters
     ----------
-    wave_grid : ndarray
-        The uniform log-lambda grid (Angstrom); only its length is used.
+    g1, g2 : ndarray
+        The template residuals on the extended grid, as :func:`todcor.estimator.prepare_window`
+        makes them (length ``n + 2e`` or ``n + 2e + 1``).
+    n : int
+        Pixels in the window.
     dv : float
         Velocity step of the grid (km/s), ``c`` times its actual ln(lambda)
-        step (as in :func:`todcor.estimator.window_stats`).
-    g1, g2 : ndarray
-        Template residuals on that grid (continuum 0).
+        step.
     v1, v2 : float
         Component velocities (km/s).
     a1, a2 : float
@@ -124,14 +130,9 @@ def model_flux(wave_grid, dv, g1, g2, v1, v2, a1, a2, velocity_convention='cz'):
 
     Returns
     -------
-    flux : ndarray
-        The modelled composite flux (continuum 1).
+    ndarray, shape (n,)
+        ``a1 * G1(v1) + a2 * G2(v2)`` on the window (flux units, no offset).
     """
-    n = len(wave_grid)
-    zeta = np.fft.rfftfreq(n, d=dv)
-    G1 = np.fft.rfft(np.asarray(g1, float))
-    G2 = np.fft.rfft(np.asarray(g2, float))
-    s1, s2 = shift_kms(v1, velocity_convention), shift_kms(v2, velocity_convention)
-    M = (a1 * G1 * np.exp(-2j * np.pi * zeta * s1)
-         + a2 * G2 * np.exp(-2j * np.pi * zeta * s2))
-    return 1.0 + np.fft.irfft(M, n=n)
+    rows1 = _shifted_rows(g1, n, dv, [v1], velocity_convention)[0]
+    rows2 = _shifted_rows(g2, n, dv, [v2], velocity_convention)[0]
+    return a1 * rows1 + a2 * rows2

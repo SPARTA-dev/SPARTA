@@ -71,40 +71,44 @@ class CCF2d:
         either side of the coarse argmax, ``refine_factor`` times finer) then
         measures it, for ~(2 * 2 * 10 + 1)^2 = 1681 extra nodes.
 
-        Why a fine map rather than a quadratic fit to the coarse one: logL
-        follows the *squared* correlation, so its peak is only ~sigma_ccf/sqrt(2)
-        wide (~2.4 km/s for 8 km/s lines), and a quadratic over +/-3 coarse
-        nodes picks up its quartic fall-off -- a bias of several CRLB sigma.
-        For the coarse argmax to be trustworthy at all the coarse step must
-        already resolve the peak (dvel <~ sigma_ccf); a tenth of it puts the
-        +/-``crlb_half``-node quadratic patch within ~0.3 sigma_ccf of the peak,
-        where the quartic term changes the curvature by only a few per cent and
-        the peak location negligibly.
+        The peak and its errors come from a degree-6 polynomial fitted to the
+        fine log-likelihood map over +/-``crlb_half`` nodes
+        (``todcor.crlb_from_map``): logL follows the *squared* correlation,
+        so its peak is narrow (~sigma_ccf/sqrt(2)), and a quadratic patch
+        misread it by up to ~6 m/s for lines of ~2 km/s FWHM; degree 6 reads it to
+        ~0.02 m/s. For the coarse argmax to be trustworthy the coarse step must
+        resolve the peak (dvel <~ sigma_ccf).
         '''
         self.default_dv = 0.1 * u.kilometer / u.second     # log-lambda grid step
         self.default_dvel = 1.0                            # (v1, v2) map step, km/s
         self.refine_span = 2       # fine-map half-width, in coarse steps
         self.refine_factor = 10    # coarse step / fine step
-        self.crlb_half = 3         # half-width (nodes) of the quadratic patch
+        self.crlb_half = 4         # half-width (nodes) of the degree-6 peak patch
         self.min_noise_dof = 50    # fewest dof to estimate one window's noise
 
     # =============================================================================
     # =============================================================================
     def cross_correlate(self, spectrum, template1, template2,
                         dv=None, vel_bound=150, dvel=None,
-                        v1_grid=None, v2_grid=None, sigma=None, alpha=0.1,
-                        nonneg=True, zeta_max=None, continuum='median',
-                        orders=None, keep_windows=True, velocity_convention='cz',
-                        output='ccf'):
+                        v1_grid=None, v2_grid=None, sigma=None, nonneg=True,
+                        amplitudes='shared', orders=None, keep_windows=True,
+                        velocity_convention='cz', output='ccf'):
         '''
         Fit both components of a double-lined spectrum simultaneously.
 
-        Every spectral order is prepared as one TODCOR *window* (resampled
-        templates, continuum removed, apodised) and reduced to its six
-        sufficient statistics; the windows are then summed and profiled into a
-        single joint fit with shared ``(v1, v2, a1, a2)``. Pooling orders this
-        way is valid because they belong to one epoch -- see
-        :func:`todcor.estimator.combine_stats`.
+        Every spectral order is prepared as one TODCOR *window*: its observed
+        pixels, and the two templates on that grid extended by the largest
+        trial velocity, so that every shift reads the templates' real
+        spectrum -- nothing wraps around, no line goes missing at the edges,
+        and no taper is needed (``todcor.prepare_window``). Orders whose
+        templates do not reach that far lose the uncovered pixels. Each window
+        is reduced to its sufficient statistics over its observed pixels, with
+        a free continuum offset profiled out, and the windows are profiled
+        into one joint fit with shared ``(v1, v2)``: with shared ``(a1, a2)``
+        too (``amplitudes='shared'``, by summing the statistics), or with each
+        order's own amplitudes, i.e. its own light ratio
+        (``amplitudes='per_order'``). Pooling orders is valid because they
+        belong to one epoch -- see :func:`todcor.estimator.combine_stats`.
 
         The coarse map locates the peak; the statistics are then re-evaluated
         on a fine local grid around it (see ``__init__``), and the velocities
@@ -116,17 +120,20 @@ class CCF2d:
         Each order counts its *native* pixels, not its resampled ones: the
         spectrum's ``native_steps()`` (the coarsest sampling it has had before
         this call) give
-        ``oversampling = max(1, dv_native / dv)``, and the Fisher weights are
-        divided by it. Otherwise the ~``dv_native / dv`` analysis pixels that
-        interpolate one native pixel would each count as independent, and the
-        CRLB would shrink by ``sqrt(dv_native / dv)``.
+        ``oversampling = max(1, dv_native / dv) / noise_fraction``, and the
+        Fisher weights are divided by it. Otherwise the ~``dv_native / dv``
+        analysis pixels that interpolate one native pixel would each count as
+        independent, and the CRLB would shrink by ``sqrt(dv_native / dv)``.
+        ``noise_fraction`` is ``Info['NoiseFraction']`` (1 when absent): after
+        a band-pass only that share of the native noise is left, and of the
+        native pixels' information, as in CCF1d.
 
         sigma=None runs the joint fit twice. Pass 1 fits every order at unit
         noise and locates the joint peak (coarse and fine maps). Each order's
         noise is then estimated from its own share of the joint chi2 there,
-        sigma_i^2 = chi2_i / (nu_i * (1 - 4 / sum(nu))) -- the four shared
-        parameters' dof charged in proportion to nu_i (see
-        todcor.window_noise).
+        sigma_i^2 = chi2_i / dof_i, with the shared parameters' dof charged
+        in proportion to nu_i and, under ``amplitudes='per_order'``, each
+        order's own two amplitudes charged to it (see todcor.window_noise).
         Pass 2 re-weights each order's statistics by 1 / sigma_i^2 (no new
         FFTs: the statistics are linear in the weights, and the per-order fine
         maps are reused when the coarse argmax has not moved) and re-profiles;
@@ -140,10 +147,11 @@ class CCF2d:
         at a 10x noise contrast, +0.5 per cent at 3x -- i.e. its errors are
         that much conservative; the RVs are unaffected.
 
-        chi2_red = chi2_best / (sum(nu) - 4). Interpolated noise is smoother
+        chi2_red = chi2_best / (sum(nu) - 4) for shared amplitudes, and
+        chi2_best / (sum(nu) - 2 - 2 n_orders) for per-order ones. Interpolated noise is smoother
         than the native noise -- a cubic spline keeps ~0.87 of its variance
-        when its nodes fall at random between the native pixels, and the
-        taper ~0.94 more -- so dividing by the bare n_eff would leave chi2_red
+        when its nodes fall at random between the native pixels -- so dividing
+        by the bare n_eff would leave chi2_red
         ~0.8 for honest noise. ``nu`` instead counts the noise power the fit
         actually sees (sparta.preprocess.resampling_noise_psd, from the
         resampler's impulse responses at the sub-pixel phases of the native
@@ -160,12 +168,13 @@ class CCF2d:
 
         That calibration -- nu, chi2_red, the sigma=None estimate, and the
         native-pixel count behind the CRLB -- assumes white noise on the
-        native pixels, resampled once. It does not hold after
-        ``filter_spectrum`` / ``preprocess`` (band-pass filtering,
-        per-order normalisation, a linear resampling before the log one): in
-        Monte Carlo on such spectra the RV scatter is only 0.72-0.74 of eRV,
-        i.e. the errors are ~1.4x conservative. Calibrate eRV by simulation
-        (or by the RV scatter of a constant star) for preprocessed spectra.
+        native pixels, resampled once. After ``filter_spectrum`` /
+        ``preprocess`` the ``noise_fraction`` correction is approximate: on
+        simulated HARPS-like SB2s the errors are ~1.1-1.2x the RV scatter
+        (without it they were ~0.55x); an exact error model for filtered
+        spectra is an open item (docs/roadmap.md). Calibrate eRV by
+        simulation (or by the RV scatter of a constant star) where it
+        matters.
 
         Parameters
         ----------
@@ -193,21 +202,17 @@ class CCF2d:
             face value. Its order-to-order ratios weight the orders; its
             overall scale sets the uncertainties only. Default None: estimate
             each order's noise from its own residual and weight the orders by
-            it (see below).
-        alpha : float
-            Tukey apodisation parameter applied to each window. Set 0 to skip
-            (e.g. if the spectrum was already tapered by
-            ``Spectrum.preprocess``).
+            it (see below). Use None after ``preprocess`` /
+            ``filter_spectrum``: the flux is then normalised and band-passed,
+            so a native-pixel noise no longer describes it.
         nonneg : bool
-            Constrain both amplitudes to be non-negative (physical light
+            Constrain the amplitudes to be non-negative (physical light
             fractions).
-        zeta_max : float, optional
-            Low-pass on the Fourier axis (s/km), e.g. ``R / c`` to drop scales
-            finer than the resolution.
-        continuum : 'median' or float
-            Remove each array's median (default), or subtract this fixed
-            continuum level. The same is applied to data and templates, which
-            is what makes the amplitudes meaningful.
+        amplitudes : {'shared', 'per_order'}
+            One amplitude pair for all orders (default), or one per order --
+            its own light ratio, for two stars of different temperature whose
+            ratio changes across the spectrum. Per-order costs two free
+            parameters per order; with a constant ratio, shared is tighter.
         orders : sequence of int, optional
             Order indices to use. Default all.
         keep_windows : bool
@@ -244,14 +249,19 @@ class CCF2d:
             ``Corr2d``
                 dict with the coarse map: 'v1_grid', 'v2_grid' (km/s), 'R'
                 (the two-dimensional correlation), 'logL_profile',
-                'logL_marginal', 'a1', 'a2', 'chi2' (all (n1, n2) maps),
+                'logL_marginal', 'a1', 'a2', 'chi2' (all (n1, n2) maps;
+                under ``amplitudes='per_order'`` 'a1' / 'a2' are
+                (n_orders, n1, n2), kept only with ``keep_windows``, else
+                None),
                 'map' (whichever of 'R' / 'logL_profile' ``output`` selects)
                 and 'output', 'best' (its argmax node) and 'units'; 'fine',
                 the same for the fine local map (None if refinement was
                 skipped); and the results: 'RV1', 'RV2' (km/s, refined),
                 'eRV1', 'eRV2' (km/s), 'rho12' (v1-v2 correlation), 'cov'
                 (2x2, km^2/s^2), 'peak' (the coarse argmax node, km/s),
-                'a1_best', 'a2_best' and 'R_best' (at the refined RVs), 'sigma' (the native
+                'a1_best', 'a2_best' (one value per window, aligned with
+                ``windows``, under ``amplitudes='per_order'``) and 'R_best'
+                (at the refined RVs), 'amplitudes', 'sigma' (the native
                 per-pixel noise behind the fit and its errors: the input as
                 given, or under sigma=None an array of the per-window
                 estimates, aligned with ``windows``), 'sigma_from_fit' (bool:
@@ -266,14 +276,18 @@ class CCF2d:
             ``stats``
                 The *combined* coarse-map sufficient statistics, on that noise
                 scale, enough to re-profile (e.g. with a different
-                ``nonneg``) without touching the spectrum again.
+                ``nonneg``) without touching the spectrum again. They pool
+                the orders with shared amplitudes: under
+                ``amplitudes='per_order'`` re-profiling them gives the shared
+                fit, not the one reported.
             ``windows``
                 Per-order diagnostics: the order index, the window's own
-                'S11' / 'S22' / 'SD' (at the input sigma, unit noise under
-                sigma=None), 'dv' (its analysis step, c times the actual
+                'S11' / 'S22' (the templates' power over the window, median
+                over the trial velocities) / 'SD' (at the input sigma, unit
+                noise under sigma=None), 'dv' (its analysis step, c times the actual
                 ln(lambda) step, km/s), 'oversampling' (dv_native / dv, at
-                least 1), 'n_eff' (the independent-pixel count
-                n_pix / oversampling), 'nu' (the expected chi2 of its pure
+                least 1, divided by the noise fraction), 'n_eff' (the
+                independent-pixel count n_pix / oversampling), 'nu' (the expected chi2 of its pure
                 noise), 'sigma' (its noise: input or estimated),
                 'sigma_fallback' (True if sigma=None could not estimate it and
                 used the common estimate), and (if ``keep_windows``) the
@@ -308,6 +322,9 @@ class CCF2d:
             dv = float(dv) << u.kilometer / u.second
 
         native = spec.native_steps()
+        # A band-pass keeps only part of the native noise (and of the
+        # information): count that share of the native pixels, as CCF1d does.
+        noise_fraction = np.asarray(spec.Info.get('NoiseFraction', [1.0] * len(spec.wv)), float)
         # Where the native pixels sit is known only if nothing has resampled
         # the spectrum yet: then they are its current grid.
         native_wv = None if 'NativeStep' in spec.Info else [np.asarray(w, float) for w in spec.wv]
@@ -344,27 +361,31 @@ class CCF2d:
         # The prepared arrays are needed until the fine pass and the evaluation
         # at the refined peak are done; only keep_windows decides whether they
         # outlive this call.
+        if amplitudes not in ('shared', 'per_order'):
+            raise ValueError(f"amplitudes must be 'shared' or 'per_order', not {amplitudes!r}")
+        # The largest |velocity| any window is evaluated at: the coarse grids
+        # plus the fine map around their edge nodes.
+        reach = self.refine_span * max(np.max(np.diff(v1_grid), initial=0.0),
+                                       np.max(np.diff(v2_grid), initial=0.0))
+        v_max = max(np.max(np.abs(v1_grid)), np.max(np.abs(v2_grid))) + reach
         prepared, stats, windows = [], [], []
         for I in orders:
             try:
                 win = prepare_window(spec.wv[I], spec.sp[I],
                                      *_template_order(template1, I),
-                                     *_template_order(template2, I),
-                                     continuum=continuum, alpha=alpha)
+                                     *_template_order(template2, I), v_max=v_max)
             except ValueError as err:
                 raise ValueError(f"order {I}: {err}") from err
             w, step = win.wave, win.dv
             ratio = native[I] / step
-            oversampling = max(1.0, ratio)
+            oversampling = max(1.0, ratio) / noise_fraction[I]
             if resampled:
                 phases = None if native_wv is None else native_phases(native_wv[I], w, step)
                 psd = resampling_noise_psd(len(w), native[I], step, phases)
             else:
                 psd = np.ones(len(w) // 2)
-            noise_psd = win.taper_power * psd
-            kw = dict(sigma=sigma[I], zeta_max=zeta_max,
-                      oversampling=oversampling, noise_psd=noise_psd,
-                      velocity_convention=velocity_convention)
+            kw = dict(sigma=sigma[I], oversampling=oversampling, noise_psd=psd,
+                      velocity_convention=velocity_convention, reach=win.reach)
             st = window_stats(win.data_g, win.g1, win.g2, step, v1_grid, v2_grid, **kw)
             stats.append(st)
             prepared.append((win, kw))
@@ -373,7 +394,8 @@ class CCF2d:
             # order can constrain, and they cost nothing. The full arrays are
             # optional (see keep_windows).
             diag = {'order': I, 'dv': step,
-                    'S11': st['S11'], 'S22': st['S22'], 'SD': st['SD'],
+                    'S11': float(np.median(st['S11'])), 'S22': float(np.median(st['S22'])),
+                    'SD': st['SD'],
                     'oversampling': oversampling, 'n_eff': len(w) / oversampling,
                     'nu': st['nu'], 'sigma': float(sigma[I]), 'sigma_fallback': False}
             if keep_windows:
@@ -385,25 +407,26 @@ class CCF2d:
         # many-order spectrum. The per-window list lives until the re-weighted
         # pass (sigma=None) has re-pooled it.
         pooled = combine_stats(stats)
-        # A template with no lines over the fitted orders makes the 2x2 amplitude
-        # system singular, and the map collapses to a flat, meaningless argmax.
+        # A template with no lines over the fitted orders (prepare_window
+        # zeroes a flat one) leaves its velocity unconstrained: the map is flat
+        # along it and its argmax meaningless.
         for k, name in (('S11', 'template1'), ('S22', 'template2')):
-            if not pooled[k] > 0:
+            if not np.max(pooled[k]) > 0:
                 raise ValueError(
                     f"{name} has no spectral structure over the fitted orders "
-                    f"({k} = {pooled[k]}); check its wavelength coverage and "
-                    "air/vacuum frame against the observation")
+                    f"(max {k} = {np.max(pooled[k]):.3g}); check its wavelength coverage "
+                    "and air/vacuum frame against the observation")
 
         # Per-window fine-map statistics, keyed by the coarse node they are
         # centred on: the re-weighted pass reuses them if its coarse argmax
         # has not moved.
-        fit_kw = dict(nonneg=nonneg, output=output, half=self.crlb_half,
+        fit_kw = dict(nonneg=nonneg, output=output, amplitudes=amplitudes, half=self.crlb_half,
                       span=self.refine_span, factor=self.refine_factor, fine_cache={})
         fit = joint_fit(stats, None, prepared, v1_grid, v2_grid, **fit_kw)
         noise = sigma_in
         if sigma_from_fit:
             noise, fallback = window_noise(fit.window_chi2, [st['nu'] for st in fit.at_peak],
-                                           min_dof=self.min_noise_dof)
+                                           min_dof=self.min_noise_dof, amplitudes=amplitudes)
             if fallback.any():
                 bad = [diag['order'] for diag, fb in zip(windows, fallback) if fb]
                 warnings.warn(
@@ -416,6 +439,10 @@ class CCF2d:
 
         coarse, crlb, at_peak = fit.coarse, fit.crlb, fit.best
         res = dict(fit.profile)
+        if amplitudes == 'per_order' and not keep_windows:
+            # One (n1, n2) amplitude map per order: dropped like the windows'
+            # arrays, as they would dominate memory on a many-order spectrum.
+            res['a1'] = res['a2'] = None
         res['units'] = u.km / u.s
         res['fine'] = fit.fine
         if coarse['on_edge']:
@@ -435,6 +462,7 @@ class CCF2d:
                    peak=coarse['peak'],
                    a1_best=at_peak['a1'], a2_best=at_peak['a2'], R_best=at_peak['R'],
                    chi2_best=at_peak['chi2'], chi2_red=at_peak['chi2_red'],
+                   amplitudes=amplitudes,
                    sigma=noise, sigma_from_fit=sigma_from_fit,
                    velocity_convention=velocity_convention)
 
@@ -451,8 +479,9 @@ class CCF2d:
         '''
         The best-fit composite flux for one window, for residual inspection.
 
-        Uses the same Fourier phase-shift model as the fit, evaluated at the
-        peak velocities and amplitudes.
+        Uses the fit's own model -- the extended templates shifted to the
+        refined velocities, scaled by the amplitudes, plus the window's
+        fitted continuum offset -- on the window's observed pixels.
 
         Parameters
         ----------
@@ -467,7 +496,7 @@ class CCF2d:
         model : ndarray
             The modelled composite (continuum 1).
         data : ndarray
-            The prepared (continuum-removed, tapered) data residual + 1.
+            The window's data (its median removed) + 1.
 
         Raises
         ------
@@ -480,10 +509,15 @@ class CCF2d:
                 'the prepared arrays were not retained; re-run '
                 'cross_correlate with keep_windows=True to inspect residuals')
         r = self.Corr2d
-        model = model_flux(win['wv'], win['dv'], win['g1'], win['g2'],
-                           r['RV1'], r['RV2'], r['a1_best'], r['a2_best'],
+        a1, a2 = r['a1_best'], r['a2_best']
+        if np.ndim(a1):                       # amplitudes='per_order': this window's
+            a1, a2 = a1[order], a2[order]
+        model = model_flux(win['g1'], win['g2'], len(win['wv']), win['dv'],
+                           r['RV1'], r['RV2'], a1, a2,
                            velocity_convention=r['velocity_convention'])
-        return win['wv'], model, win['data_g'] + 1.0
+        # The window's continuum offset is a free parameter of the fit.
+        model = model + np.mean(win['data_g'] - model)
+        return win['wv'], model + 1.0, win['data_g'] + 1.0
 
     # =============================================================================
     # =============================================================================

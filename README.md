@@ -176,8 +176,9 @@ periodograms.
   it, so oversampling does not shrink the errors.
 - **Errors are not calibrated after filtering.** The ML and Cramér–Rao errors
   assume white noise on the native pixels. `preprocess` (band-pass filter,
-  normalisation, a linear-λ resampling) correlates the noise; in Monte Carlo
-  the errors are then 17–38 % (UNICOR) or ~1.4× (TODCOR) too large. Calibrate
+  normalisation, a linear-λ resampling) correlates the noise; both engines
+  count only the share of noise the filter kept, and in Monte Carlo the errors
+  are then 25–40 % (UNICOR) or 10–20 % (TODCOR) too large. Calibrate
   them by simulation, or by the scatter of a constant star.
 - **Air or vacuum** depends on the product (listed per product in
   [`docs/instruments.md`](https://github.com/SPARTA-dev/SPARTA/blob/master/docs/instruments.md)).

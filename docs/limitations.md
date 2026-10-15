@@ -34,39 +34,45 @@ with the details. Proposed fixes are collected in [roadmap.md](roadmap.md).
 
 ## TODCOR
 
-- **Bias on short, line-crowded windows.** The Fourier shift is circular: a
-  line pushed past one end of a window re-enters at the other, and the taper
-  only damps the ends. On noiseless simulated SB2 spectra
-  ([tutorial 04](../examples/tutorials/04_todcor.ipynb)) the largest
-  velocity bias was 15.6 m/s on a 50 Å window (`alpha=0.1`,
-  `continuum='median'`) and 3.1 m/s on a 200 Å window (`alpha=0.3`,
-  `continuum=1.0`); the test suite quotes ~10 m/s at |v| ≈ 45 km/s over 50 Å
-  and ~2 m/s over 200 Å. Use long windows and a firm taper; the
-  template is not extended or zero-padded beyond the window yet.
-- **One amplitude pair for all orders.** Pooled orders share (a1, a2). The
-  light ratio of two stars of different temperature changes with wavelength,
-  so over a wide range one pair is an approximation
-  ([todcor_method.md §7](../packages/todcor/docs/todcor_method.md)).
-- **`continuum='median'` biases the amplitudes.** The median of an
-  absorption spectrum lies below its continuum. The test suite quotes the
-  amplitudes ~0.5% low; in tutorial 04 (50 Å window) they came out 0.696 and
-  0.297 for 0.7 and 0.3. For continuum-normalised spectra pass
-  `continuum=1.0`; for filtered spectra the median (≈ 0) is right.
+- **Templates must reach past every order.** `CCF2d` reads each template up
+  to v_max = the largest |trial velocity| plus the fine map's reach
+  (`refine_span` = 2 coarse steps) beyond each end of each order, and drops
+  the observed pixels it cannot (an order with fewer than 2 left raises). No
+  line is lost to a wrap-around any more, but a short template costs pixels:
+  a template cut by `Template.cut_multiorder_like(spectrum, margins=150)`
+  leaves ~2 km/s plus a pixel at each end of each order uncovered at the
+  default `vel_bound` and `dvel`.
+- **A small velocity bias remains.** On noise-free simulated SB2 spectra
+  (R = 60,000, templates sampled 10× finer than a 0.5 km/s grid) the
+  pipeline's largest velocity error is ≤ 0.023 m/s on a 50 Å window and
+  ≤ 0.016 m/s on 200 Å (the earlier circular, tapered shift: 11.8 and
+  1.9 m/s). The exact χ² minimum is within 0.012 m/s of the truth; that
+  remainder is the linear resampling of the templates onto the analysis grid
+  ([todcor_method.md §2](../packages/todcor/docs/todcor_method.md#2-the-window-observed-pixels-extended-templates)).
+- **Amplitudes are shared across orders by default.** The light ratio of two
+  stars of different temperature changes with wavelength, so over a wide
+  range one (a1, a2) is an approximation. `amplitudes='per_order'` fits one
+  pair per order, at two free parameters per order; within an order the
+  ratio is still one number
+  ([correlation_engines.md](correlation_engines.md#pooling-orders)).
 - **Twin templates have no component labels.** With the same template for
   both stars the fit is symmetric under exchanging (v1, a1) and (v2, a2), so
   which star is "1" is arbitrary and can change from epoch to epoch. Give the
   components disjoint trial grids (`v1_grid`, `v2_grid`) or sort the epochs'
   solutions afterwards.
-- **A template whose continuum is not 1.** `CCF2d` fills observed pixels
-  outside a template's coverage with 1.0, the normalised continuum. A
-  TIRAVEL template is a normalised co-add whose continuum is near 0 (~0.01
-  in a simulated test), so the fill puts a large step at the uncovered ends of
-  each order. Cut the observed orders to the template's coverage, or use the
-  TIRAVEL template with UNICOR, which drops uncovered pixels instead.
-- **Local Cramér–Rao errors.** The errors come from a quadratic fit to the
-  log-likelihood at an isolated, resolved peak. They degrade for blended or
-  nearly degenerate components and are NaN when the peak is on the edge of the
-  velocity grid ([correlation_engines.md](correlation_engines.md#peak-refinement-and-the-errors)).
+- **A TIRAVEL template spans only the observed range.** Its continuum level no
+  longer matters (each order's offset is free, and uncovered pixels are
+  dropped, not filled), so it can feed `CCF2d`. But it covers only the
+  epochs' common rest-frame range, so each order loses about v_max at each
+  end (~2.5 Å at 5000 Å for the default 150 km/s scan); narrow the scan
+  (`vel_bound` or the trial grids) to keep more. Its scale is arbitrary, so
+  the amplitudes against it are not light fractions.
+- **Local Cramér–Rao errors.** The errors come from a degree-6 polynomial
+  fitted to the log-likelihood around an isolated, resolved peak. They degrade
+  for blended or nearly degenerate components and are NaN when the peak is on
+  the edge of the velocity grid or the polynomial's maximum lies more than one
+  fine step from the grid maximum
+  ([correlation_engines.md](correlation_engines.md#peak-refinement-and-the-errors)).
 
 ## TIRAVEL
 
@@ -90,11 +96,12 @@ The calibration of UNICOR's and TODCOR's errors is summarised in
   kept, an approximate correction that errs high: eRV/scatter 1.25–1.4 on
   simulated spectra, and ~3 on the real HARPS TOI-193 RVs, where template
   mismatch adds to it; an exact error model for filtered spectra is open
-  ([roadmap](roadmap.md)); TODCOR ~1.4× (to be re-measured);
+  ([roadmap](roadmap.md)); TODCOR, with the same correction, 1.1–1.2× on
+  simulated HARPS-like SB2s;
 - conservative under photon noise: UNICOR scatter/eRV ≈ 0.89 (~10%);
 - conservative with template mismatch, which is counted as noise;
 - TODCOR: conservative on analysis grids coarser than native whose nodes fall
-  between native pixels (scatter/eRV 0.82–0.91 at 1.5× native); an explicit
+  between native pixels (scatter/eRV 0.8–0.9 at 1.5× native); an explicit
   `sigma` is taken at face value and the errors are not rescaled by
   `chi2_red`.
 

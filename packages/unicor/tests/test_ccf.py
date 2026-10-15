@@ -902,3 +902,13 @@ def test_a_noise_fraction_scales_the_independent_bins_and_the_error():
     with pytest.raises(ValueError, match="noise_fraction"):
         unicor.ccf_order(wave, noisy, ext, _forest(ext), 40, dv_kms=0.5,
                          native_step_kms=0.5, noise_fraction=1.5)
+
+
+def test_parseval_weights_match_real_space():
+    rng = np.random.default_rng(0)
+    for n in (256, 257):
+        x = rng.standard_normal(n)
+        x -= x.mean()  # DC removed, as in the fit
+        X = np.fft.rfft(x)[1:]
+        w = unicor.parseval_weights(n, sigma=1.0)
+        assert np.sum(w * np.abs(X) ** 2) == pytest.approx(np.sum(x ** 2), rel=1e-9)

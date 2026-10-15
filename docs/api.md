@@ -916,10 +916,8 @@ CCF2d.cross_correlate(
     v1_grid=None,
     v2_grid=None,
     sigma=None,
-    alpha=0.1,
     nonneg=True,
-    zeta_max=None,
-    continuum='median',
+    amplitudes='shared',
     orders=None,
     keep_windows=True,
     velocity_convention='cz',
@@ -937,11 +935,9 @@ Fit both components of a double-lined spectrum simultaneously.
 - `vel_bound` (*float or (float, float)*): Trial-velocity range (km/s): `[-vel_bound, vel_bound]` if scalar, else [min, max]. Used for both components unless explicit grids are given. Default 150 km/s, as in CCF1d and Observations.
 - `dvel` (*float, optional*): Step of the coarse trial-velocity map (km/s). Default `self.default_dvel`, 1 km/s.
 - `v1_grid, v2_grid` (*array_like, optional*): Explicit trial-velocity grids (km/s); a given grid replaces the `vel_bound` / `dvel` one for its component.
-- `sigma` (*float or array_like, optional*): Per-pixel noise of the observed flux on its *native* pixels (flux units), a scalar (all orders) or one value per order; taken at face value. Its order-to-order ratios weight the orders; its overall scale sets the uncertainties only. Default None: estimate each order's noise from its own residual and weight the orders by it (see below).
-- `alpha` (*float*): Tukey apodisation parameter applied to each window. Set 0 to skip (e.g. if the spectrum was already tapered by `Spectrum.preprocess`).
-- `nonneg` (*bool*): Constrain both amplitudes to be non-negative (physical light fractions).
-- `zeta_max` (*float, optional*): Low-pass on the Fourier axis (s/km), e.g. `R / c` to drop scales finer than the resolution.
-- `continuum` (*'median' or float*): Remove each array's median (default), or subtract this fixed continuum level. The same is applied to data and templates, which is what makes the amplitudes meaningful.
+- `sigma` (*float or array_like, optional*): Per-pixel noise of the observed flux on its *native* pixels (flux units), a scalar (all orders) or one value per order; taken at face value. Its order-to-order ratios weight the orders; its overall scale sets the uncertainties only. Default None: estimate each order's noise from its own residual and weight the orders by it (see below). Use None after `preprocess` / `filter_spectrum`: the flux is then normalised and band-passed, so a native-pixel noise no longer describes it.
+- `nonneg` (*bool*): Constrain the amplitudes to be non-negative (physical light fractions).
+- `amplitudes` (*{'shared', 'per_order'}*): One amplitude pair for all orders (default), or one per order -- its own light ratio, for two stars of different temperature whose ratio changes across the spectrum. Per-order costs two free parameters per order; with a constant ratio, shared is tighter.
 - `orders` (*sequence of int, optional*): Order indices to use. Default all.
 - `keep_windows` (*bool*): Retain the per-order prepared arrays (needed by `best_fit_spectrum`). Set False when fitting a long time series: the arrays are the size of the spectrum, so keeping them for every epoch is what dominates memory.
 - `velocity_convention` (*{'cz', 'relativistic'}*): Doppler convention of the trial velocities and the RVs (see `unicor.dsp.doppler_factor`). A component at v is shifted by c ln(1 + v/c) ('cz'; IAU 2000, IRAF fxcor) or c artanh(v/c) ('relativistic') along the log-lambda axis, measured in each order's actual ln(lambda) step. For the same spectrum the 'cz' RVs exceed the 'relativistic' ones by ~v^2/2c (37.5 m/s at 150 km/s).
@@ -951,9 +947,9 @@ Fit both components of a double-lined spectrum simultaneously.
 
 - *CCF2d*: self, with these attributes:
 
-  - `Corr2d`: dict with the coarse map: 'v1_grid', 'v2_grid' (km/s), 'R' (the two-dimensional correlation), 'logL_profile', 'logL_marginal', 'a1', 'a2', 'chi2' (all (n1, n2) maps), 'map' (whichever of 'R' / 'logL_profile' `output` selects) and 'output', 'best' (its argmax node) and 'units'; 'fine', the same for the fine local map (None if refinement was skipped); and the results: 'RV1', 'RV2' (km/s, refined), 'eRV1', 'eRV2' (km/s), 'rho12' (v1-v2 correlation), 'cov' (2x2, km^2/s^2), 'peak' (the coarse argmax node, km/s), 'a1_best', 'a2_best' and 'R_best' (at the refined RVs), 'sigma' (the native per-pixel noise behind the fit and its errors: the input as given, or under sigma=None an array of the per-window estimates, aligned with `windows`), 'sigma_from_fit' (bool: True when the noise was estimated, i.e. sigma=None), the misfit at the refined RVs at that noise, 'chi2_best', and 'chi2_red' (chi2_best per noise degree of freedom, see below; ~1 by construction under sigma=None), and 'velocity_convention' (that of every velocity above). The maps ('logL_profile', 'logL_marginal', 'chi2', and those under 'fine') are on the same noise scale; 'R' does not depend on it, only on the orders' relative weights.
-  - `stats`: The *combined* coarse-map sufficient statistics, on that noise scale, enough to re-profile (e.g. with a different `nonneg`) without touching the spectrum again.
-  - `windows`: Per-order diagnostics: the order index, the window's own 'S11' / 'S22' / 'SD' (at the input sigma, unit noise under sigma=None), 'dv' (its analysis step, c times the actual ln(lambda) step, km/s), 'oversampling' (dv_native / dv, at least 1), 'n_eff' (the independent-pixel count n_pix / oversampling), 'nu' (the expected chi2 of its pure noise), 'sigma' (its noise: input or estimated), 'sigma_fallback' (True if sigma=None could not estimate it and used the common estimate), and (if `keep_windows`) the prepared arrays.
+  - `Corr2d`: dict with the coarse map: 'v1_grid', 'v2_grid' (km/s), 'R' (the two-dimensional correlation), 'logL_profile', 'logL_marginal', 'a1', 'a2', 'chi2' (all (n1, n2) maps; under `amplitudes='per_order'` 'a1' / 'a2' are (n_orders, n1, n2), kept only with `keep_windows`, else None), 'map' (whichever of 'R' / 'logL_profile' `output` selects) and 'output', 'best' (its argmax node) and 'units'; 'fine', the same for the fine local map (None if refinement was skipped); and the results: 'RV1', 'RV2' (km/s, refined), 'eRV1', 'eRV2' (km/s), 'rho12' (v1-v2 correlation), 'cov' (2x2, km^2/s^2), 'peak' (the coarse argmax node, km/s), 'a1_best', 'a2_best' (one value per window, aligned with `windows`, under `amplitudes='per_order'`) and 'R_best' (at the refined RVs), 'amplitudes', 'sigma' (the native per-pixel noise behind the fit and its errors: the input as given, or under sigma=None an array of the per-window estimates, aligned with `windows`), 'sigma_from_fit' (bool: True when the noise was estimated, i.e. sigma=None), the misfit at the refined RVs at that noise, 'chi2_best', and 'chi2_red' (chi2_best per noise degree of freedom, see below; ~1 by construction under sigma=None), and 'velocity_convention' (that of every velocity above). The maps ('logL_profile', 'logL_marginal', 'chi2', and those under 'fine') are on the same noise scale; 'R' does not depend on it, only on the orders' relative weights.
+  - `stats`: The *combined* coarse-map sufficient statistics, on that noise scale, enough to re-profile (e.g. with a different `nonneg`) without touching the spectrum again. They pool the orders with shared amplitudes: under `amplitudes='per_order'` re-profiling them gives the shared fit, not the one reported.
+  - `windows`: Per-order diagnostics: the order index, the window's own 'S11' / 'S22' (the templates' power over the window, median over the trial velocities) / 'SD' (at the input sigma, unit noise under sigma=None), 'dv' (its analysis step, c times the actual ln(lambda) step, km/s), 'oversampling' (dv_native / dv, at least 1, divided by the noise fraction), 'n_eff' (the independent-pixel count n_pix / oversampling), 'nu' (the expected chi2 of its pure noise), 'sigma' (its noise: input or estimated), 'sigma_fallback' (True if sigma=None could not estimate it and used the common estimate), and (if `keep_windows`) the prepared arrays.
   - `n_ord`: The number of pooled windows.
   - `crlb`: The `todcor.crlb_from_map` output behind the RVs.
 
@@ -977,7 +973,7 @@ The best-fit composite flux for one window, for residual inspection.
 
 - `wv` (*ndarray*): Wavelengths (Angstrom).
 - `model` (*ndarray*): The modelled composite (continuum 1).
-- `data` (*ndarray*): The prepared (continuum-removed, tapered) data residual + 1.
+- `data` (*ndarray*): The window's data (its median removed) + 1.
 
 **Raises**
 
@@ -1262,11 +1258,11 @@ Double-lined (SB2) radial velocities of every epoch, by TODCOR.
 - `velocity_convention` (*{'cz', 'relativistic'}*): Doppler convention of the RVs (see `CCF2d.cross_correlate`).
 - `output` (*{'ccf', 'loglike'}*): The primary map of each epoch's CCF2d: the two-dimensional correlation R (default) or the profile log-likelihood (see `CCF2d.cross_correlate`). Both are stored; the RVs, errors and amplitudes do not depend on it.
 - `progress` (*bool*): Show a tqdm progress bar over the epochs. Off by default; needs the optional `tqdm` package (`pip install tqdm`).
-- `**kwargs`: Passed to `CCF2d.cross_correlate` (e.g. `alpha`, `zeta_max`, `orders`); `keep_windows` defaults to False here, as keeping spectrum-sized arrays for every epoch fills memory.
+- `**kwargs`: Passed to `CCF2d.cross_correlate` (e.g. `amplitudes`, `nonneg`, `orders`); `keep_windows` defaults to False here, as keeping spectrum-sized arrays for every epoch fills memory.
 
 **Returns**
 
-- *Observations*: self, with `vels1` / `vels2` (km/s), their Cramer-Rao uncertainties `evels1` / `evels2` (km/s), the amplitudes `amps1` / `amps2` and the CCF2d objects `ccf2d_list`.
+- *Observations*: self, with `vels1` / `vels2` (km/s), their Cramer-Rao uncertainties `evels1` / `evels2` (km/s), the amplitudes `amps1` / `amps2` (one per epoch, or (n_epochs, n_orders) under `amplitudes='per_order'`) and the CCF2d objects `ccf2d_list`.
 
 ##### `Observations.build_tiravel_template`
 
@@ -3224,11 +3220,11 @@ TODCOR: two-dimensional correlation for double-lined (SB2) spectra.
 
 Everything below is importable from `todcor` itself (`todcor.__all__`).
 
-`todcor` also re-exports these `unicor.dsp` names, documented under [`unicor.dsp`](#unicordsp): `C_KMS`, `log_lambda_grid`, `log_grid_step`, `resample`, `tukey_window`, `shift_kms`, `doppler_factor`, `velocity_from_log_shift`, `rfft_positive`, `parseval_weights`, `rotational_kernel`, `broaden_gaussian_residual`, `broaden_rotational_residual`.
+`todcor` also re-exports these `unicor.dsp` names, documented under [`unicor.dsp`](#unicordsp): `C_KMS`, `log_lambda_grid`, `log_grid_step`, `resample`, `shift_kms`, `doppler_factor`, `velocity_from_log_shift`, `rotational_kernel`, `broaden_gaussian_residual`, `broaden_rotational_residual`.
 
 ### todcor.estimator
 
-The Fourier-domain TODCOR estimator (the derivation).
+The TODCOR estimator (the derivation).
 
 #### `todcor.window_stats`
 
@@ -3241,10 +3237,10 @@ todcor.window_stats(
     v1_grid,
     v2_grid,
     sigma=1.0,
-    zeta_max=None,
     oversampling=1.0,
     noise_psd=None,
     velocity_convention='cz',
+    reach=None,
 )
 ```
 
@@ -3252,19 +3248,23 @@ Weighted least-squares sufficient statistics for one spectral window.
 
 **Parameters**
 
-- `data_g` (*ndarray*): Observed residual flux (continuum removed), on a uniform log-lambda grid of step `dv`, already windowed/apodised.
-- `g1, g2` (*ndarray*): The two template residuals, already broadened, apodised, and resampled onto the *same* grid as `data_g`.
-- `dv` (*float*): Velocity step of the grid (km/s): `c` times its *actual* ln(lambda) step (`unicor.dsp.log_grid_step`), which is what a shift `s` is measured in -- a nominal `dv` for a grid built as `ln(1 + dv/c)` is off by `dv/2c` relative.
-- `v1_grid, v2_grid` (*ndarray*): Trial radial velocities of each component (km/s).
+- `data_g` (*ndarray*): The window's flux (any constant level; it is profiled out), on a uniform log-lambda grid of step `dv`; `n` pixels.
+- `g1, g2` (*ndarray*): The two templates on that grid extended by the same `e >= 0` pixels on the left and `e` or `e + 1` on the right (length `n + 2e` or `n + 2e + 1`), as `prepare_window` makes them.
+- `dv` (*float*): Velocity step of the grid (km/s): `c` times its *actual* ln(lambda) step (`unicor.dsp.log_grid_step`).
+- `v1_grid, v2_grid` (*ndarray*): Trial radial velocities of each component (km/s); their shifts must stay within `reach` pixels.
 - `sigma` (*float*): Per-pixel noise of the data (same flux units) on its *native* sampling, assumed white and homoscedastic there.
-- `zeta_max` (*float or None*): Optional low-pass: drop Fourier modes above `zeta_max` (s/km), e.g. to exclude scales finer than the instrumental resolution.
-- `oversampling` (*float*): Analysis pixels per independent (native) pixel, `dv_native / dv`, clipped at 1 by the caller (dimensionless, >= 1). The weights are divided by it, so each native pixel's information is counted once. Default 1: the analysis grid is the native sampling (no change).
-- `noise_psd` (*ndarray or None*): Expected noise power of `data_g` per Fourier mode, relative to white noise of variance `sigma**2` on the analysis grid, aligned with `unicor.dsp.rfft_positive` (length `n // 2`; see `resampled_noise_psd`). Used only for the noise budget `nu`. Default None: white noise on the analysis grid (all ones).
+- `oversampling` (*float*): Analysis pixels per independent (native) pixel, `dv_native / dv`, clipped at 1 by the caller (dimensionless, >= 1). The weight is divided by it, so each native pixel's information is counted once.
+- `noise_psd` (*ndarray or None*): Expected noise power of `data_g` per Fourier mode, relative to white noise of variance `sigma**2` on the analysis grid (`resampled_noise_psd`); only its mean enters the noise budget `nu`. Default None: white noise on the analysis grid.
 - `velocity_convention` (*{'cz', 'relativistic'}*): Doppler convention of `v1_grid`/`v2_grid` (`unicor.dsp.doppler_factor`). Default 'cz'.
+- `reach` (*int or None*): The largest shift (pixels) the templates may be read at: a prepared window's `reach` (its extension less the ramp). Default None: the whole left extension `e` (with `e = 0`, any shift: circular).
 
 **Returns**
 
-- *dict*: `S11`, `S22`, `SD` : scalar template/data weighted powers. `b1` (n1,), `b2` (n2,) : data-template cross-terms vs `v1`/`v2`. `A12` (n1, n2) : template-template cross-term vs `(v1, v2)`. `nu` : expected chi^2 of the window's pure-noise residual -- its effective noise degrees of freedom (dimensionless).
+- *dict*: `S11` (n1,), `S22` (n2,), `SD` (scalar), `b1` (n1,), `b2` (n2,), `A12` (n1, n2), all on the noise scale `w`; and `nu`, the expected chi^2 of the window's pure-noise residual (its noise degrees of freedom, dimensionless): `n * mean(noise_psd) / oversampling - 1` (one for the offset).
+
+**Raises**
+
+- *ValueError*: If a template is shorter than the window, the two templates differ in length, a trial shift exceeds `reach` (or the extension, when `e > 0`), or `oversampling < 1`.
 
 #### `todcor.resampled_noise_psd`
 
@@ -3331,34 +3331,65 @@ Profile/marginalise the amplitudes from (combined) statistics -> R and logL maps
 
 - `stats` (*dict*): Output of `window_stats` or `combine_stats`.
 - `v1_grid, v2_grid` (*ndarray*): The trial-velocity grids (km/s; echoed out and used for the peak).
-- `nonneg` (*bool*): If True, constrain both amplitudes to be non-negative (physical light fractions) via a per-node 2-variable NNLS. This suppresses the sign flips that let an under-constrained component chase noise. In this mode `logL_marginal` is set equal to `logL_profile`: the exact marginal would be an orthant-truncated Gaussian integral, so this drops *both* the `-1/2 ln|det|` width term and the truncation term `ln Phi_N` (not attempted). Velocities come from the profile peak regardless.
+- `nonneg` (*bool*): If True, constrain both amplitudes to be non-negative (physical light fractions) via a per-node 2-variable NNLS. In this mode `logL_marginal` is set equal to `logL_profile` (the exact marginal would be an orthant-truncated Gaussian integral). Velocities come from the profile peak regardless.
 - `output` (*{'ccf', 'loglike'}*): Which surface is the primary result, `'map'`: the two-dimensional correlation `R` (default) or `logL_profile`. Both are always returned; they share their argmax, so `best` does not depend on it.
 
 **Returns**
 
-- *dict*: `R`, `logL_profile`, `logL_marginal`, `a1`, `a2`, `chi2` : (n1, n2) maps, where `R = sqrt(1 - chi2 / SD)` is the two-dimensional correlation (dimensionless, in [0, 1]); `map`, the one of `R` / `logL_profile` that `output` selects (the same array, not a copy), and `output`; `v1_grid`, `v2_grid`; and `best`, the `logL_profile` argmax as `{'v1', 'v2', 'a1', 'a2', 'chi2', 'chi2_red', 'R'}` (km/s / dimensionless), where `chi2_red = chi2 / (nu - 4)` (four fitted parameters; `nan` if `nu <= 4`). The reported peak is always the *profile* argmax -- the marginal peak can differ by the `det`-gradient.
+- *dict*: `R`, `logL_profile`, `logL_marginal`, `a1`, `a2`, `chi2` : (n1, n2) maps, where `R = sqrt(1 - chi2 / SD)` is the two-dimensional correlation (dimensionless, in [0, 1]); `map`, the one of `R` / `logL_profile` that `output` selects, and `output`; `v1_grid`, `v2_grid`; and `best`, the `logL_profile` argmax as `{'v1', 'v2', 'a1', 'a2', 'chi2', 'chi2_red', 'R'}` (km/s / dimensionless), with `chi2_red = chi2 / (nu - 4)` (`nan` if `nu <= 4`).
 
 **Raises**
 
 - *ValueError*: If `output` is unknown, or the data carry no power (`SD <= 0`), which leaves `R` undefined.
 
+#### `todcor.profile_per_window`
+
+```python
+todcor.profile_per_window(
+    stats_list,
+    weights,
+    v1_grid,
+    v2_grid,
+    nonneg=False,
+    output='ccf',
+)
+```
+
+Profile each window's own amplitudes, then pool the windows' chi^2 maps.
+
+**Parameters**
+
+- `stats_list` (*sequence of dict*): Each window's `window_stats` on `v1_grid` x `v2_grid`.
+- `weights` (*array_like or None*): One positive factor per window on its statistics (e.g. `1 / sigma_i**2`); None for all ones.
+- `v1_grid, v2_grid` (*ndarray*): The trial-velocity grids (km/s).
+- `nonneg` (*bool*): Constrain every window's amplitudes to be non-negative.
+- `output` (*{'ccf', 'loglike'}*): The primary map, `'map'`: `R` (default) or `logL_profile`.
+
+**Returns**
+
+- *dict*: As `profile_from_stats`, except that `a1` and `a2` are (n_windows, n1, n2) and `best['a1']`, `best['a2']` one value per window; `best['chi2_red'] = chi2 / (sum nu - 2 - 2 n_windows)`; and `logL_marginal` equals `logL_profile` (the per-window marginal is not evaluated).
+
 #### `todcor.crlb_from_map`
 
 ```python
-todcor.crlb_from_map(logL, v1_grid, v2_grid, half=3)
+todcor.crlb_from_map(logL, v1_grid, v2_grid, half=4)
 ```
 
-Cramer-Rao velocity errors from the curvature of the logL surface.
+Velocities and their Cramer-Rao errors from a log-likelihood map.
 
 **Parameters**
 
 - `logL` (*ndarray (n1, n2)*): Profile log-likelihood surface (`res['logL_profile']`).
 - `v1_grid, v2_grid` (*ndarray*): The trial-velocity grids (km/s).
-- `half` (*int*): Half-width (in grid nodes) of the local quadratic patch.
+- `half` (*int*): Half-width (in grid nodes) of the patch (>= 1).
 
 **Returns**
 
-- *dict*: `sigma_v1`, `sigma_v2` (km/s), `rho` (v1-v2 correlation), `cov` (2x2 covariance, km^2/s^2), `peak` (the argmax grid node, km/s) and `peak_refined` (the stationary point of the same local quadratic -- a sub-grid peak that removes the +/- step/2 quantisation of the argmax, clipped to one grid step, and equal to `peak` when the curvature is not positive definite), plus `on_edge` (True when the argmax sits on the boundary of the velocity grid). The sigmas are `nan` if the local curvature is not positive definite (e.g. an amplitude boundary) or the peak is on a grid edge, where the true maximum may lie outside the grid and the one-sided patch would extrapolate.
+- *dict*: `sigma_v1`, `sigma_v2` (km/s), `rho` (v1-v2 correlation), `cov` (2x2 covariance, km^2/s^2), `peak` (the argmax grid node, km/s) and `peak_refined` (the polynomial's maximum, within one grid step of `peak`; `peak` itself, with `nan` sigmas, when the curvature is not negative definite or the maximum lies further), plus `on_edge` (True when the argmax sits on the boundary of the velocity grid, where the true maximum may lie outside it: then the sigmas are `nan` and nothing is refined).
+
+**Raises**
+
+- *ValueError*: If `half` is not a positive integer.
 
 #### `todcor.todcor_map`
 
@@ -3371,7 +3402,6 @@ todcor.todcor_map(
     v1_grid,
     v2_grid,
     sigma=1.0,
-    zeta_max=None,
     nonneg=False,
     oversampling=1.0,
     noise_psd=None,
@@ -3384,7 +3414,7 @@ Single-window TODCOR correlation and log-likelihood maps (convenience wrapper).
 
 **Parameters**
 
-- `data_g, g1, g2, dv, v1_grid, v2_grid, sigma, zeta_max, oversampling, noise_psd, velocity_convention`: As `window_stats`: residual data and templates on one uniform log-lambda grid of actual step `dv` (km/s), trial velocities (km/s), native per-pixel noise (flux units), Fourier cutoff (s/km), oversampling factor, noise spectrum and Doppler convention.
+- `data_g, g1, g2, dv, v1_grid, v2_grid, sigma, oversampling, noise_psd, velocity_convention`: As `window_stats`: the window's flux and the two templates on its grid extended by whole pixels on each side (step `dv`, km/s), trial velocities (km/s), native per-pixel noise (flux units), oversampling factor, noise spectrum and Doppler convention.
 - `nonneg` (*bool*): As `profile_from_stats`: constrain both amplitudes to be non-negative.
 - `output` (*{'ccf', 'loglike'}*): As `profile_from_stats`: the primary surface `'map'` is the two-dimensional correlation `R` (default) or `logL_profile`.
 
@@ -3395,51 +3425,43 @@ Single-window TODCOR correlation and log-likelihood maps (convenience wrapper).
 #### `todcor.TodcorWindow`
 
 ```python
-TodcorWindow(wave, dv, data_g, g1, g2, taper_power)
+TodcorWindow(wave, dv, data_g, g1, g2, extension, reach)
 ```
 
-One prepared TODCOR window: data and templates as tapered line residuals.
+One prepared TODCOR window: the observed pixels and the extended templates.
 
 **Parameters**
 
-- `wave` (*ndarray*): The window's uniform log-lambda grid (Angstrom).
+- `wave` (*ndarray*): The window's observed pixels: a uniform log-lambda grid (Angstrom), possibly narrower than the order (see `prepare_window`).
 - `dv` (*float*): Its actual velocity step, `c` times its ln(lambda) step (km/s; `unicor.dsp.log_grid_step`).
-- `data_g` (*ndarray*): Observed flux minus its continuum, tapered (flux units).
-- `g1, g2` (*ndarray*): The two templates on `wave`, minus their continuum, tapered the same way (flux units).
-- `taper_power` (*float*): Mean square of the taper (dimensionless; 1.0 without one): the factor it puts on the window's noise power, i.e. on `noise_psd`.
+- `data_g` (*ndarray*): The observed flux on `wave`, minus its median (flux units).
+- `g1, g2` (*ndarray*): The two templates minus their median on `wave` extended by `extension` pixels on the left and `extension` (odd `wave`) or `extension + 1` (even `wave`) on the right, so their length is odd, ramped to zero over the outermost `ramp` pixels (flux units).
+- `extension` (*int*): Pixels added on the left of `wave`: `reach` plus the ramp.
+- `reach` (*int*): The largest shift (pixels) the window may be evaluated at without reading the ramp: pass it to `window_stats` (`reach=`).
 
 #### `todcor.prepare_window`
 
 ```python
-todcor.prepare_window(
-    wave,
-    flux,
-    t1_wave,
-    t1_flux,
-    t2_wave,
-    t2_flux,
-    continuum='median',
-    alpha=0.1,
-)
+todcor.prepare_window(wave, flux, t1_wave, t1_flux, t2_wave, t2_flux, *, v_max, ramp=20)
 ```
 
-Prepare one window for TODCOR: residuals on one log-lambda grid, apodised.
+Prepare one window for TODCOR: observed pixels, templates extended past them.
 
 **Parameters**
 
 - `wave` (*array_like*): The observed window's wavelengths (Angstrom), uniform in ln(lambda).
 - `flux` (*array_like*): Its flux, one value per wavelength.
-- `t1_wave, t1_flux, t2_wave, t2_flux` (*array_like*): The primary's and the secondary's rest-frame templates: strictly increasing wavelengths (Angstrom) and flux, continuum ~1.
-- `continuum` (*'median' or float*): Subtract each array's median (default), or this fixed level (flux units).
-- `alpha` (*float*): Tukey taper parameter (`unicor.dsp.tukey_window`); 0 for no taper (e.g. for a spectrum tapered already).
+- `t1_wave, t1_flux, t2_wave, t2_flux` (*array_like*): The primary's and the secondary's rest-frame templates: strictly increasing wavelengths (Angstrom) and flux.
+- `v_max` (*float*): The largest |trial velocity| the window will be evaluated at, refinement included (km/s, > 0).
+- `ramp` (*int*): Pixels over which each extension falls to zero (>= 2).
 
 **Returns**
 
-- *TodcorWindow*: The grid, its step `dv` (km/s), the three tapered residuals and the taper's mean square.
+- *TodcorWindow*: The observed grid, its step `dv` (km/s), the data residual, the two extended templates, the extension and the reach (pixels).
 
 **Raises**
 
-- *ValueError*: If `wave` is not uniform in ln(lambda), `flux` does not match it, or a residual is not finite (`'<spectrum|template1|template2> flux contains NaN/inf; ...'`).
+- *ValueError*: If `wave` is not uniform in ln(lambda), `flux` does not match it, a flux is not finite, `v_max` or `ramp` is invalid, or the templates cover no observed pixel across `+-v_max`.
 
 #### `todcor.refine_grid`
 
@@ -3495,7 +3517,8 @@ todcor.joint_fit(
     *,
     nonneg,
     output,
-    half=3,
+    amplitudes='shared',
+    half=4,
     span=2,
     factor=10,
     fine_cache=None,
@@ -3508,26 +3531,27 @@ One joint fit of pooled windows: coarse map, fine map, CRLB, peak values.
 
 - `stats_list` (*sequence of dict*): Each window's `window_stats` on `v1_grid` x `v2_grid`.
 - `weights` (*array_like or None*): One positive factor per window on its statistics (dimensionless, e.g. `1 / sigma_i**2` for unit-noise windows); None for all ones.
-- `prepared` (*sequence of (TodcorWindow, dict)*): Each window and the `window_stats` keyword arguments behind its statistics (`sigma`, `zeta_max`, `oversampling`, `noise_psd`, `velocity_convention`), in the order of `stats_list`.
+- `prepared` (*sequence of (TodcorWindow, dict)*): Each window and the `window_stats` keyword arguments behind its statistics (`sigma`, `oversampling`, `noise_psd`, `velocity_convention`), in the order of `stats_list`.
 - `v1_grid, v2_grid` (*ndarray*): The coarse trial velocities (km/s).
-- `nonneg` (*bool*): Constrain both amplitudes to be non-negative (`profile_from_stats`).
+- `nonneg` (*bool*): Constrain the amplitudes to be non-negative.
 - `output` (*{'ccf', 'loglike'}*): The primary map, `'map'`, of `profile` and `fine`.
-- `half` (*int*): Half-width (nodes) of the quadratic patch of `crlb_from_map`.
+- `amplitudes` (*{'shared', 'per_order'}*): One `(a1, a2)` for all windows (default: `combine_stats` then `profile_from_stats`), or one per window (`profile_per_window`), for a light ratio that changes across the spectrum.
+- `half` (*int*): Half-width (nodes) of the polynomial patch of `crlb_from_map`.
 - `span, factor` (*int*): The fine grid (`refine_grid`).
-- `fine_cache` (*dict, optional*): Per-window fine statistics by coarse node `(i, j)`, read and filled here; pass the same dict to calls that should share them. It is keyed by node only, so share it only between calls with the same `prepared` windows, grids, `span` and `factor` (e.g. the two noise passes of one epoch). Default None: a fresh one.
+- `fine_cache` (*dict, optional*): Per-window fine statistics by coarse node `(i, j)`, read and filled here; share it only between calls with the same `prepared` windows, grids, `span` and `factor` (e.g. the two noise passes of one epoch). Default None: a fresh one.
 
 **Returns**
 
-- *TodcorFit*: The pooled statistics, the coarse and fine maps, the CRLB behind the velocities and every value at the refined peak.
+- *TodcorFit*: The pooled statistics, the coarse and fine maps, the CRLB behind the velocities and every value at the refined peak; with `amplitudes='per_order'`, `best['a1']` and `best['a2']` hold one value per window.
 
 **Raises**
 
-- *ValueError*: If `prepared` and `stats_list` differ in length, or as `combine_stats` and `profile_from_stats`.
+- *ValueError*: If `prepared` and `stats_list` differ in length, `amplitudes` is unknown, or as `combine_stats` and `profile_from_stats`.
 
 #### `todcor.window_noise`
 
 ```python
-todcor.window_noise(chi2, nu, min_dof=50)
+todcor.window_noise(chi2, nu, min_dof=50, amplitudes='shared')
 ```
 
 Each window's noise from its own share of a unit-noise joint fit's chi2.
@@ -3537,6 +3561,7 @@ Each window's noise from its own share of a unit-noise joint fit's chi2.
 - `chi2` (*array_like*): Each window's share of the joint chi2 at unit noise (dimensionless).
 - `nu` (*array_like*): Each window's noise degrees of freedom (`window_stats`'s `nu`).
 - `min_dof` (*float*): The fewest dof for a window's own estimate.
+- `amplitudes` (*{'shared', 'per_order'}*): How the fit treated the amplitudes (`joint_fit`).
 
 **Returns**
 
@@ -3545,7 +3570,7 @@ Each window's noise from its own share of a unit-noise joint fit's chi2.
 
 **Raises**
 
-- *ValueError*: If `chi2` and `nu` are not one value per window each, or no positive, finite noise can be estimated.
+- *ValueError*: If `chi2` and `nu` are not one value per window each, `amplitudes` is unknown, or no positive, finite noise can be estimated.
 
 ### todcor.simulate
 
@@ -3611,20 +3636,20 @@ Build a noiseless composite (continuum-normalised) by physical shifting.
 #### `todcor.model_flux`
 
 ```python
-todcor.model_flux(wave_grid, dv, g1, g2, v1, v2, a1, a2, velocity_convention='cz')
+todcor.model_flux(g1, g2, n, dv, v1, v2, a1, a2, velocity_convention='cz')
 ```
 
-Reconstruct the best-fit composite flux on the grid (for residual plots).
+The best-fit composite on a window's pixels, as the fit models it.
 
 **Parameters**
 
-- `wave_grid` (*ndarray*): The uniform log-lambda grid (Angstrom); only its length is used.
-- `dv` (*float*): Velocity step of the grid (km/s), `c` times its actual ln(lambda) step (as in `todcor.estimator.window_stats`).
-- `g1, g2` (*ndarray*): Template residuals on that grid (continuum 0).
+- `g1, g2` (*ndarray*): The template residuals on the extended grid, as `todcor.estimator.prepare_window` makes them (length `n + 2e` or `n + 2e + 1`).
+- `n` (*int*): Pixels in the window.
+- `dv` (*float*): Velocity step of the grid (km/s), `c` times its actual ln(lambda) step.
 - `v1, v2` (*float*): Component velocities (km/s).
 - `a1, a2` (*float*): Component amplitudes (dimensionless).
 - `velocity_convention` (*{'cz', 'relativistic'}*): Doppler convention of `v1`, `v2`. Default 'cz'.
 
 **Returns**
 
-- `flux` (*ndarray*): The modelled composite flux (continuum 1).
+- *ndarray, shape (n,)*: `a1 * G1(v1) + a2 * G2(v2)` on the window (flux units, no offset).

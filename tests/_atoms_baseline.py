@@ -336,7 +336,7 @@ def _record_ccf2d(out):
         for mode in ("ccf", "loglike"):
             name = f"ccf2d.{sigma_key}.{mode}"
             ccf = CCF2d().cross_correlate(spec, t1, t2, dv=1.0, vel_bound=100, dvel=2.0,
-                                          sigma=sigma, alpha=0.1, output=mode)
+                                          sigma=sigma, output=mode)
             res = ccf.Corr2d
             for level, maps in (("coarse", res), ("fine", res["fine"])):
                 for key in _MAP_KEYS:

@@ -491,8 +491,8 @@ class Observations:
             Show a tqdm progress bar over the epochs. Off by default; needs the
             optional ``tqdm`` package (``pip install tqdm``).
         **kwargs
-            Passed to ``CCF2d.cross_correlate`` (e.g. ``alpha``,
-            ``zeta_max``, ``orders``); ``keep_windows`` defaults to False
+            Passed to ``CCF2d.cross_correlate`` (e.g. ``amplitudes``,
+            ``nonneg``, ``orders``); ``keep_windows`` defaults to False
             here, as keeping spectrum-sized arrays for every epoch fills
             memory.
 
@@ -501,7 +501,9 @@ class Observations:
         Observations
             self, with ``vels1`` / ``vels2`` (km/s), their Cramer-Rao
             uncertainties ``evels1`` / ``evels2`` (km/s), the amplitudes
-            ``amps1`` / ``amps2`` and the CCF2d objects ``ccf2d_list``.
+            ``amps1`` / ``amps2`` (one per epoch, or (n_epochs, n_orders)
+            under ``amplitudes='per_order'``) and the CCF2d objects
+            ``ccf2d_list``.
         '''
         spectra = self._spectra('RV calculation')
         kwargs.setdefault('keep_windows', False)

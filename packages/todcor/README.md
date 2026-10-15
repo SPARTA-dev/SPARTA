@@ -1,6 +1,6 @@
 # todcor
 
-Standalone Python engine for **Fourier-domain two-component (TODCOR) radial
+Standalone Python engine for **two-component (TODCOR) radial
 velocities** of double-lined spectroscopic binaries — the array-level core of
 [SPARTA](https://github.com/SPARTA-dev/SPARTA)'s TODCOR. Its only dependencies are
 numpy and [`unicor`](https://github.com/SPARTA-dev/SPARTA/tree/master/packages/unicor) (for the shared log-λ grid and broadening
@@ -8,16 +8,19 @@ primitives; it brings in scipy).
 
 `todcor` fits the radial velocities *and* relative amplitudes of both
 components of an SB2 simultaneously. It is TODCOR (Zucker & Mazeh 1994, ApJ
-420, 806) recast as a Gaussian profile likelihood: on a uniform log-λ grid a
-Doppler shift is a translation, so in the Fourier domain it is a phase factor —
-the templates are transformed once and reused at every trial velocity. The
-amplitudes enter linearly and are solved in closed form (2×2 weighted least
-squares) at each `(v1, v2)` node; profiling them out gives the classic TODCOR
-map. Spectral windows (orders) of **one epoch** pool by adding their sufficient
-statistics, and the Cramér–Rao bound comes from the curvature of the map.
+420, 806) recast as a Gaussian profile likelihood over the observed pixels of
+each window (echelle order). On a uniform log-λ grid a Doppler shift is a
+translation: each template is resampled onto the window's grid extended past
+both ends by the largest trial shift, and shifted by a Fourier phase factor,
+so nothing wraps around and no taper is needed. A free continuum offset per
+window and the amplitudes enter linearly and are solved in closed form at
+each `(v1, v2)` node; profiling them out gives the classic TODCOR map.
+Windows of **one epoch** pool by adding their sufficient statistics (shared
+amplitudes) or with one amplitude pair per window, and the Cramér–Rao bound
+comes from the curvature of the map.
 
 Inputs and outputs are plain floats and arrays: velocities and the log-λ shift
-`s` in km/s, ζ (the Fourier conjugate) in s/km, kernel widths as FWHM in km/s.
+`s` in km/s, wavelengths in Å, kernel widths as FWHM in km/s.
 Velocities are in the `'cz'` Doppler convention (`λ_obs/λ_rest = 1 + v/c`; IAU
 2000, IRAF fxcor) unless you pass `velocity_convention='relativistic'`
 (`√((1 + v/c)/(1 − v/c))`) to `window_stats` / `todcor_map` and the forward
@@ -69,15 +72,11 @@ observed = todcor.composite_flux(wave, [(t_wave, t1), (t_wave, t2)],
                                  velocities=(25.3, -41.7), amplitudes=(0.7, 0.3))
 observed += rng.normal(0.0, sigma, wave.size)
 
-# Residuals (flux - 1) on the analysis grid. The templates go there at rest;
-# the observation is already broadened, so it is only tapered, like them.
-taper = todcor.tukey_window(wave.size)
-g1 = (todcor.resample(t_wave, t1, wave) - 1.0) * taper
-g2 = (todcor.resample(t_wave, t2, wave) - 1.0) * taper
-data = (observed - 1.0) * taper
-
+# The window: the observed pixels, and both templates resampled onto that grid
+# extended past each end by the largest trial velocity (no wrap, no taper).
 v1 = v2 = np.arange(-80.0, 80.5, 0.5)               # trial velocities (km/s)
-res = todcor.todcor_map(data, g1, g2, todcor.log_grid_step(wave), v1, v2, sigma=sigma,
+win = todcor.prepare_window(wave, observed, t_wave, t1, t_wave, t2, v_max=80.0)
+res = todcor.todcor_map(win.data_g, win.g1, win.g2, win.dv, v1, v2, sigma=sigma,
                         nonneg=True)
 crlb = todcor.crlb_from_map(res["logL_profile"], v1, v2)
 best = res["best"]
@@ -88,17 +87,19 @@ print("refined:   v1 = {:.3f} +- {:.3f}, v2 = {:.3f} +- {:.3f} km/s".format(
 ```
 
 ```text
-grid peak: v1 = 25.5, v2 = -41.5 km/s, a1 = 0.702, a2 = 0.296, chi2_red = 1.01
-refined:   v1 = 25.301 +- 0.012, v2 = -41.647 +- 0.030 km/s
+grid peak: v1 = 25.5, v2 = -41.5 km/s, a1 = 0.701, a2 = 0.296, chi2_red = 1.06
+refined:   v1 = 25.295 +- 0.012, v2 = -41.644 +- 0.029 km/s
 ```
 
 The injected values are v1 = 25.3, v2 = −41.7 km/s, a1 = 0.7, a2 = 0.3. The
 observation is never broadened here: real data already carry the instrumental
-profile, so only the templates are matched to the resolution. `sigma` is the
-per-pixel noise of the observed flux; with it right, `chi2_red` ≈ 1. The
-quadratic refinement of `crlb_from_map` needs a map step that resolves the
-peak; SPARTA's `CCF2d` re-evaluates a finer local map around it instead (see
-the method notes).
+profile, so only the templates are matched to the resolution. The templates
+must cover the window ± `v_max`; observed pixels they do not reach are
+dropped. `sigma` is the per-pixel noise of the observed flux; with it right,
+`chi2_red` ≈ 1 at the peak (1.005 here at the refined velocities; the grid
+node above is up to 0.25 km/s off the peak, hence 1.06). `crlb_from_map` reads the peak from a degree-6 polynomial over
+±4 nodes, so the map step must resolve the peak; SPARTA's `CCF2d` re-evaluates
+a finer local map around it (see the method notes).
 
 ## Two maps: correlation or log-likelihood
 
@@ -117,11 +118,14 @@ They are related by `logL_profile = −(SD/2)(1 − R²)` and share their peak, 
 derivation and the reduction to the one-dimensional CCF are in the method notes.
 
 Several windows (orders) of the same epoch, evaluated on one shared velocity
-grid, pool by adding their statistics:
+grid, pool by adding their statistics (one amplitude pair for all), or keep
+one amplitude pair per window:
 
 ```python
-stats = [todcor.window_stats(d, g1, g2, dv, v1, v2, sigma=s) for d, g1, g2, dv, s in windows]
-res = todcor.profile_from_stats(todcor.combine_stats(stats), v1, v2, nonneg=True)
+# windows: (TodcorWindow, noise) pairs, each window from prepare_window
+stats = [todcor.window_stats(w.data_g, w.g1, w.g2, w.dv, v1, v2, sigma=s) for w, s in windows]
+res = todcor.profile_from_stats(todcor.combine_stats(stats), v1, v2, nonneg=True)  # one (a1, a2)
+res = todcor.profile_per_window(stats, None, v1, v2, nonneg=True)    # one (a1, a2) per window
 ```
 
 ## Per-window atoms
@@ -129,18 +133,24 @@ res = todcor.profile_from_stats(todcor.combine_stats(stats), v1, v2, nonneg=True
 SPARTA's `CCF2d` is a chain of four functions on plain arrays. Chained by hand,
 they reproduce its fit bit for bit:
 
-- `prepare_window(wave, flux, t1_wave, t1_flux, t2_wave, t2_flux, continuum='median', alpha=0.1)`
-  → `TodcorWindow` (`wave`, `dv`, `data_g`, `g1`, `g2`, `taper_power`): both
-  templates resampled onto the window (uncovered pixels filled with 1.0), the
-  continuum removed from all three, and a Tukey taper applied;
-- `joint_fit(stats, weights, prepared, v1, v2, nonneg=..., output=..., fine_cache=None)`
+- `prepare_window(wave, flux, t1_wave, t1_flux, t2_wave, t2_flux, v_max=, ramp=20)`
+  → `TodcorWindow` (`wave`, `dv`, `data_g`, `g1`, `g2`, `extension`): the
+  observed pixels the templates cover across ±`v_max`, and both templates
+  resampled onto that grid extended by `extension` pixels on each side
+  (`v_max` plus a `ramp` falling to zero);
+- `joint_fit(stats, weights, prepared, v1, v2, nonneg=..., output=..., amplitudes='shared', fine_cache=None)`
   → `TodcorFit` (`pooled`, `profile`, `coarse`, `fine`, `crlb`, `at_peak`,
   `best`, `window_chi2`): pool the windows, find the peak on the coarse map,
   re-evaluate the statistics exactly on a fine local map (`refine_grid`),
-  get the CRLB from that map, and evaluate the amplitudes at the refined
-  velocities;
-- `window_noise(chi2, nu, min_dof=50)` → `(sigma, fallback)`: each window's
-  noise from its share of the joint χ².
+  get the peak and the CRLB from that map, and evaluate the amplitudes at the
+  refined velocities;
+- `window_noise(chi2, nu, min_dof=50, amplitudes='shared')` →
+  `(sigma, fallback)`: each window's noise from its share of the joint χ².
+
+`amplitudes='per_order'` gives each window its own `(a1, a2)` — its own light
+ratio, for two stars of different temperature over a wide range — at two
+free parameters per window; `best['a1']`, `best['a2']` then hold one value per
+window. Pass the same `amplitudes` to `window_noise`.
 
 Continuing the quick start with a second, noisier order, at unknown noise:
 
@@ -152,8 +162,9 @@ v1 = v2 = np.arange(-80.0, 80.5, 1.0)
 
 prepared, stats = [], []
 for w, f in orders:
-    win = todcor.prepare_window(w, f, t_wave, t1, t_wave, t2)   # median continuum, 10% taper
-    kw = dict(noise_psd=win.taper_power * np.ones(w.size // 2))  # unit noise: estimated below
+    # v_max: the coarse grid plus the fine map's reach (2 coarse steps)
+    win = todcor.prepare_window(w, f, t_wave, t1, t_wave, t2, v_max=82.0)
+    kw = {}                                   # unit, white noise: estimated below
     prepared.append((win, kw))
     stats.append(todcor.window_stats(win.data_g, win.g1, win.g2, win.dv, v1, v2, **kw))
 
@@ -170,24 +181,26 @@ print(f"v1 = {rv1:.3f} +- {crlb['sigma_v1']:.3f}, v2 = {rv2:.3f} +- {crlb['sigma
 ```
 
 ```text
-noise per window: [0.011  0.0319]
-v1 = 25.292 +- 0.018, v2 = -41.623 +- 0.045 km/s, a1 = 0.694, a2 = 0.298
+noise per window: [0.01   0.0317]
+v1 = 25.299 +- 0.016, v2 = -41.621 +- 0.041 km/s, a1 = 0.697, a2 = 0.298
 ```
 
 The second pass weights each window by `1/σ_i²`. The statistics are linear in
-the weights, so it computes no new FFTs, and it reuses the cached fine map if
-the coarse peak has not moved. The true noise is 0.01 and √(0.01² + 0.03²) ≈
-0.032. `noise_psd` is the white-noise spectrum times the taper's mean square.
-For a spectrum resampled from coarser native pixels, SPARTA's
-`sparta.preprocess.resampling_noise_psd` models the resampled noise instead;
-it lives in SPARTA because it probes SPARTA's spline resampler.
+the weights, so it shifts no template again, and it reuses the cached fine
+map if the coarse peak has not moved. The true noise is 0.01 and
+√(0.01² + 0.03²) ≈ 0.032. For a spectrum resampled from coarser native
+pixels, pass `oversampling` and a `noise_psd` that models the resampled noise
+(`todcor.resampled_noise_psd`); SPARTA's
+`sparta.preprocess.resampling_noise_psd` builds it for SPARTA's spline
+resampler.
 
 ## Learn the method
 
 - [`docs/todcor_method.md`](https://github.com/SPARTA-dev/SPARTA/blob/master/packages/todcor/docs/todcor_method.md):
-  the derivation (sufficient statistics, the χ² quadratic form, the
-  two-dimensional correlation `R`, profile vs marginal amplitudes, Parseval, the even-N Nyquist drop, window combination,
-  the noise budget and its assumptions).
+  the derivation (the window and its extended templates, the sufficient
+  statistics, the χ² quadratic form, the two-dimensional correlation `R`,
+  profile vs marginal amplitudes, shared and per-window amplitudes, the peak
+  refinement, the noise budget and its assumptions).
 - SPARTA's [`examples/howto/todcor_detailed/`](https://github.com/SPARTA-dev/SPARTA/tree/master/examples/howto/todcor_detailed)
   notebooks 01–03 walk through it numerically with this package alone.
   SPARTA's `CCF2d` and `Observations.calc_rv_against_two_templates` run it on

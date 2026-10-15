@@ -1,9 +1,12 @@
 """Tests for the standalone TODCOR estimator (:mod:`todcor`).
 
 The pure estimator (``todcor.estimator`` + ``todcor.simulate``) on synthetic
-composites -- noiseless/noisy recovery, Parseval, the exact-shift chi2, the CRLB
-against a Monte Carlo, sub-grid refinement, and window combination -- plus the
-log-lambda primitives it re-exports from ``unicor``. The SPARTA-object adapter
+composites -- noiseless/noisy recovery, the exact-shift chi2, the CRLB against
+a Monte Carlo, sub-grid refinement, window combination, and the
+extended-template window (no wrap-around, a free offset, the one-template
+reduction to UNICOR's CCF, cm/s recovery with lines across the window edges,
+the degree-6 peak) -- plus the log-lambda primitives it re-exports from
+``unicor``. The SPARTA-object adapter
 ``CCF2d`` is tested in SPARTA's ``tests/test_ccf2d.py``.
 
 Self-contained: no external data, numpy only.
@@ -15,6 +18,7 @@ import numpy as np
 import pytest
 
 import todcor as ops
+from unicor.dsp import tukey_window
 from todcor import (
     chi2_from_stats, combine_stats, composite_flux, crlb_from_map, model_flux,
     profile_from_stats, shift_template_flux, todcor_map, window_stats,
@@ -45,7 +49,7 @@ def _build_case(dv=2.0, alpha=0.1, pad=12.0):
     lo = max(w1.min(), w2.min()) + pad
     hi = min(w1.max(), w2.max()) - pad
     wave_grid, _ = ops.log_lambda_grid(lo, hi, dv)
-    win = ops.tukey_window(len(wave_grid), alpha=alpha)
+    win = tukey_window(len(wave_grid), alpha=alpha)
     g1 = (ops.resample(w1, f1, wave_grid, fill=1.0) - 1.0) * win
     g2 = (ops.resample(w2, f2, wave_grid, fill=1.0) - 1.0) * win
     return wave_grid, win, (w1, f1), (w2, f2), g1, g2, dv
@@ -59,16 +63,6 @@ def test_log_lambda_grid_is_velocity_even():
     steps = np.diff(np.log(wave)) * ops.C_KMS
     assert np.allclose(steps, 2.5, rtol=1e-12)
     assert np.allclose(np.diff(u), 2.5)
-
-
-def test_parseval_weights_match_real_space():
-    rng = np.random.default_rng(0)
-    for n in (256, 257):
-        x = rng.standard_normal(n)
-        x -= x.mean()  # DC removed, as in the fit
-        X = np.fft.rfft(x)[1:]
-        w = ops.parseval_weights(n, sigma=1.0)
-        assert np.sum(w * np.abs(X) ** 2) == pytest.approx(np.sum(x ** 2), rel=1e-9)
 
 
 def test_shift_kms_matches_log_lambda_translation():
@@ -132,16 +126,19 @@ def test_noisy_recovery_unbiased():
     assert abs(np.mean(rec2) - v2_true) <= dv
 
 
-def test_exact_shift_chi2_zero_even_and_odd_n():
+@pytest.mark.parametrize("e", [0, 7, 20])
+def test_exact_shift_chi2_zero_even_and_odd_n(e):
     # A composite built with model_flux at exact (v1,v2,a1,a2) must be fit with
-    # chi2 ~ 0 -- including even-N windows (Nyquist mode handled consistently).
+    # chi2 ~ 0 -- for even and odd window and extended lengths (the Nyquist
+    # mode of the shift handled consistently), with or without an extension,
+    # and whatever constant offset the data carry (it is profiled out).
     for n in (88, 256, 400, 401):
-        grid = np.exp(np.linspace(np.log(4400), np.log(4520), n))
+        grid = np.exp(np.linspace(np.log(4400), np.log(4520), n + 2 * e))
         dv = np.log(grid[1] / grid[0]) * ops.C_KMS
         g1 = -0.5 * np.exp(-0.5 * ((grid - 4450) / 2.0) ** 2)
         g2 = +0.6 * np.exp(-0.5 * ((grid - 4485) / 3.0) ** 2)
         v1, v2, a1, a2 = 33.0, -51.0, 0.7, 0.5
-        data = model_flux(grid, dv, g1, g2, v1, v2, a1, a2) - 1.0
+        data = model_flux(g1, g2, n, dv, v1, v2, a1, a2) + 0.37
         st = window_stats(data, g1, g2, dv, np.array([v1]), np.array([v2]),
                           sigma=0.01)
         r = profile_from_stats(st, np.array([v1]), np.array([v2]), nonneg=False)
@@ -230,7 +227,7 @@ def test_multiwindow_combination_recovers():
     stats = []
     for lo, hi in [(4030, 4380), (4640, 4740)]:
         grid, _ = ops.log_lambda_grid(lo, hi, dv)
-        win = ops.tukey_window(len(grid), alpha=0.2)
+        win = tukey_window(len(grid), alpha=0.2)
         g1 = (ops.resample(*t_prim, grid, fill=1.0) - 1.0) * win
         g2 = (ops.resample(*t_sec, grid, fill=1.0) - 1.0) * win
         flux = composite_flux(grid, [t_prim, t_sec], [v1_true, v2_true],
@@ -296,7 +293,7 @@ def test_chi2_from_stats_splits_the_joint_chi2_by_window():
     stats = []
     for lo, hi in [(4030, 4380), (4640, 4740)]:
         grid, _ = ops.log_lambda_grid(lo, hi, dv)
-        win = ops.tukey_window(len(grid), alpha=0.2)
+        win = tukey_window(len(grid), alpha=0.2)
         g1 = (ops.resample(*t_prim, grid, fill=1.0) - 1.0) * win
         g2 = (ops.resample(*t_sec, grid, fill=1.0) - 1.0) * win
         flux = composite_flux(grid, [t_prim, t_sec], [4.0, -6.0], [0.7, 0.4])
@@ -308,10 +305,17 @@ def test_chi2_from_stats_splits_the_joint_chi2_by_window():
     assert np.all(parts[0] > 0) and np.all(parts[1] > 0)
 
 
-def test_window_stats_rejects_grid_length_mismatch():
+@pytest.mark.parametrize("n_data", [+1, +2])
+def test_window_stats_rejects_grid_length_mismatch(n_data):
+    # The templates must be the window's grid extended on each side (one more
+    # pixel on the right allowed, for an odd length): data longer than the
+    # templates, or two templates of different length, are refused.
     wave_grid, win, t1, t2, g1, g2, dv = _build_case()
-    with pytest.raises(ValueError, match="share one grid"):
-        window_stats(np.zeros(len(g1) - 1), g1, g2, dv, np.array([0.0]),
+    with pytest.raises(ValueError, match="g1 must be the window's grid extended"):
+        window_stats(np.zeros(len(g1) + n_data), g1, g2, dv, np.array([0.0]),
+                     np.array([0.0]))
+    with pytest.raises(ValueError, match="share one extended grid"):
+        window_stats(np.zeros(len(g1) - 2), g1, g2[1:], dv, np.array([0.0]),
                      np.array([0.0]))
 
 
@@ -380,7 +384,8 @@ def test_r_is_one_for_a_noiseless_composite_at_the_truth(n):
     dv = np.log(grid[1] / grid[0]) * ops.C_KMS
     g1 = -0.5 * np.exp(-0.5 * ((grid - 4450) / 2.0) ** 2)
     g2 = +0.6 * np.exp(-0.5 * ((grid - 4485) / 3.0) ** 2)
-    data = model_flux(grid, dv, g1, g2, 33.0, -51.0, 0.7, 0.5) - 1.0
+    # Templates on the window extended by 15 pixels (~470 km/s) per side.
+    data = model_flux(g1, g2, n - 30, dv, 33.0, -51.0, 0.7, 0.5)
     # The lines are ~130 km/s wide (sigma): scan well beyond that.
     v1, v2 = 33.0 + 25.0 * np.arange(-12, 13), -51.0 + 25.0 * np.arange(-12, 13)
     res = todcor_map(data, g1, g2, dv, v1, v2, sigma=0.01)
@@ -484,16 +489,18 @@ def test_oversampling_divides_the_weights():
     v = np.arange(-30.0, 31.0, 5.0)
     st1 = window_stats(data_g, g1, g2, dv, v, v, sigma=0.02)
     st8 = window_stats(data_g, g1, g2, dv, v, v, sigma=0.02, oversampling=8.0)
-    for k in ("S11", "S22", "SD", "b1", "b2", "A12", "nu"):
+    for k in ("S11", "S22", "SD", "b1", "b2", "A12"):
         assert np.allclose(st8[k], st1[k] / 8.0, rtol=1e-12), k
-    # White noise on the analysis grid: one degree of freedom per retained
-    # Fourier coefficient (DC and the even-N Nyquist mode are dropped).
-    n = len(data_g)
-    assert st1["nu"] == pytest.approx(n - 2 if n % 2 == 0 else n - 1)
+    # White noise on the analysis grid: one degree of freedom per pixel, less
+    # one for the window's free offset -- n / M independent pixels when M
+    # analysis pixels share each native one, for either parity of n.
+    for n in (len(data_g), len(data_g) - 1):
+        d, t1_, t2_ = data_g[:n], g1[:n], g2[:n]
+        assert window_stats(d, t1_, t2_, dv, v, v)["nu"] == pytest.approx(n - 1.0)
+        assert window_stats(d, t1_, t2_, dv, v, v, oversampling=8.0)["nu"] \
+            == pytest.approx(n / 8.0 - 1.0)
     with pytest.raises(ValueError, match="oversampling"):
         window_stats(data_g, g1, g2, dv, v, v, oversampling=0.5)
-    with pytest.raises(ValueError, match="noise_psd"):
-        window_stats(data_g, g1, g2, dv, v, v, noise_psd=np.ones(n))
 
 
 def test_resampled_noise_psd_counts_native_pixels():
@@ -550,7 +557,7 @@ def test_crlb_and_chi2_red_honest_on_an_oversampled_grid():
     wave_native, _ = ops.log_lambda_grid(4450.0, 4520.0, 1.0)
     wave_grid, _ = ops.log_lambda_grid(4452.0, 4518.0, 1.0 / M)
     n, dv = len(wave_grid), 1.0 / M
-    win = ops.tukey_window(n, alpha=0.1)
+    win = tukey_window(n, alpha=0.1)
     g1 = (_narrow_line_flux(wave_grid, c1, d1) - 1.0) * win
     g2 = (_narrow_line_flux(wave_grid, c2, d2) - 1.0) * win
     flux0 = 1.0 + a1 * (_narrow_line_flux(wave_native, c1, d1, v=v1_true) - 1.0) \
@@ -670,10 +677,11 @@ def test_forward_model_follows_the_convention(conv):
     np.testing.assert_allclose(
         composite_flux(wave, [t1, t2], [v1, v2], [a1, a2], velocity_convention=conv),
         1.0 + data_g, atol=1e-5)
-    # ... and the Fourier phase shift the fit uses.
+    # ... and the Fourier phase shift the fit uses (no extension: a circular
+    # shift, exact here since the lines are 400 km/s clear of the edges).
     np.testing.assert_allclose(
-        model_flux(wave, dv, g1, g2, v1, v2, a1, a2, velocity_convention=conv),
-        1.0 + data_g, atol=1e-9)
+        model_flux(g1, g2, wave.size, dv, v1, v2, a1, a2, velocity_convention=conv),
+        data_g, atol=1e-9)
 
 
 def test_cubic_shift_of_a_coarse_template_beats_linear():
@@ -713,8 +721,217 @@ def test_an_unknown_convention_is_refused(bad):
              lambda: shift_template_flux(*t, wave, 10.0, velocity_convention=bad),
              lambda: composite_flux(wave, [t, t], [10.0, -10.0], [0.5, 0.5],
                                     velocity_convention=bad),
-             lambda: model_flux(wave, dv, g1, g2, 10.0, -10.0, 0.5, 0.5,
+             lambda: model_flux(g1, g2, wave.size, dv, 10.0, -10.0, 0.5, 0.5,
                                 velocity_convention=bad))
     for call in calls:
         with pytest.raises(ValueError, match='convention'):
             call()
+
+
+# =============================================================================
+# The extended-template window: no wrap-around, a free offset (acceptance)
+# =============================================================================
+def _line_forest(seed, lam_lo, lam_hi, lines_per_A, sigma_kms):
+    """Rest-frame Gaussian-line forest (in velocity) as a function of lambda,
+    its lines everywhere in [lam_lo, lam_hi] -- across any window's edges."""
+    rng = np.random.default_rng(seed)
+    n = int(lines_per_A * (lam_hi - lam_lo))
+    centres = rng.uniform(0.0, _C * np.log(lam_hi / lam_lo), n)
+    depths = rng.uniform(0.05, 0.6, n)
+
+    def flux(wave):
+        u = _C * np.log(np.asarray(wave, float) / lam_lo)
+        out = np.ones(u.size)
+        for c, d in zip(centres, depths):
+            near = np.abs(u - c) < 12.0 * sigma_kms        # exp(-72): nothing beyond
+            out[near] *= 1.0 - d * np.exp(-0.5 * ((u[near] - c) / sigma_kms) ** 2)
+        return out
+    return flux
+
+
+def _shifted(flux, wave, v):
+    """The forest Doppler-shifted by v ('cz'), evaluated exactly at ``wave``."""
+    return flux(np.asarray(wave, float) / (1.0 + v / _C))
+
+
+def test_window_stats_without_an_extension_is_a_circular_shift():
+    # e = 0: the template is the window itself, and a shift of k whole pixels
+    # reads it rolled by k -- the statistics are those of np.roll.
+    rng = np.random.default_rng(4)
+    n, dv = 301, 1.0
+    data, g1, g2 = rng.normal(size=(3, n))
+    k = np.array([-7, 0, 3, 12])
+    v = ops.velocity_from_log_shift(k * dv / _C)
+    st = window_stats(data, g1, g2, dv, v, v)
+    rolled1 = np.array([np.roll(g1, kk) for kk in k])
+    rolled2 = np.array([np.roll(g2, kk) for kk in k])
+    proj = lambda x: x - x.mean(axis=-1, keepdims=True)     # the free offset
+    np.testing.assert_allclose(st["b1"], proj(rolled1) @ proj(data), rtol=1e-10)
+    np.testing.assert_allclose(st["S22"], np.sum(proj(rolled2) ** 2, axis=1), rtol=1e-10)
+    np.testing.assert_allclose(st["A12"], proj(rolled1) @ proj(rolled2).T,
+                               rtol=1e-10, atol=1e-10 * n)
+    assert st["SD"] == pytest.approx(np.sum(proj(data) ** 2), rel=1e-12)
+
+
+def test_a_constant_added_to_the_data_or_a_template_changes_nothing():
+    # The window's continuum level is a free parameter: every statistic is
+    # projected off a constant, so offsets in the data or the (extended)
+    # templates leave the fit unchanged.
+    wave, _ = ops.log_lambda_grid(5000.0, 5030.0, 1.0)
+    t_wave, _ = ops.log_lambda_grid(4990.0, 5040.0, 0.1)
+    T1, T2 = _line_forest(31, 4980.0, 5050.0, 1.0, 4.0), _line_forest(32, 4980.0, 5050.0, 1.0, 5.0)
+    flux = 1.0 + 0.7 * (_shifted(T1, wave, 12.3) - 1.0) + 0.3 * (_shifted(T2, wave, -8.1) - 1.0)
+    flux = flux + np.random.default_rng(5).normal(0.0, 0.01, wave.size)
+    win = ops.prepare_window(wave, flux, t_wave, T1(t_wave), t_wave, T2(t_wave), v_max=30.0)
+    v1, v2 = np.arange(5.0, 20.0), np.arange(-15.0, 0.0)
+    ref = window_stats(win.data_g, win.g1, win.g2, win.dv, v1, v2)
+    moved = window_stats(win.data_g + 0.3, win.g1 - 0.2, win.g2 + 0.45, win.dv, v1, v2)
+    for k in ("S11", "S22", "SD", "b1", "b2", "A12", "nu"):
+        scale = np.max(np.abs(ref[k]))
+        np.testing.assert_allclose(moved[k], ref[k], rtol=0, atol=1e-9 * scale, err_msg=k)
+
+
+@pytest.mark.parametrize("n_cut", [0, 1])
+def test_one_template_correlation_is_unicors_ccf_lag_by_lag(n_cut):
+    # With one template, the offset-projected normalised correlation
+    # c1 = b1 / sqrt(S11 SD) over the window's observed pixels is UNICOR's
+    # extended-template Pearson CCF: same pixels, same template segment at
+    # every whole lag. (An even window's template carries one extra pixel on
+    # the right, which no lag up to +-extension reads; UNICOR wants it off.)
+    import unicor
+    wave, _ = ops.log_lambda_grid(5000.0, 5040.0, 1.0)
+    wave = wave[:wave.size - n_cut]
+    t_wave, _ = ops.log_lambda_grid(4990.0, 5050.0, 0.1)
+    T1, T2 = _line_forest(41, 4980.0, 5060.0, 1.0, 4.0), _line_forest(42, 4980.0, 5060.0, 1.0, 5.0)
+    flux = 1.0 + 0.7 * (_shifted(T1, wave, 9.4) - 1.0) + 0.3 * (_shifted(T2, wave, -21.7) - 1.0)
+    flux = flux + np.random.default_rng(6).normal(0.0, 0.01, wave.size)
+    win = ops.prepare_window(wave, flux, t_wave, T1(t_wave), t_wave, T2(t_wave), v_max=40.0)
+    n, e = win.wave.size, win.extension
+    v, ccf = unicor.ccf_vs_velocity(win.g1[:n + 2 * e], win.data_g, win.wave)
+    assert v.size == 2 * win.extension + 1                 # every lag of the extension
+    st = window_stats(win.data_g, win.g1, win.g2, win.dv, v, np.array([0.0]))
+    c1 = st["b1"] / np.sqrt(st["S11"] * st["SD"])
+    np.testing.assert_allclose(c1, ccf, rtol=0, atol=1e-10)
+    assert v[np.argmax(c1)] == pytest.approx(9.4, abs=1.0)
+
+
+@pytest.mark.parametrize("n_cut", [0, 1])                    # either window parity
+@pytest.mark.parametrize("width", [50.0, 200.0])
+@pytest.mark.parametrize("v1, v2", [(37.31, -52.64), (-59.87, 58.43), (12.345, -3.21),
+                                    (0.4, 0.0)])
+def test_noise_free_sb2_is_recovered_to_the_cm_per_s_with_lines_across_the_edges(
+        width, v1, v2, n_cut):
+    # An independent forward model: analytic line forests (R ~ 60 000 lines)
+    # evaluated exactly at the shifted wavelengths, with lines straddling both
+    # window edges; templates sampled 10x finer than the 0.5 km/s grid. The
+    # pipeline prepare_window -> window_stats -> joint_fit (coarse 1 km/s map,
+    # 0.1 km/s fine map, degree-6 peak) must land on the truth. The old
+    # circular, tapered window was off by up to ~12 m/s on 50 A.
+    lo, hi = 5000.0, 5000.0 + width
+    T1 = _line_forest(1, lo - 10.0, hi + 10.0, 1.0, 2.1)
+    T2 = _line_forest(2, lo - 10.0, hi + 10.0, 0.7, 3.0)
+    wave, _ = ops.log_lambda_grid(lo, hi, 0.5)
+    wave = wave[:wave.size - n_cut]
+    t_wave, _ = ops.log_lambda_grid(lo - 5.0, hi + 5.0, 0.05)
+    a1, a2 = 0.7, 0.3
+    flux = 1.0 + a1 * (_shifted(T1, wave, v1) - 1.0) + a2 * (_shifted(T2, wave, v2) - 1.0)
+    g1 = np.arange(round(v1) - 6.0, round(v1) + 7.0)
+    g2 = np.arange(round(v2) - 6.0, round(v2) + 7.0)
+    v_max = max(np.abs(g1).max(), np.abs(g2).max()) + 2.0    # + the fine map's reach
+    win = ops.prepare_window(wave, flux, t_wave, T1(t_wave), t_wave, T2(t_wave), v_max=v_max)
+    assert win.wave.size == wave.size                       # the templates cover it all
+    st = window_stats(win.data_g, win.g1, win.g2, win.dv, g1, g2)
+    fit = ops.joint_fit([st], None, [(win, {})], g1, g2, nonneg=True, output='ccf')
+    assert fit.fine is not None
+    err = np.abs(np.array(fit.crlb["peak_refined"]) - [v1, v2]) * 1e3      # m/s
+    np.testing.assert_array_less(err, 0.05)
+    assert fit.best["a1"] == pytest.approx(a1, abs=1e-3)
+    assert fit.best["a2"] == pytest.approx(a2, abs=1e-3)
+
+
+def _non_quadratic_peak(v1, v2, truth, SD=2e5, r=(0.6, 0.35), s=(1.2, 1.7), c12=0.15,
+                        mix=(0.3, -0.2)):
+    """logL = -(SD/2)(1 - R^2), with Zucker & Mazeh's R^2 of Gaussian c1, c2
+    (in mixed coordinates, so v1 and v2 correlate) and a constant c12.
+
+    Both c's peak at ``truth``, and so does R^2 (dR^2/dc_i > 0 there). Returns
+    the map and its analytic covariance ``inv(-Hessian)`` at the maximum.
+    """
+    V1, V2 = np.meshgrid(v1, v2, indexing="ij")
+    J = np.array([[1.0, mix[0]], [mix[1], 1.0]])            # u = J (v - truth)
+    u1 = (V1 - truth[0]) + mix[0] * (V2 - truth[1])
+    u2 = (V2 - truth[1]) + mix[1] * (V1 - truth[0])
+    c1 = r[0] * np.exp(-u1 ** 2 / (4 * s[0] ** 2))
+    c2 = r[1] * np.exp(-u2 ** 2 / (4 * s[1] ** 2))
+    R2 = (c1 ** 2 - 2 * c1 * c2 * c12 + c2 ** 2) / (1 - c12 ** 2)
+    # At the maximum grad c = 0, so Hess R^2 = sum_i (dR^2/dc_i) Hess c_i.
+    dR2 = np.array([2 * (r[0] - c12 * r[1]), 2 * (r[1] - c12 * r[0])]) / (1 - c12 ** 2)
+    hess_u = np.diag(dR2 * -np.array(r) / (2 * np.square(s)))
+    hessian = 0.5 * SD * J.T @ hess_u @ J
+    return -0.5 * SD * (1 - R2), np.linalg.inv(-hessian)
+
+
+def test_crlb_degree_six_peak_reads_a_non_quadratic_peak():
+    step, truth = 0.1, (0.0373, -0.0521)                    # off the nodes
+    v1 = np.arange(-20, 21) * step
+    v2 = np.arange(-20, 21) * step - 0.3
+    logL, cov = _non_quadratic_peak(v1, v2, truth)
+    cr = crlb_from_map(logL, v1, v2)
+    assert not cr["on_edge"]
+    np.testing.assert_array_less(np.abs(np.subtract(cr["peak_refined"], truth)), 1e-4 * step)
+    np.testing.assert_allclose(cr["cov"], cov, rtol=1e-3)
+    assert cr["sigma_v1"] == pytest.approx(np.sqrt(cov[0, 0]), rel=1e-3)
+    assert cr["sigma_v2"] == pytest.approx(np.sqrt(cov[1, 1]), rel=1e-3)
+    assert cr["rho"] == pytest.approx(cov[0, 1] / np.sqrt(cov[0, 0] * cov[1, 1]), rel=1e-3)
+
+
+def test_crlb_degree_six_peak_beyond_the_map_edge_is_nan():
+    step = 0.1
+    v = np.arange(-20, 21) * step
+    logL, _ = _non_quadratic_peak(v, v, (2.6, 0.0))         # v1 truth beyond +2.0
+    cr = crlb_from_map(logL, v, v)
+    assert cr["on_edge"]
+    assert np.isnan(cr["sigma_v1"]) and np.isnan(cr["sigma_v2"]) and np.isnan(cr["cov"]).all()
+    # Grid-limited, not extrapolated (v2 at the ridge's node along v1 = 2).
+    assert cr["peak_refined"] == cr["peak"] and cr["peak"][0] == 2.0
+
+
+def test_crlb_refuses_a_maximum_more_than_a_step_away_or_a_saddle():
+    v = np.arange(-6.0, 7.0)
+    V1, V2 = np.meshgrid(v, v, indexing="ij")
+    # A one-node spike on a broad peak centred 3 steps away: the argmax is the
+    # spike, the polynomial's maximum ~3 steps off -- extrapolation.
+    spike = -0.5 * ((V1 - 3.0) ** 2 + V2 ** 2) / 100.0 + 0.06 * ((V1 == 0) & (V2 == 0))
+    # A double well in v2 whose argmax node sits between the wells: the
+    # fitted curvature there is positive along v2.
+    saddle = -V1 ** 2 + 0.5 * V2 ** 2 - 0.1 * V2 ** 4 + 0.5 * (V2 == 0)
+    for logL in (spike, saddle):
+        cr = crlb_from_map(logL, v, v)
+        assert cr["peak"] == (0.0, 0.0) and not cr["on_edge"]
+        assert np.isnan(cr["sigma_v1"]) and np.isnan(cr["sigma_v2"])
+        assert cr["peak_refined"] == cr["peak"]
+
+
+def test_model_flux_is_the_composite_of_the_extended_templates():
+    # The fit's own model: at whole-pixel velocities it is exactly the
+    # extended templates read k pixels off centre; at any velocity it is a
+    # composite the fit matches with chi2 = 0 and the true amplitudes.
+    wave, _ = ops.log_lambda_grid(5000.0, 5030.0, 1.0)
+    t_wave, _ = ops.log_lambda_grid(4990.0, 5040.0, 0.1)
+    T1, T2 = _line_forest(51, 4980.0, 5050.0, 1.0, 4.0), _line_forest(52, 4980.0, 5050.0, 1.0, 5.0)
+    win = ops.prepare_window(wave, np.ones(wave.size), t_wave, T1(t_wave), t_wave, T2(t_wave),
+                             v_max=30.0)
+    n, e = win.wave.size, win.extension
+    k1, k2 = 17, -23
+    v1, v2 = (ops.velocity_from_log_shift(k * win.dv / _C) for k in (k1, k2))
+    want = 0.7 * win.g1[e - k1: e - k1 + n] + 0.3 * win.g2[e - k2: e - k2 + n]
+    np.testing.assert_allclose(model_flux(win.g1, win.g2, n, win.dv, v1, v2, 0.7, 0.3), want,
+                               rtol=0, atol=1e-12)
+    for v1, v2 in ((v1, v2), (13.37, -21.05)):
+        data = model_flux(win.g1, win.g2, n, win.dv, v1, v2, 0.7, 0.3) + 0.42
+        st = window_stats(data, win.g1, win.g2, win.dv, np.array([v1]), np.array([v2]),
+                          sigma=0.01)
+        best = profile_from_stats(st, np.array([v1]), np.array([v2]))["best"]
+        assert best["chi2"] == pytest.approx(0.0, abs=1e-12 * st["SD"])
+        assert (best["a1"], best["a2"]) == (pytest.approx(0.7, abs=1e-10),
+                                            pytest.approx(0.3, abs=1e-10))

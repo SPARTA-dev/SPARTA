@@ -34,7 +34,7 @@ from sparta.template import Template
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from _atoms_baseline import _sb2_case  # noqa: E402
 
-DV, VEL_BOUND, DVEL, ALPHA = 1.0, 100, 2.0, 0.1       # km/s, km/s, km/s, -
+DV, VEL_BOUND, DVEL = 1.0, 100, 2.0                  # km/s
 _MAP_KEYS = ("v1_grid", "v2_grid", "R", "logL_profile", "logL_marginal", "a1", "a2", "chi2",
              "map")
 
@@ -160,32 +160,36 @@ def test_the_noise_fallback_warning_points_at_the_caller():
 # =============================================================================
 # The atoms rebuild CCF2d exactly
 # =============================================================================
-def _rebuild(spec, t1, t2, sigma, output):
+def _rebuild(spec, t1, t2, sigma, output, amplitudes="shared"):
     """CCF2d.cross_correlate(spec, t1, t2, dv=DV, vel_bound=VEL_BOUND, dvel=DVEL,
-    sigma=sigma, alpha=ALPHA, output=output), from the atoms."""
+    sigma=sigma, output=output, amplitudes=amplitudes), from the atoms."""
     native = spec.native_steps()
     v = np.arange(-VEL_BOUND, VEL_BOUND + 0.5 * DVEL, DVEL)
+    # The largest |v| any window is evaluated at: the grid plus the fine map's
+    # reach (CCF2d's refine_span = 2 coarse steps).
+    v_max = np.max(np.abs(v)) + 2 * np.max(np.diff(v))
     sigmas = np.broadcast_to(np.atleast_1d(np.asarray(1.0 if sigma is None else sigma, float)),
                              (len(spec.wv),))
     prepared, stats = [], []
     for I, (w, s) in enumerate(zip(spec.wv, spec.sp)):
         w_log, s_log = resample_to_log_grid(w, s, DV)
         win = prepare_window(w_log, s_log, t1.model.wv[0], t1.model.sp[0],
-                             t2.model.wv[0], t2.model.sp[0], continuum="median", alpha=ALPHA)
+                             t2.model.wv[0], t2.model.sp[0], v_max=v_max)
         psd = resampling_noise_psd(len(win.wave), native[I], win.dv,
                                    native_phases(w, win.wave, win.dv))
-        kw = dict(sigma=sigmas[I], zeta_max=None, oversampling=max(1.0, native[I] / win.dv),
-                  noise_psd=win.taper_power * psd, velocity_convention="cz")
+        kw = dict(sigma=sigmas[I], oversampling=max(1.0, native[I] / win.dv),
+                  noise_psd=psd, velocity_convention="cz")
         stats.append(window_stats(win.data_g, win.g1, win.g2, win.dv, v, v, **kw))
         prepared.append((win, kw))
 
     cache = {}
-    fit = joint_fit(stats, None, prepared, v, v, nonneg=True, output=output, fine_cache=cache)
+    fit_kw = dict(nonneg=True, output=output, amplitudes=amplitudes, fine_cache=cache)
+    fit = joint_fit(stats, None, prepared, v, v, **fit_kw)
     noise = sigma
     if sigma is None:
-        noise, _ = window_noise(fit.window_chi2, [st["nu"] for st in fit.at_peak])
-        fit = joint_fit(stats, 1.0 / noise ** 2, prepared, v, v, nonneg=True, output=output,
-                        fine_cache=cache)
+        noise, _ = window_noise(fit.window_chi2, [st["nu"] for st in fit.at_peak],
+                                amplitudes=amplitudes)
+        fit = joint_fit(stats, 1.0 / noise ** 2, prepared, v, v, **fit_kw)
     return fit, prepared, stats, noise
 
 
@@ -198,7 +202,7 @@ def _same(a, b):
 def test_the_atoms_rebuild_ccf2d_exactly(sigma, output):
     spec, t1, t2 = _sb2_case()
     ccf = CCF2d().cross_correlate(spec, t1, t2, dv=DV, vel_bound=VEL_BOUND, dvel=DVEL,
-                                  sigma=sigma, alpha=ALPHA, output=output)
+                                  sigma=sigma, output=output)
     fit, prepared, stats, noise = _rebuild(spec, t1, t2, sigma, output)
     res = ccf.Corr2d
 
@@ -229,11 +233,35 @@ def test_the_atoms_rebuild_ccf2d_exactly(sigma, output):
     assert ccf.n_ord == len(prepared)
     for I, (obj, (win, kw), st) in enumerate(zip(ccf.windows, prepared, stats)):
         assert obj["order"] == I and obj["dv"] == win.dv
-        for key in ("S11", "S22", "SD", "nu"):
+        for key in ("SD", "nu"):
             assert obj[key] == st[key]
+        for key in ("S11", "S22"):                      # velocity-dependent: the median
+            assert obj[key] == float(np.median(st[key]))
         assert obj["oversampling"] == kw["oversampling"]
         assert obj["n_eff"] == len(win.wave) / kw["oversampling"]
         assert obj["sigma"] == (noise[I] if sigma is None else sigma)
         for key, arr in (("wv", win.wave), ("data_g", win.data_g), ("g1", win.g1),
                          ("g2", win.g2)):
             _same(obj[key], arr)
+
+
+@pytest.mark.parametrize("sigma", [None, 0.005])
+def test_the_atoms_rebuild_ccf2d_per_order_exactly(sigma):
+    # amplitudes='per_order': one (a1, a2) per window, the noise of each
+    # window charged its own two amplitudes (window_noise).
+    spec, t1, t2 = _sb2_case()
+    ccf = CCF2d().cross_correlate(spec, t1, t2, dv=DV, vel_bound=VEL_BOUND, dvel=DVEL,
+                                  sigma=sigma, amplitudes="per_order")
+    fit, prepared, _, noise = _rebuild(spec, t1, t2, sigma, "ccf", amplitudes="per_order")
+    res = ccf.Corr2d
+    for maps, atom in ((res, fit.profile), (res["fine"], fit.fine)):
+        for key in _MAP_KEYS:
+            _same(maps[key], atom[key])
+    assert (res["RV1"], res["RV2"]) == fit.crlb["peak_refined"]
+    assert (res["eRV1"], res["eRV2"]) == (fit.crlb["sigma_v1"], fit.crlb["sigma_v2"])
+    assert res["amplitudes"] == "per_order"
+    for key in ("a1", "a2"):
+        assert res[f"{key}_best"].shape == (len(prepared),)
+        _same(res[f"{key}_best"], fit.best[key])
+    assert (res["chi2_best"], res["chi2_red"]) == (fit.best["chi2"], fit.best["chi2_red"])
+    _same(res["sigma"], noise)

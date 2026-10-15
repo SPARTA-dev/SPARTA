@@ -107,10 +107,10 @@ every known limitation, with its measured size, is in
 ## Error bars
 
 - [ ] **Calibrate the errors after preprocessing.** The band-pass removes
-  most of the noise and correlates the rest; UNICOR corrects for the noise it
-  removes, approximately. ⚠ The quoted errors err high: 1.25–1.4× the scatter
-  on simulated spectra, ~3× on the real HARPS TOI-193 RVs (template mismatch
-  adds to it); TODCOR ~1.4×. Calibrate by simulating your setup, or by the
+  most of the noise and correlates the rest; UNICOR and TODCOR correct for the
+  noise it removes, approximately. ⚠ The quoted errors err high: UNICOR
+  1.25–1.4× the scatter on simulated spectra, ~3× on the real HARPS TOI-193
+  RVs (template mismatch adds to it); TODCOR 1.1–1.2× on simulated SB2s. Calibrate by simulating your setup, or by the
   scatter of a constant star.
   → [conventions](conventions.md#when-are-the-error-bars-calibrated)
 - [ ] **Expect a mismatched template to inflate the errors.** ⚠ In tutorial 07
@@ -120,20 +120,20 @@ every known limitation, with its measured size, is in
 
 ## Double-lined binaries (TODCOR)
 
-- [ ] **Use long windows, a firm taper and the right continuum.** ⚠ On
-  noiseless simulated SB2 spectra the velocity bias was 15.6 m/s on a 50 Å
-  window (`alpha=0.1`, `continuum='median'`) and 3.1 m/s on 200 Å (`alpha=0.3`,
-  `continuum=1.0`). → [limitations](limitations.md#todcor),
-  [tutorial 04](../examples/tutorials/04_todcor.ipynb)
-- [ ] **Pass `continuum=1.0` for continuum-normalised spectra.** ⚠ The median of
-  an absorption spectrum lies below its continuum and lowers the amplitudes
-  (0.696 and 0.297 for 0.7 and 0.3 in tutorial 04). → [limitations](limitations.md#todcor)
+- [ ] **Cut the templates wider than the scan plus the fine map.** `CCF2d`
+  needs both templates over each order ± (`vel_bound` + 2 `dvel`) plus a
+  pixel. ⚠ Observed pixels they do not reach are dropped, which costs
+  information. → [limitations](limitations.md#todcor)
+- [ ] **Choose shared or per-order amplitudes.** Keep `amplitudes='shared'`
+  (the default) when the light ratio is constant over the fitted orders
+  (similar stars, a narrow range); use `amplitudes='per_order'` for stars of
+  different temperature over a wide range. ⚠ Shared amplitudes are an
+  approximation when the ratio changes with wavelength; per-order ones cost
+  two free parameters per order and give one (a1, a2) per order.
+  → [correlation engines § pooling orders](correlation_engines.md#pooling-orders)
 - [ ] **Label the components.** With twin templates, give the stars disjoint
   trial grids (`v1_grid`, `v2_grid`) or sort the solutions afterwards. ⚠ Which
   star is "1" can change from epoch to epoch. → [limitations](limitations.md#todcor)
-- [ ] **Remember that (a1, a2) are shared by all orders.** ⚠ The light ratio of
-  stars of different temperature changes with wavelength.
-  → [limitations](limitations.md#todcor)
 - [ ] **Look at the R map; take the errors from ln L.** ⚠ ln L spans ~10⁶ over
   the map and shows only the peak node. → [correlation engines § two maps](correlation_engines.md#two-maps-one-peak)
 
@@ -149,9 +149,10 @@ every known limitation, with its measured size, is in
 - [ ] **Do not read ρ on its own.** ⚠ 1 − ρ ∝ (S/N)⁻²: compare ρ between trial
   velocities of the same data, not between data sets.
   → [tiravel](tiravel.md#what-ρ-says-and-what-it-does-not)
-- [ ] **With TODCOR, cut the orders to the template's coverage.** ⚠ Its
-  continuum is near 0 and `CCF2d` fills uncovered pixels with 1.
-  → [limitations](limitations.md#todcor)
+- [ ] **With TODCOR, narrow the scan.** The template spans only the epochs'
+  common range; ⚠ `CCF2d` drops about `vel_bound` from each end of each
+  order, where the template does not reach. Its scale is arbitrary, so the
+  amplitudes are not light fractions. → [limitations](limitations.md#todcor)
 
 ## Periodograms
 

@@ -129,8 +129,7 @@ def _record_sb2():
                                  dict(K_DWARF, amplitude=0.3)])
     obs = Observations(survey="SIMULATED", simulation=sim)
     template1, template2 = component_templates(sim)
-    obs.calc_rv_against_two_templates(template1, template2, dv=0.3, vel_bound=40,
-                                      continuum=1.0, alpha=0.3)
+    obs.calc_rv_against_two_templates(template1, template2, dv=0.3, vel_bound=40)
     return {"rv1": _rounded(obs.vels1), "rv2": _rounded(obs.vels2),
             "erv1": _rounded(obs.evels1), "erv2": _rounded(obs.evels2),
             "a1": _rounded(obs.amps1), "a2": _rounded(obs.amps2)}

@@ -7,10 +7,10 @@
 ## Radial velocities
 
 - **An exact error model for filtered spectra (open issue, 2026-10-15)** —
-  after the band-pass, UNICOR counts only the share of native noise the
-  filter kept (`filtered_noise_fraction`), which turns errors that were
+  after the band-pass, UNICOR and TODCOR count only the share of native noise
+  the filter kept (`filtered_noise_fraction`), which turns errors that were
   0.6–0.7× the scatter into 1.25–1.4× on simulated HARPS- and NRES-like
-  spectra. The remaining excess is the share of the lines' own signal the
+  spectra (UNICOR), and ~0.55× into 1.1–1.2× on simulated SB2s (TODCOR). The remaining excess is the share of the lines' own signal the
   filter removes (the noise cut sits at ~1.6× the line FWHM), which this
   correction ignores; on the real HARPS TOI-193 RVs template mismatch adds to
   it (quoted 46 m/s for a 14 m/s scatter). Derive the error of a CCF of
@@ -22,11 +22,6 @@
   epochs' velocities, the half of Zucker & Mazeh (2006) that is still missing;
   today ρ is only evaluated at supplied velocities. The plan and what it
   needs: [tiravel.md](tiravel.md#development).
-- **TODCOR beyond the window edges** — extend the templates past each window
-  (or zero-pad) so the circular Fourier shift stops biasing short,
-  line-crowded windows (15.6 m/s at 50 Å in tutorial 04).
-- **Per-window TODCOR amplitudes** — profile (a1, a2) per order and sum the
-  log-likelihood maps, for light ratios that change with wavelength.
 - **Fix the bisector span** — compute it from the velocities of the level
   crossings, choose and document the convention, give it an honest error and
   a working per-order path, then pin it in the golden master.
@@ -34,8 +29,6 @@
   rotation) for both components of an SB2 by the TODCOR correlation R: the
   "analysis of composite spectra" planned in the original README, beyond
   fitting a fixed pair.
-- **Templates with any continuum in TODCOR** — fill uncovered pixels with the
-  template's own continuum, so TIRAVEL templates can feed `CCF2d`.
 - **Filter on the ln λ grid** — apply the band-pass after resampling onto
   the CCF's ln λ grid, where a velocity scale is exact everywhere, and drop
   the intermediate linear resampling (one interpolation fewer).
@@ -88,8 +81,8 @@ with a few lines of its own):
   in `PeriodicityDetector.calc_partial_periodogram`.
 - **The cut of `Template.cut_multiorder_like`** (the template range around
   each order, with a velocity margin) as an atom.
-- **TODCOR's per-window noise setup** (`sigma`, `zeta_max`, `oversampling`,
-  the tapered `resampling_noise_psd`) and the two-pass fit with
+- **TODCOR's per-window noise setup** (`sigma`, `oversampling`,
+  `resampling_noise_psd`) and the two-pass fit with
   `window_noise` as one atom; today that knowledge lives inside `CCF2d`.
 - **The whole per-order preprocessing chain** on arrays, with its
   native-step bookkeeping, which is easy to get wrong by hand.
