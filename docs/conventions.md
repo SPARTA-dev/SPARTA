@@ -176,12 +176,19 @@ place and in this order:
 4. **`filter_spectrum`** — first-order Butterworth band-pass, run forward and
    backward (zero phase) on the flux minus its 80th percentile; each order is
    then standardised to zero mean and unit variance. The continuum goes to 0.
+   Both cuts are **velocity scales** (km/s), the periods of the band edges:
+   variations broader than `continuum_scale_kms` and structure narrower than
+   `noise_scale_kms` are removed (each to half its amplitude at the cut), so a
+   template and the data get the same physical filter whatever their pixels.
 5. **`apply_cosine_bell`** — Tukey taper (`alpha`), bringing each order's
    ends to 0.
 
 Defaults: `n_trim=10, clean_margins=True, remove_nans=True, delta=0.5,
-cosmic_sigma=3, filter_lowcut=3, filter_highcut=0.15, alpha=0.3`; the
-per-product recommendations are in [instruments.md](instruments.md).
+cosmic_sigma=3, continuum_scale_kms=2000, noise_scale_kms=4, alpha=0.3`; the
+per-product recommendations are in [instruments.md](instruments.md) (HARPS
+2000 / 4 km/s, NRES 1400 / 9.6 km/s: 1.6–1.7 times the line-spread FWHM c/R
+for the noise cut, the values the former pixel-unit settings gave on the
+bundled data).
 
 Why this order:
 
@@ -224,7 +231,7 @@ honest and < 1 conservative):
 | White noise on the native grid | 1.03 | 0.94 (primary), 1.02 (secondary) | `tests/instruments/test_simulated.py` |
 | HARPS archive grid, native step seeded | 1.07 (1.25 without seeding) | — | same |
 | Photon noise (σ ∝ √flux) | 0.89 | — | same |
-| After `preprocess` (band-pass, normalisation, linear-λ resampling) | 0.85 at `filter_highcut=0.15`, 0.72 at 0.9 (eRV/scatter 1.17, 1.38) | 0.72–0.74 | `CCF1d` / `CCF2d` docstrings |
+| After `preprocess` (band-pass, normalisation, linear-λ resampling) | 0.85 with the noise cut at ~6.7 native pixels, 0.72 at ~1.1 (eRV/scatter 1.17, 1.38) | 0.72–0.74 | `CCF1d` / `CCF2d` docstrings |
 | TODCOR analysis grid 1.5× coarser than native | — | 0.82–0.91 | [todcor_method.md §9](../packages/todcor/docs/todcor_method.md) |
 
 So:

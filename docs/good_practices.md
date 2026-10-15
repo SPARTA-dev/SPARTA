@@ -59,11 +59,11 @@ every known limitation, with its measured size, is in
 - [ ] **Cut the template wider than the scan.** Every lag must find template:
   tutorial 03 cuts each order with a 150 km/s margin for a ±100 km/s scan.
   → [correlation engines § the CCF](correlation_engines.md#the-ccf)
-- [ ] **Preprocess the template with the data's settings, and mind the pixel
-  scale.** ⚠ The band-pass cuts are in pixel units, so on a template with finer
-  pixels the same settings are a different filter; changing the template's
-  pixels moved the NRES RVs by −12 and −18 m/s.
-  → [limitations](limitations.md#spectra-and-templates)
+- [ ] **Preprocess the template with the data's settings.** The band-pass
+  cuts are velocity scales (km/s), so data and template get the same filter
+  whatever their pixels; ⚠ `n_trim` and the taper are still in pixels.
+  → [conventions](conventions.md#preprocessing-order),
+  [limitations](limitations.md#spectra-and-templates)
 - [ ] **Download templates only on purpose.** Three models ship with SPARTA;
   fetching another needs `allow_download=True` and puts it in the user cache
   (`$SPARTA_CACHE_DIR/phoenix`, else `$XDG_CACHE_HOME/sparta/phoenix` or

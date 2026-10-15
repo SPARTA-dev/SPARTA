@@ -84,12 +84,12 @@ longer mutates the caller's data, and:
 | `Spectrum(wvUnits=...)` | `Spectrum(wave_unit=...)` |
 | `InterpolateSpectrum(delta, InterpMethod)` | `interpolate(delta, method)` |
 | `TrimSpec(Ntrim, NtrimLeft, NtrimRight, CleanMargins, RemoveNaNs)` | `trim(n_trim, n_trim_left, n_trim_right, clean_margins, remove_nans)` |
-| `FilterSpectrum(lowcut, highcut, order)` | `filter_spectrum(lowcut, highcut, order)` |
+| `FilterSpectrum(lowcut, highcut, order)` | `filter_spectrum(continuum_scale_kms, noise_scale_kms, order)` (velocity scales, see Numerical changes) |
 | `ApplyCosineBell(alpha)` | `apply_cosine_bell(alpha)` |
 | `RemoveCosmics(**kwargs)` (`sigma_upper=`) | `remove_cosmics(sigma_upper=3)` |
 | `BarycentricCorrection()` | `barycentric_correction()` |
 | `SelectOrders(orders, remove)` | `select_orders(orders, remove)` |
-| `SpecPreProccess(Ntrim, CleanMargins, RemoveNaNs, delta, RemCosmicNum, FilterLC, FilterHC, alpha)` | `preprocess(n_trim, clean_margins, remove_nans, delta, cosmic_sigma, filter_lowcut, filter_highcut, alpha)` |
+| `SpecPreProccess(Ntrim, CleanMargins, RemoveNaNs, delta, RemCosmicNum, FilterLC, FilterHC, alpha)` | `preprocess(n_trim, clean_margins, remove_nans, delta, cosmic_sigma, continuum_scale_kms, noise_scale_kms, alpha)` |
 
 `native_steps`, `orders` and `from_spectrum1d` are unchanged.
 
@@ -148,7 +148,7 @@ caller used `add_noise(-1)`, which returned the model flux unchanged.
 
 | 0.2.0 | 0.3.0 |
 |---|---|
-| `PreProccessSpectra(Ntrim, CleanMargins, RemoveNaNs, delta, RemCosmicNum, FilterLC, FilterHC, alpha)` | `preprocess(n_trim, clean_margins, remove_nans, delta, cosmic_sigma, filter_lowcut, filter_highcut, alpha)` |
+| `PreProccessSpectra(Ntrim, CleanMargins, RemoveNaNs, delta, RemCosmicNum, FilterLC, FilterHC, alpha)` | `preprocess(n_trim, clean_margins, remove_nans, delta, cosmic_sigma, continuum_scale_kms, noise_scale_kms, alpha)` |
 | `SelectOrders(orders, remove)` | `select_orders(orders, remove)` |
 | `calc_rv_against_template(template, dv, VelBound, err_per_ord, combine_ccfs)` | `calc_rv_against_template(template, dv, vel_bound, errors_per_order, combine_ccfs)` |
 | `calc_rv_against_two_templates(template1, template2, dv, VelBound, ...)` | `calc_rv_against_two_templates(template1, template2, dv, vel_bound, ...)` |
@@ -186,6 +186,25 @@ Keys of `results_frequency` / `results_power`:
 
 ### Numerical changes (2026-10-15)
 
+- **The band-pass cuts are velocity scales.** `FilterLC` / `FilterHC` (a
+  multiple of 1/span and a fraction of the pixel Nyquist frequency) are now
+  `continuum_scale_kms` / `noise_scale_kms`, the periods of the band edges in
+  km/s, converted at each order's median wavelength. The same setting is now
+  the same physical filter on any pixels: at a 4 km/s scale the old HARPS
+  setting passed 0.50 of the amplitude on a 0.005 Å grid at 5000 Å, 0.03 on a
+  0.02 Å grid and 0.29 on a 0.01 Å grid at 6500 Å, so a template on finer
+  pixels than the data was filtered differently. The recommendations keep the old values' meaning on the
+  bundled data: HARPS 3 / 0.15 → 2000 / 4 km/s (they were 1978 / 3.97), NRES
+  4 / 0.15 → 1400 / 9.6 km/s (they were 1129–1422 / 9.6, varying with each
+  order's span); the `preprocess` defaults are HARPS's. Effect: the NRES
+  TOI-677 RVs of how-to 01 moved by +6 to +16 m/s (mean +10), their rms (75
+  m/s) and errors (median 24 m/s) unchanged, and tutorial 03's recipe, whose
+  template sits on other pixels, now gives the same mean RV (38.182 km/s;
+  the two disagreed by 7 m/s before); the NRES golden recipe, whose
+  template was on finer pixels, moved by −19.5 m/s with 8% smaller errors;
+  HARPS TOI-193 RVs: rms 14.1 m/s unchanged, median error 28.2 → 27.8 m/s;
+  the TIRAVEL golden (HARPS, half the epochs): library RVs +1.7 m/s on
+  average (at most 2.8 m/s), ρ 0.99683 → 0.99685.
 - **The partial periodograms shift each spectrum exactly to rest**,
   λ / (1 + v/c), instead of λ·(1 − v/c), which left a residual shift of
   ≈ v²/c (33 m/s at 100 km/s) that the shape periodogram partly detected.

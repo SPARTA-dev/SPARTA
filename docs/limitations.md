@@ -89,7 +89,7 @@ The calibration of UNICOR's and TODCOR's errors is summarised in
 
 - calibrated for white noise on the native pixels of an unfiltered spectrum;
 - conservative after `preprocess`: UNICOR eRV/scatter 1.17–1.38 depending on
-  `filter_highcut`, TODCOR ~1.4×;
+  the noise cut (`noise_scale_kms`), TODCOR ~1.4×;
 - conservative under photon noise: UNICOR scatter/eRV ≈ 0.89 (~10%);
 - conservative with template mismatch, which is counted as noise;
 - TODCOR: conservative on analysis grids coarser than native whose nodes fall
@@ -150,17 +150,13 @@ The calibration of UNICOR's and TODCOR's errors is summarised in
 - **`Spectrum` is not yet a specutils object.** It is a multi-order container
   of per-order arrays plus an `Info` dict; specutils is the interchange format
   (`Spectrum.orders`, `Spectrum.from_spectrum1d`), not the working store.
-- **Preprocessing is set in pixel units.** `filter_highcut` is a fraction of
-  each order's pixel Nyquist frequency, so the same setting smooths two
-  spectra on different pixel scales differently and changing `delta` changes
-  the cut in 1/Å; `filter_lowcut` is a multiple of 1/span, so it depends on
-  each order's length (template orders are cut wider than the data's).
-  `n_trim` and the taper length (`alpha`) are in pixels too. In the NRES
-  golden recipe, putting the unbroadened template on 0.018–0.029 Å pixels
-  instead of 0.030 Å before `preprocess(delta=1)` moved the RVs by −12 and
-  −18 m/s (≲ 1σ); the band-pass cut is the likely main cause, but the
-  effect has not been isolated from the other pixel-unit steps. Preprocess
-  template and data on comparable pixel scales.
+- **The band-pass cuts are converted at each order's median wavelength**, so
+  on a very wide single order (a whole 3800–6900 Å 1-D spectrum) they are off
+  by up to ~30% at its ends; use a window (`window_A`) or echelle orders.
+- **Trimming and the taper are set in pixels.** The band-pass cuts are
+  velocity scales, but `n_trim` and the taper length (`alpha`, a fraction of
+  the order) are not, so on a template with finer pixels or wider orders they
+  cut a different stretch of spectrum.
 - **`Template.integrate_spec`** bins only the first order, drops the trailing
   pixels and the last complete group, and sums (rather than averages) each
   group.

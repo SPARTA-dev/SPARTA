@@ -229,8 +229,8 @@ class Spectrum:
 # =============================================================================
 # =============================================================================
     def preprocess(self, n_trim=10, clean_margins=True, remove_nans=True,
-                   delta=0.5, cosmic_sigma=3, filter_lowcut=3, filter_highcut=0.15,
-                   alpha=0.3):
+                   delta=0.5, cosmic_sigma=3, continuum_scale_kms=2000.0,
+                   noise_scale_kms=4.0, alpha=0.3):
         '''
         Apply the standard preprocessing chain, in place.
 
@@ -251,8 +251,10 @@ class Spectrum:
             step (see ``interpolate``).
         cosmic_sigma : float
             Upward outlier threshold, in mad_std (see ``remove_cosmics``).
-        filter_lowcut, filter_highcut : float
-            The band-pass edges (see ``filter_spectrum``).
+        continuum_scale_kms, noise_scale_kms : float
+            The band-pass edges as velocity periods (km/s; see
+            ``filter_spectrum``). The defaults, 2000 and 4 km/s, are the
+            recommendation for HARPS (R = 120,000).
         alpha : float
             Tukey shape parameter (see ``apply_cosine_bell``).
 
@@ -265,7 +267,8 @@ class Spectrum:
         self.trim(n_trim=n_trim, clean_margins=clean_margins, remove_nans=remove_nans)
         self.interpolate(delta=delta)
         self.remove_cosmics(sigma_upper=cosmic_sigma)
-        self.filter_spectrum(lowcut=filter_lowcut, highcut=filter_highcut, order=1)
+        self.filter_spectrum(continuum_scale_kms=continuum_scale_kms,
+                             noise_scale_kms=noise_scale_kms, order=1)
         self.apply_cosine_bell(alpha=alpha)
 
         return self
@@ -433,24 +436,27 @@ class Spectrum:
 
     # =============================================================================
     # =============================================================================
-    def filter_spectrum(self, lowcut, highcut, order):
+    def filter_spectrum(self, continuum_scale_kms, noise_scale_kms, order):
         '''
         Band-pass filter every order with a Butterworth filter, in place.
 
-        Removes the slowly varying instrumental response (below ``lowcut``)
-        and the pixel-scale noise (above ``highcut``). The filter runs forward
-        and backward (zero phase) on the flux minus its 80th percentile, and
-        each filtered order is standardized to zero mean and unit variance.
-        The grid must be evenly spaced: the Nyquist frequency is taken from
-        the first wavelength step.
+        Removes the slowly varying instrumental response (variations broader
+        than ``continuum_scale_kms``) and the pixel-scale noise (structure
+        narrower than ``noise_scale_kms``): velocity scales, so every order,
+        template or data, gets the same physical filter whatever its pixels.
+        The filter runs forward and backward (zero phase) on the flux minus
+        its 80th percentile, and each filtered order is standardized
+        (``unicor.dsp.standardize``). The grid must be evenly spaced: the
+        Nyquist frequency is taken from the first wavelength step. See
+        ``sparta.preprocess.bandpass``.
 
         Parameters
         ----------
-        lowcut : float
-            Lower band edge, in units of the lowest frequency of the order,
-            1 / (max(w) - min(w)).
-        highcut : float
-            Upper band edge, in units of the Nyquist frequency (0-1).
+        continuum_scale_kms : float
+            Lower band edge, as a velocity period (km/s).
+        noise_scale_kms : float
+            Upper band edge, as a velocity period (km/s); more than two grid
+            steps.
         order : int
             Order of the Butterworth filter.
 
@@ -459,7 +465,7 @@ class Spectrum:
         Spectrum
             self, with ``sp`` filtered.
         '''
-        spF = [bandpass(w, s, lowcut, highcut, order=order)
+        spF = [bandpass(w, s, continuum_scale_kms, noise_scale_kms, order=order)
                for w, s in zip(self.wv, self.sp)]
         self.sp = spF
         return self

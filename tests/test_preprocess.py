@@ -197,13 +197,14 @@ def test_remove_cosmics_interpolates_upward_outliers_only():
 def test_bandpass_standardizes_and_removes_the_slow_trend():
     wave = np.linspace(5000.0, 5020.0, 4000)
     flux = 500.0 * (1.0 + 0.3 * (wave - 5010.0) / 10.0) * _lines(wave)
-    out = bandpass(wave, flux, lowcut=3, highcut=0.15)
+    out = bandpass(wave, flux, continuum_scale_kms=400.0, noise_scale_kms=4.0)
     assert out.mean() == pytest.approx(0.0, abs=1e-12)
     assert out.std() == pytest.approx(1.0, rel=1e-12)
     # The continuum slope is gone (the input correlates with it at 0.83);
     # the lines are what is left.
     assert abs(np.corrcoef(out, wave - 5010.0)[0, 1]) < 0.05
-    lines_only = bandpass(wave, 500.0 * _lines(wave), lowcut=3, highcut=0.15)
+    lines_only = bandpass(wave, 500.0 * _lines(wave), continuum_scale_kms=400.0,
+                          noise_scale_kms=4.0)
     assert np.corrcoef(out, lines_only)[0, 1] > 0.95
 
 
@@ -236,7 +237,8 @@ def _spy(monkeypatch, module, name):
     ("interpolate", dict(delta=1.0, method="log"),
      ["resample_to_log_grid", "coarsest_native_step"]),
     ("remove_cosmics", {}, ["remove_cosmics"]),
-    ("filter_spectrum", dict(lowcut=3, highcut=0.15, order=1), ["bandpass"]),
+    ("filter_spectrum", dict(continuum_scale_kms=2000.0, noise_scale_kms=4.0, order=1),
+     ["bandpass"]),
     ("preprocess", {}, ["trim_margins", "resample_to_linear_grid", "coarsest_native_step",
                         "remove_cosmics", "bandpass"]),
 ])
@@ -292,7 +294,7 @@ def test_atoms_rebuild_the_full_preprocess_chain_exactly():
         w, s = resample_to_linear_grid(w, s, 0.5)
         native = coarsest_native_step(native, w)
         s = remove_cosmics(w, s, sigma_upper=3)
-        s = bandpass(w, s, lowcut=3, highcut=0.15, order=1)
+        s = bandpass(w, s, continuum_scale_kms=2000.0, noise_scale_kms=4.0, order=1)
         s = s * dsp.tukey_window(len(s), 0.3)
         assert np.array_equal(w, obj.wv[I])
         assert np.array_equal(s, obj.sp[I])
@@ -315,5 +317,84 @@ def test_bandpass_ends_with_standardize():
     rng = np.random.default_rng(3)
     wave = np.linspace(5000.0, 5100.0, 4000)
     flux = 1.0 + 0.01 * rng.standard_normal(wave.size) - 0.3 * np.exp(-0.5 * ((wave - 5050) / 0.1) ** 2)
-    out = bandpass(wave, flux, lowcut=3, highcut=0.15)
+    out = bandpass(wave, flux, continuum_scale_kms=2000.0, noise_scale_kms=4.0)
     np.testing.assert_allclose(out, dsp.standardize(out), rtol=0, atol=1e-12)
+
+
+# --- the band-pass cuts are velocity scales (km/s): the same physical filter
+# whatever the pixel size or the wavelength
+
+def _amplitudes(wave, flux, periods_kms):
+    """Amplitudes of the sinusoids of the given velocity periods in the
+    interior of the order (one joint least-squares fit, so they do not leak
+    into each other)."""
+    lam = np.median(wave)
+    v = C_KMS * (wave - lam) / lam
+    cols = [np.ones_like(v)]
+    for p in periods_kms:
+        cols += [np.sin(2 * np.pi * v / p), np.cos(2 * np.pi * v / p)]
+    inner = slice(wave.size // 5, -wave.size // 5)
+    coef = np.linalg.lstsq(np.column_stack(cols)[inner], flux[inner], rcond=None)[0]
+    return [np.hypot(coef[1 + 2 * k], coef[2 + 2 * k]) for k in range(len(periods_kms))]
+
+
+@pytest.mark.parametrize("lam0, step", [(5000.0, 0.005), (5000.0, 0.02), (6500.0, 0.01)])
+def test_bandpass_cuts_are_the_same_velocity_scale_on_any_grid(lam0, step):
+    # One spectrum with a sinusoid in the pass band (60 km/s) and one at the
+    # noise scale (4 km/s), equal in amplitude: their output ratio is the
+    # filter's response at the cut, the same on every grid (standardization
+    # scales both alike). In pixel units it changed with the pixel size.
+    wave = np.arange(lam0 - 50.0, lam0 + 50.0, step)
+    v = C_KMS * (wave - lam0) / lam0                            # km/s
+    flux = 1.0 + 0.01 * (np.sin(2 * np.pi * v / 60.0) + np.sin(2 * np.pi * v / 4.0))
+    out = bandpass(wave, flux, continuum_scale_kms=2000.0, noise_scale_kms=4.0)
+    passband, at_cut = _amplitudes(wave, out, [60.0, 4.0])
+    # filtfilt squares the first-order response: 1/2 at the cut, ~1 in band.
+    assert at_cut / passband == pytest.approx(0.5, abs=0.01)
+
+
+def test_the_same_spectrum_on_two_pixel_scales_is_filtered_alike():
+    # The trap the pixel units set: a template on finer pixels than the data
+    # was filtered differently. In velocity units both come out the same.
+    def spectrum(step):
+        # Narrow lines (FWHM ~6 km/s), well inside the compared window, so
+        # the noise cut matters; the old pixel-unit filter gave 0.965 here.
+        wave = np.arange(5000.0, 5100.0, step)
+        lines = sum(np.exp(-0.5 * ((wave - c) / 0.04) ** 2) for c in (5030.0, 5050.0, 5070.0))
+        return wave, 1.0 + 0.2 * (wave - 5050) / 50 - 0.5 * lines
+    fine_w, fine_f = spectrum(0.005)
+    coarse_w, coarse_f = spectrum(0.02)
+    fine = bandpass(fine_w, fine_f, continuum_scale_kms=2000.0, noise_scale_kms=4.0)
+    coarse = bandpass(coarse_w, coarse_f, continuum_scale_kms=2000.0, noise_scale_kms=4.0)
+    inner = (coarse_w > 5010) & (coarse_w < 5090)
+    on_coarse = np.interp(coarse_w, fine_w, fine)
+    assert np.corrcoef(on_coarse[inner], coarse[inner])[0, 1] > 0.999
+
+
+@pytest.mark.parametrize("continuum, noise, match", [
+    (2000.0, 0.01, "noise_scale_kms"),         # finer than two grid steps
+    (3.0, 4.0, "continuum_scale_kms"),         # not broader than the noise scale
+    (2000.0, 0.0, "positive"), (-5.0, 4.0, "positive"), (np.nan, 4.0, "positive"),
+    (2000.0 * u.m / u.s, 4.0, "noise_scale_kms"),   # 2 km/s: not broader than the noise scale
+])
+def test_bandpass_refuses_cuts_it_cannot_apply(continuum, noise, match):
+    wave = np.arange(5000.0, 5100.0, 0.01)
+    with pytest.raises(ValueError, match=match):
+        bandpass(wave, 1.0 + 0.0 * wave, continuum_scale_kms=continuum, noise_scale_kms=noise)
+
+
+def test_bandpass_takes_velocity_quantities():
+    wave = np.arange(5000.0, 5100.0, 0.01)
+    flux = 1.0 - 0.5 * _lines(wave)
+    plain = bandpass(wave, flux, continuum_scale_kms=2000.0, noise_scale_kms=4.0)
+    quantity = bandpass(wave, flux, continuum_scale_kms=2000.0 * u.km / u.s,
+                        noise_scale_kms=4000.0 * u.m / u.s)
+    np.testing.assert_allclose(quantity, plain, rtol=0, atol=1e-12)
+
+
+def test_bandpass_refuses_an_uneven_grid():
+    # The Nyquist frequency comes from the first step: a ln-lambda or raw grid
+    # would be filtered at the wrong scales.
+    wave = dsp.log_lambda_grid(5000.0, 5200.0, 0.5)[0]
+    with pytest.raises(ValueError, match="evenly spaced"):
+        bandpass(wave, 1.0 + 0.0 * wave, continuum_scale_kms=2000.0, noise_scale_kms=4.0)

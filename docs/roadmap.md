@@ -27,12 +27,13 @@
   fitting a fixed pair.
 - **Templates with any continuum in TODCOR** — fill uncovered pixels with the
   template's own continuum, so TIRAVEL templates can feed `CCF2d`.
-- **A band-pass cut in physical units** — `filter_lowcut` / `filter_highcut`
-  in 1/Å or s/km instead of the order's span and pixel Nyquist frequency, so
-  template and data are filtered alike whatever their pixel scales.
-- **A wavelength `delta` for `Spectrum.interpolate`** — read a length
-  Quantity as the step itself, or raise on one (either is a behaviour
-  change, so a deliberate one).
+- **Filter on the ln λ grid** — apply the band-pass after resampling onto
+  the CCF's ln λ grid, where a velocity scale is exact everywhere, and drop
+  the intermediate linear resampling (one interpolation fewer).
+- **The noise cut against the resolution** — the recommended noise scale is
+  ~1.6 × FWHM (c/R), where a line keeps only ~0.25–0.3 of its amplitude per
+  Fourier mode; measure the RV precision and the error calibration as a
+  function of `noise_scale_kms` / FWHM.
 - **Both broadening kernels in one call** — `broaden_rotational` and
   `broaden_instrumental` each resample a non-ln λ template onto ln λ and back;
   one call applying both would halve the interpolations.

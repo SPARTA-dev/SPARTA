@@ -380,8 +380,8 @@ Exact **only** under these; the first is the one to watch:
   (`preprocess`'s linear-λ resampling, then `CCF2d`'s log-λ one) remove and
   correlate noise power that ν and the CRLB do not know about. Measured by
   Monte Carlo on preprocessed spectra: TODCOR RV scatter / eRV = 0.72–0.74,
-  i.e. errors ~1.4× too large; UNICOR eRV / RV scatter = 1.17 at
-  `preprocess`'s default `filter_highcut = 0.15` and 1.38 at `filter_highcut = 0.9`.
+  i.e. errors ~1.4× too large; UNICOR eRV / RV scatter = 1.17 with the noise
+  cut at ~6.7 native pixels (`noise_scale_kms`) and 1.38 at ~1.1.
   χ²_red then drifts from 1 and `sigma=None` absorbs only each order's mean
   scale. Calibrate the errors by simulation (or a constant star) for
   preprocessed spectra. The taper makes the noise heteroscedastic (`σ_n = w_n σ`); only its

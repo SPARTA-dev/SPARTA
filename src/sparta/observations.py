@@ -276,14 +276,14 @@ class Observations:
 # =============================================================================
 # =============================================================================
     def preprocess(self, n_trim=10, clean_margins=True, remove_nans=True,
-                   delta=0.5, cosmic_sigma=3, filter_lowcut=3, filter_highcut=0.15,
-                   alpha=0.3, progress=False):
+                   delta=0.5, cosmic_sigma=3, continuum_scale_kms=2000.0,
+                   noise_scale_kms=4.0, alpha=0.3, progress=False):
         '''
         Apply ``Spectrum.preprocess`` to every epoch, in place.
 
         Parameters
         ----------
-        n_trim, clean_margins, remove_nans, delta, cosmic_sigma, filter_lowcut, filter_highcut, alpha
+        n_trim, clean_margins, remove_nans, delta, cosmic_sigma, continuum_scale_kms, noise_scale_kms, alpha
             Passed through; see ``Spectrum.preprocess``. The per-instrument
             recommendations are in docs/instruments.md.
         progress : bool
@@ -297,8 +297,9 @@ class Observations:
         '''
         for s in _progress(self.spec_list, progress):
             s.preprocess(n_trim=n_trim, clean_margins=clean_margins, remove_nans=remove_nans,
-                         delta=delta, cosmic_sigma=cosmic_sigma, filter_lowcut=filter_lowcut,
-                         filter_highcut=filter_highcut, alpha=alpha)
+                         delta=delta, cosmic_sigma=cosmic_sigma,
+                         continuum_scale_kms=continuum_scale_kms,
+                         noise_scale_kms=noise_scale_kms, alpha=alpha)
 
         return self
 

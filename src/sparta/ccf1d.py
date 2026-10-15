@@ -89,8 +89,9 @@ class CCF1d:
         per-order normalisation (``filter_spectrum`` / ``preprocess``)
         remove noise power and correlate it, so the uncertainty is then no
         longer calibrated: in Monte Carlo the ratio eRV / (RV scatter) is
-        1.17 with preprocess's default filter_highcut=0.15 and 1.38 with
-        filter_highcut=0.9, i.e. the errors are 17-38% conservative. Calibrate by
+        1.17 with the noise cut at ~6.7 native pixels (``noise_scale_kms``,
+        e.g. 4 km/s for HARPS) and 1.38 with it at ~1.1 native pixels, i.e.
+        the errors are 17-38% conservative. Calibrate by
         simulation for preprocessed spectra.
 
         Parameters

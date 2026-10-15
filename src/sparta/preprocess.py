@@ -266,15 +266,22 @@ def remove_cosmics(wave, flux, sigma_upper=3):
     return s
 
 
-def bandpass(wave, flux, lowcut, highcut, order=1):
+def bandpass(wave, flux, continuum_scale_kms, noise_scale_kms, order=1):
     '''
     Band-pass filter one evenly sampled order with a Butterworth filter.
 
-    Removes the slowly varying instrumental response (below ``lowcut``) and
-    the pixel-scale noise (above ``highcut``). The filter runs forward and
-    backward (zero phase) on the flux minus its 80th percentile, and the
-    result is standardized to zero mean and unit variance. The Nyquist
-    frequency is taken from the first wavelength step.
+    Removes the slowly varying instrumental response (variations broader than
+    ``continuum_scale_kms``) and the pixel-scale noise (structure narrower
+    than ``noise_scale_kms``). Both cuts are velocity scales, the periods of
+    the band edges, so the filter is the same physical filter on any pixel
+    size and at any wavelength: they are converted to frequencies in 1/Angstrom
+    at the order's median wavelength (the conversion varies by the order's
+    fractional span: ~2% over 100 Angstrom at 5000 Angstrom, but ~30% at the
+    ends of a 3800-6900 Angstrom single-order spectrum). The filter runs
+    forward and backward (zero phase), which squares its response (1/2 at each
+    cut), on the flux minus its 80th percentile, and the result is
+    standardized (``unicor.dsp.standardize``). The grid step is taken from the
+    first two wavelengths.
 
     Parameters
     ----------
@@ -282,11 +289,14 @@ def bandpass(wave, flux, lowcut, highcut, order=1):
         1-D evenly spaced wavelengths (Angstrom).
     flux : array_like
         1-D flux matching ``wave``.
-    lowcut : float
-        Lower band edge, in units of the lowest frequency of the order,
-        1 / (max(wave) - min(wave)).
-    highcut : float
-        Upper band edge, in units of the Nyquist frequency (0-1).
+    continuum_scale_kms : float or astropy.units.Quantity
+        Lower band edge, as a velocity period (km/s if a plain number):
+        variations broader than this are removed. Must exceed
+        ``noise_scale_kms``.
+    noise_scale_kms : float or astropy.units.Quantity
+        Upper band edge, as a velocity period (km/s): structure narrower than
+        this is removed. Must span more than two grid steps (below the Nyquist
+        frequency).
     order : int
         Order of the Butterworth filter.
 
@@ -294,16 +304,44 @@ def bandpass(wave, flux, lowcut, highcut, order=1):
     -------
     ndarray
         The filtered, standardized flux (dimensionless).
+
+    Raises
+    ------
+    ValueError
+        If a scale is not positive and finite, the grid is not evenly
+        spaced, ``noise_scale_kms`` spans two grid steps or fewer, or
+        ``continuum_scale_kms`` does not exceed it.
     '''
+    scales = {}
+    for name, scale in (('continuum_scale_kms', continuum_scale_kms),
+                        ('noise_scale_kms', noise_scale_kms)):
+        scale = u.Quantity(scale, u.km/u.s).value             # units at the boundary
+        if not (np.isfinite(scale) and scale > 0):
+            raise ValueError(f"{name} must be a positive velocity scale (km/s), got {scale!r}")
+        scales[name] = scale
+    continuum_scale_kms, noise_scale_kms = scales['continuum_scale_kms'], scales['noise_scale_kms']
     w = np.asarray(wave, float)
     s = np.asarray(flux, float)
-    nyq = 0.5/np.abs(w[1]-w[0])
+    step = np.abs(w[1]-w[0])                                  # Angstrom
+    if not np.allclose(np.diff(w), w[1]-w[0], rtol=1e-6, atol=0):
+        raise ValueError("bandpass needs an evenly spaced wavelength grid (its Nyquist "
+                         "frequency comes from the first step); resample with "
+                         "resample_to_linear_grid first")
+    nyq = 0.5/step                                            # 1/Angstrom
+    lam = np.median(w)
 
-    # The lowest frequency the order holds, in units of the Nyquist frequency.
-    df = (np.max(w)-np.min(w))**(-1)/nyq
-    low = lowcut*df
+    # A velocity period v spans lam * v / c Angstrom here.
+    low = dsp.C_KMS/(lam*continuum_scale_kms)/nyq
+    high = dsp.C_KMS/(lam*noise_scale_kms)/nyq
+    if not high < 1:
+        raise ValueError(
+            f"noise_scale_kms={noise_scale_kms} km/s spans {lam*noise_scale_kms/dsp.C_KMS/step:.2f} "
+            "grid steps here; it must span more than 2 (below the Nyquist frequency)")
+    if not low < high:
+        raise ValueError(f"continuum_scale_kms={continuum_scale_kms} km/s must exceed "
+                         f"noise_scale_kms={noise_scale_kms} km/s")
 
-    b, a = signal.butter(order, [low, highcut], btype='band')
+    b, a = signal.butter(order, [low, high], btype='band')
 
     # Subtract a continuum-like level (the 80th percentile) so the filter's
     # edge transients start near zero.

@@ -125,8 +125,8 @@ Spectrum.preprocess(
     remove_nans=True,
     delta=0.5,
     cosmic_sigma=3,
-    filter_lowcut=3,
-    filter_highcut=0.15,
+    continuum_scale_kms=2000.0,
+    noise_scale_kms=4.0,
     alpha=0.3,
 )
 ```
@@ -138,7 +138,7 @@ Apply the standard preprocessing chain, in place.
 - `n_trim, clean_margins, remove_nans`: See `trim`.
 - `delta` (*float*): Linear resampling step, in units of each order's median wavelength step (see `interpolate`).
 - `cosmic_sigma` (*float*): Upward outlier threshold, in mad_std (see `remove_cosmics`).
-- `filter_lowcut, filter_highcut` (*float*): The band-pass edges (see `filter_spectrum`).
+- `continuum_scale_kms, noise_scale_kms` (*float*): The band-pass edges as velocity periods (km/s; see `filter_spectrum`). The defaults, 2000 and 4 km/s, are the recommendation for HARPS (R = 120,000).
 - `alpha` (*float*): Tukey shape parameter (see `apply_cosine_bell`).
 
 **Returns**
@@ -198,15 +198,15 @@ Trim the edges of every order, in place.
 ##### `Spectrum.filter_spectrum`
 
 ```python
-Spectrum.filter_spectrum(lowcut, highcut, order)
+Spectrum.filter_spectrum(continuum_scale_kms, noise_scale_kms, order)
 ```
 
 Band-pass filter every order with a Butterworth filter, in place.
 
 **Parameters**
 
-- `lowcut` (*float*): Lower band edge, in units of the lowest frequency of the order, 1 / (max(w) - min(w)).
-- `highcut` (*float*): Upper band edge, in units of the Nyquist frequency (0-1).
+- `continuum_scale_kms` (*float*): Lower band edge, as a velocity period (km/s).
+- `noise_scale_kms` (*float*): Upper band edge, as a velocity period (km/s); more than two grid steps.
 - `order` (*int*): Order of the Butterworth filter.
 
 **Returns**
@@ -418,7 +418,7 @@ Replace the upward outliers (cosmic-ray hits) of one order.
 #### `sparta.bandpass`
 
 ```python
-sparta.bandpass(wave, flux, lowcut, highcut, order=1)
+sparta.bandpass(wave, flux, continuum_scale_kms, noise_scale_kms, order=1)
 ```
 
 Band-pass filter one evenly sampled order with a Butterworth filter.
@@ -427,13 +427,17 @@ Band-pass filter one evenly sampled order with a Butterworth filter.
 
 - `wave` (*array_like*): 1-D evenly spaced wavelengths (Angstrom).
 - `flux` (*array_like*): 1-D flux matching `wave`.
-- `lowcut` (*float*): Lower band edge, in units of the lowest frequency of the order, 1 / (max(wave) - min(wave)).
-- `highcut` (*float*): Upper band edge, in units of the Nyquist frequency (0-1).
+- `continuum_scale_kms` (*float or astropy.units.Quantity*): Lower band edge, as a velocity period (km/s if a plain number): variations broader than this are removed. Must exceed `noise_scale_kms`.
+- `noise_scale_kms` (*float or astropy.units.Quantity*): Upper band edge, as a velocity period (km/s): structure narrower than this is removed. Must span more than two grid steps (below the Nyquist frequency).
 - `order` (*int*): Order of the Butterworth filter.
 
 **Returns**
 
 - *ndarray*: The filtered, standardized flux (dimensionless).
+
+**Raises**
+
+- *ValueError*: If a scale is not positive and finite, the grid is not evenly spaced, `noise_scale_kms` spans two grid steps or fewer, or `continuum_scale_kms` does not exceed it.
 
 #### `sparta.resampling_noise_psd`
 
@@ -1145,8 +1149,8 @@ Observations.preprocess(
     remove_nans=True,
     delta=0.5,
     cosmic_sigma=3,
-    filter_lowcut=3,
-    filter_highcut=0.15,
+    continuum_scale_kms=2000.0,
+    noise_scale_kms=4.0,
     alpha=0.3,
     progress=False,
 )
@@ -1156,7 +1160,7 @@ Apply `Spectrum.preprocess` to every epoch, in place.
 
 **Parameters**
 
-- `n_trim, clean_margins, remove_nans, delta, cosmic_sigma, filter_lowcut, filter_highcut, alpha`: Passed through; see `Spectrum.preprocess`. The per-instrument recommendations are in docs/instruments.md.
+- `n_trim, clean_margins, remove_nans, delta, cosmic_sigma, continuum_scale_kms, noise_scale_kms, alpha`: Passed through; see `Spectrum.preprocess`. The per-instrument recommendations are in docs/instruments.md.
 - `progress` (*bool*): Show a tqdm progress bar over the epochs. Off by default; needs the optional `tqdm` package (`pip install tqdm`).
 
 **Returns**
