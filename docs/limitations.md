@@ -80,6 +80,8 @@ with the details. Proposed fixes are collected in [roadmap.md](roadmap.md).
 - **Relative velocities.** Only velocity differences enter ρ; the template's
   rest frame inherits the zero point of the supplied velocities.
 
+Status, diagnostics and the development plan: [tiravel.md](tiravel.md).
+
 ## Error bars
 
 The calibration of UNICOR's and TODCOR's errors is summarised in

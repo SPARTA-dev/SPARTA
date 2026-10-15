@@ -8,7 +8,8 @@
 
 - **TIRAVEL velocity optimiser** — maximise the alignment measure ρ over the
   epochs' velocities, the half of Zucker & Mazeh (2006) that is still missing;
-  today ρ is only evaluated at supplied velocities.
+  today ρ is only evaluated at supplied velocities. The plan and what it
+  needs: [tiravel.md](tiravel.md#development).
 - **TODCOR beyond the window edges** — extend the templates past each window
   (or zero-pad) so the circular Fourier shift stops biasing short,
   line-crowded windows (15.6 m/s at 50 Å in tutorial 04).
