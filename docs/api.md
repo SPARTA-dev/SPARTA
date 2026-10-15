@@ -1818,7 +1818,7 @@ The uniform wavelength grid common to all spectra: their overlap, sampled at the
 sparta.resample_spec_to_common_grid(waves, fluxes, factor)
 ```
 
-Resample spectra onto their common grid and normalize each one.
+Resample spectra onto their common grid as points on the unit sphere.
 
 **Parameters**
 
@@ -1828,7 +1828,7 @@ Resample spectra onto their common grid and normalize each one.
 
 **Returns**
 
-- *ndarray*: (n_grid, n_spectra); each column mean-subtracted and L2-normalized.
+- *ndarray*: (n_grid, n_spectra); each column the standardized spectrum (`unicor.dsp.standardize`) divided by sqrt(n_grid): a unit vector.
 
 ### sparta.tiravel_ops
 
@@ -3176,21 +3176,21 @@ Interpolate `flux(wave)` onto `wave_grid`.
 
 - *ValueError*: If `wave` is not strictly increasing, or `kind` is unknown.
 
-#### `unicor.normalize`
+#### `unicor.standardize`
 
 ```python
-unicor.normalize(flux)
+unicor.standardize(flux)
 ```
 
-Mean-subtract and L2-normalize a flux vector.
+Zero mean and unit variance: SPARTA's one normalisation of a flux vector.
 
 **Parameters**
 
-- `flux` (*array_like*): 1-D flux.
+- `flux` (*array_like*): 1-D flux (any unit).
 
 **Returns**
 
-- *ndarray*: `(flux - mean) / ||flux - mean||`; just mean-subtracted if that norm is zero.
+- *ndarray*: `(flux - mean) / std` (dimensionless; population std); just mean-subtracted, i.e. zeros, for a flat order.
 
 #### `unicor.zero_lag_correlation`
 

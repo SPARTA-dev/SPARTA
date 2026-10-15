@@ -565,31 +565,37 @@ def resample(wave, flux, wave_grid, fill=None, kind='linear'):
     return out
 
 
-def normalize(flux):
-    """Mean-subtract and L2-normalize a flux vector.
+def standardize(flux):
+    """Zero mean and unit variance: SPARTA's one normalisation of a flux vector.
+
+    The band-pass filter ends with it, and USuRPER's points on the unit sphere
+    are ``standardize(flux) / sqrt(len(flux))``. A correlation is blind to it;
+    TODCOR's amplitudes keep their meaning across orders of different length,
+    which a unit-norm scaling would not.
 
     Parameters
     ----------
     flux : array_like
-        1-D flux.
+        1-D flux (any unit).
 
     Returns
     -------
     ndarray
-        ``(flux - mean) / ||flux - mean||``; just mean-subtracted if that
-        norm is zero.
+        ``(flux - mean) / std`` (dimensionless; population std); just
+        mean-subtracted, i.e. zeros, for a flat order.
     """
     f = np.asarray(flux, float)
     f = f - f.mean()
-    norm = np.sqrt((f ** 2).sum())
-    return f / norm if norm > 0 else f
+    std = f.std()
+    return f / std if std > 0 else f
 
 
 def zero_lag_correlation(a, b):
     """Unshifted (zero-lag) correlation: the inner product of two vectors.
 
-    On L2-normalized inputs this is the cosine similarity used by USuRPER; no
-    Fourier transform or velocity scan is involved.
+    On unit vectors (``standardize(f) / sqrt(len(f))``) this is the cosine
+    similarity used by USuRPER; no Fourier transform or velocity scan is
+    involved.
 
     Parameters
     ----------

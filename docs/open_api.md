@@ -69,7 +69,7 @@ The steps of `Spectrum.trim`, `interpolate`, `remove_cosmics`,
 | `rotational_kernel`, `broaden_rotational`, `broaden_gaussian` | `unicor` | rotational (Gray 2005) and Gaussian broadening of normalized flux | km/s (`vsini`, FWHM = c/R) | uniform velocity (ln λ) grid; continuum 1 beyond the ends; linear limb darkening `epsilon`; a `vsini` below the grid step gives a one-tap kernel, i.e. no broadening |
 | `broaden_rotational_residual`, `broaden_gaussian_residual` | `unicor` | the same on residual flux (continuum 0) | km/s | zero-padded ends; a width ≤ 0 returns the input |
 | `rfft_positive`, `parseval_weights` | `unicor` | positive-frequency FFT (DC dropped) and the weights that make a Fourier χ² equal the real-space χ² | ζ in s/km; weights 1/flux² | white, homoscedastic per-pixel noise |
-| `normalize`, `zero_lag_correlation` | `unicor` | mean-subtract and L2-normalize; the unshifted inner product | dimensionless | — |
+| `standardize`, `zero_lag_correlation` | `unicor` | zero mean and unit variance, SPARTA's one normalisation ([conventions](conventions.md#normalised-flux)); the unshifted inner product | dimensionless | a flat vector stays zero |
 
 ## UNICOR — the per-order CCF (`unicor.ccf`)
 
@@ -134,8 +134,8 @@ The steps of `PeriodicityDetector.calc_pdc`, `calc_usurper` and
 |---|---|---|---|---|
 | `scalar_distance_matrix` | `sparta` | \|y_i − y_j\| of scalar values (e.g. RVs) | the unit of y | — |
 | `error_aware_distance_matrix` | `sparta` | distances of values with Gaussian errors (Binnenfeld, Shahaf & Zucker 2024, Eq. 3) | √(unit of y) | the published form (no √π on the erf term); negative arguments clipped to 0 |
-| `spectral_distance_matrix` | `sparta` | chord distances of spectra on the unit sphere (USuRPER, Binnenfeld et al. 2020) | Å in; distances in [0, 2] | spectra linearly resampled onto their common grid, mean-subtracted, L2-normalized |
-| `get_wv_grid`, `resample_spec_to_common_grid` | `sparta` | the uniform λ grid of the spectra's overlap, and the spectra on it, normalized | Å | grid step = finest median pixel step × `factor`; linear interpolation |
+| `spectral_distance_matrix` | `sparta` | chord distances of spectra on the unit sphere (USuRPER, Binnenfeld et al. 2020) | Å in; distances in [0, 2] | spectra linearly resampled onto their common grid, standardized, as unit vectors (the distance is the RMS difference of the standardized spectra) |
+| `get_wv_grid`, `resample_spec_to_common_grid` | `sparta` | the uniform λ grid of the spectra's overlap, and the spectra on it as unit vectors, `standardize(f)/√n` | Å | grid step = finest median pixel step × `factor`; linear interpolation |
 | `phase_distance_matrix` | `sparta` | the phase kernel d(1/f − d), d = (t_i − t_j) mod 1/f | times days, f 1/day; days² | f > 0 |
 | `double_centering` | `sparta` | double-centred matrix (the biased statistic) | as the input | — |
 | `unbiased_u_centering`, `inner_prod`, `norm_z` | `sparta` | U-centring, the U-centred inner product, the component orthogonal to another matrix (Székely & Rizzo 2014) | as the input | n > 3 (`unbiased_u_centering` raises at n ≤ 3) |

@@ -309,3 +309,11 @@ def test_atoms_rebuild_the_log_resampling_exactly(delta):
         assert np.array_equal(w_new, obj.wv[I])
         assert np.array_equal(s_new, obj.sp[I])
         assert coarsest_native_step(dsp.dv_from_wave(w), w_new) == obj.native_steps()[I]
+
+
+def test_bandpass_ends_with_standardize():
+    rng = np.random.default_rng(3)
+    wave = np.linspace(5000.0, 5100.0, 4000)
+    flux = 1.0 + 0.01 * rng.standard_normal(wave.size) - 0.3 * np.exp(-0.5 * ((wave - 5050) / 0.1) ** 2)
+    out = bandpass(wave, flux, lowcut=3, highcut=0.15)
+    np.testing.assert_allclose(out, dsp.standardize(out), rtol=0, atol=1e-12)

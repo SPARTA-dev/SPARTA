@@ -308,7 +308,7 @@ def bandpass(wave, flux, lowcut, highcut, order=1):
     # Subtract a continuum-like level (the 80th percentile) so the filter's
     # edge transients start near zero.
     s = signal.filtfilt(b, a, s-np.percentile(s, 80), padlen=10*max(len(b), len(a)))
-    return (s-np.mean(s))/np.std(s)
+    return dsp.standardize(s)
 
 
 def resampling_noise_psd(n, dv_native, dv, phases=None, n_phase=32):

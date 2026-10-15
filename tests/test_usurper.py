@@ -66,11 +66,31 @@ def test_doppler_shift_wave_classical():
     np.testing.assert_allclose(so.doppler_shift_wave(wave, 30.0), wave * (1 + 30.0 / C))
 
 
-def test_zero_lag_and_normalize():
+def test_standardize_is_zero_mean_unit_variance_and_leaves_a_flat_order_flat():
     x = np.array([1.0, 2.0, 3.0, 4.0])
-    n = so.normalize(x)
-    assert n.mean() == pytest.approx(0.0)                        # mean-subtracted
-    assert so.zero_lag_correlation(n, n) == pytest.approx(1.0)   # unit L2 norm
+    z = so.standardize(x)
+    assert z.mean() == pytest.approx(0.0, abs=1e-15)
+    assert z.std() == pytest.approx(1.0)
+    np.testing.assert_array_equal(so.standardize(np.full(5, 3.0)), np.zeros(5))
+    u = z / np.sqrt(z.size)                                      # USuRPER's unit vector
+    assert so.zero_lag_correlation(u, u) == pytest.approx(1.0)
+
+
+def test_usurper_columns_are_the_standardized_spectra_as_unit_vectors():
+    # One normalisation across SPARTA: USuRPER's points on the unit sphere are
+    # the standardized spectra divided by sqrt(n_pixels).
+    from sparta import pdc
+    vals = [_spectrum(t) for t in TIMES[:4]]
+    waves, fluxes = [v.wv[0] for v in vals], [v.sp[0] for v in vals]
+    M = pdc.resample_spec_to_common_grid(waves, fluxes, factor=1)
+    grid = pdc.get_wv_grid(waves, 1)
+    for i, (w, f) in enumerate(zip(waves, fluxes)):
+        expected = so.standardize(so.resample(w, f, grid)) / np.sqrt(len(grid))
+        np.testing.assert_allclose(M[:, i], expected, rtol=0, atol=1e-15)
+    d = pdc.spectral_distance_matrix(waves, fluxes)
+    z = [so.standardize(so.resample(w, f, grid)) for w, f in zip(waves, fluxes)]
+    rms = np.array([[np.sqrt(np.mean((a - b) ** 2)) for b in z] for a in z])
+    np.testing.assert_allclose(d, rms, rtol=0, atol=1e-7)        # chord = RMS difference
 
 
 # --- input validation and partial-periodogram purity (audited bug fixes) -----

@@ -25,6 +25,12 @@ from sparta.tiravel_ops import (
 )
 from sparta.spectrum import Spectrum
 
+
+def _unit(x):
+    """The standardized spectrum as a unit vector (cosine similarities below)."""
+    x = np.asarray(x, float)
+    return ops.standardize(x) / np.sqrt(x.size)
+
 C = ops.C_KMS
 
 
@@ -197,9 +203,9 @@ def test_coadd_beats_every_single_epoch():
     M = normalize_rows([align_spectra(waves, fluxes, velocities, grid)])
     template = coadd(M, alignment(correlation_matrix(M))['weights'])
 
-    truth = ops.normalize(_template(grid))
-    got = float(np.dot(ops.normalize(template), truth))
-    singles = [abs(float(np.dot(ops.normalize(row), truth))) for row in M]
+    truth = _unit(_template(grid))
+    got = float(np.dot(_unit(template), truth))
+    singles = [abs(float(np.dot(_unit(row), truth))) for row in M]
     assert abs(got) > max(singles)
 
 
@@ -226,8 +232,8 @@ def test_build_template_recovers_the_common_template():
     assert tir.weights.shape == (5,)
 
     grid = tir.template.model.wv[0]
-    truth = ops.normalize(_template(np.asarray(grid, float)))
-    got = ops.normalize(np.asarray(tir.template.model.sp[0], float))
+    truth = _unit(_template(np.asarray(grid, float)))
+    got = _unit(np.asarray(tir.template.model.sp[0], float))
     assert abs(float(np.dot(got, truth))) > 0.98
 
 

@@ -97,9 +97,10 @@ def spectral_distance_matrix(waves, fluxes):
     '''
     Chord distances between spectra on the unit sphere (USuRPER).
 
-    The spectra are resampled onto their common grid, mean-subtracted and
-    L2-normalized; the distance of two unit vectors with zero-lag correlation
-    r is sqrt(2 (1 - r)).
+    The spectra are resampled onto their common grid and standardized
+    (``unicor.dsp.standardize``), then scaled to unit vectors; the distance
+    of two unit vectors with zero-lag correlation r is sqrt(2 (1 - r)), the
+    RMS difference of the standardized spectra.
 
     Parameters
     ----------
@@ -435,7 +436,7 @@ def get_wv_grid(waves, factor):
 
 def resample_spec_to_common_grid(waves, fluxes, factor):
     '''
-    Resample spectra onto their common grid and normalize each one.
+    Resample spectra onto their common grid as points on the unit sphere.
 
     The spectra are linearly interpolated (``unicor.resample``).
 
@@ -451,10 +452,11 @@ def resample_spec_to_common_grid(waves, fluxes, factor):
     Returns
     -------
     ndarray
-        (n_grid, n_spectra); each column mean-subtracted and L2-normalized.
+        (n_grid, n_spectra); each column the standardized spectrum
+        (``unicor.dsp.standardize``) divided by sqrt(n_grid): a unit vector.
     '''
     wv_grid   = get_wv_grid(waves, factor)
     sp_matrix = np.zeros((len(wv_grid), len(waves)))
     for i, (w, f) in enumerate(zip(waves, fluxes)):
-        sp_matrix[:, i] = dsp.normalize(dsp.resample(w, f, wv_grid))
+        sp_matrix[:, i] = dsp.standardize(dsp.resample(w, f, wv_grid)) / np.sqrt(len(wv_grid))
     return sp_matrix

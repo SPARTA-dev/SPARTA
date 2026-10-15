@@ -144,6 +144,21 @@ therefore count *native* pixels.
   n_pix/M), and models the colour of the resampled noise (see
   [correlation_engines.md](correlation_engines.md#noise-oversampling-and-n_eff)).
 
+## Normalised flux
+
+One normalisation, `unicor.dsp.standardize`: zero mean and unit variance per
+order. The band-pass filter ends with it, so a preprocessed order is
+dimensionless and its continuum is 0. USuRPER and the partial periodograms
+use it too: their points on the unit sphere are `standardize(f)/√n` on the
+spectra's common grid of n pixels, so the chord distance is the RMS difference
+of the standardized spectra. The correlation (UNICOR) is blind to the scale.
+TODCOR's amplitudes keep their meaning between data and templates of
+different pixel counts, which a unit-length scaling would not give.
+
+One deliberate exception: TIRAVEL (`normalize_rows`) subtracts each order's
+mean but scales each epoch to unit length over all orders together, so that
+orders count by their line content in the one correlation matrix.
+
 ## Preprocessing order
 
 `Spectrum.preprocess` (and `Observations.preprocess`, epoch by epoch) runs, in

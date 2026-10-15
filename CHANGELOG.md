@@ -202,6 +202,12 @@ Keys of `results_frequency` / `results_power`:
 
 ### Other changes
 
+- **One normalisation:** `unicor.dsp.standardize` (zero mean, unit variance)
+  ends the band-pass filter and builds USuRPER's unit vectors
+  (`standardize(f)/√n`); `unicor.normalize` (mean-subtract and unit length) is
+  removed. Results change only by rounding (the golden master passes at 1e-9;
+  the byte baseline is re-blessed). TIRAVEL keeps its joint unit-length
+  scaling across orders on purpose (docs/conventions.md).
 - **Downloaded PHOENIX models go to a user cache**, not into the package:
   `$SPARTA_CACHE_DIR/phoenix`, else `$XDG_CACHE_HOME/sparta/phoenix`, else
   `~/.cache/sparta/phoenix` (`SPARTA_CACHE_DIR` must be absolute). The four
