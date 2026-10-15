@@ -62,27 +62,29 @@ needs Python 3.10 or later; it is tested on 3.10, 3.12 and 3.13.
 ```bash
 git clone https://github.com/SPARTA-dev/SPARTA.git
 cd SPARTA
-python -m venv .venv            # or: conda create -n sparta python=3.12
-source .venv/bin/activate       #     conda activate sparta
+python -m venv .venv
+source .venv/bin/activate       # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-This installs SPARTA and its two correlation engines, UNICOR and TODCOR, in
-editable mode (a `git pull` updates them), plus the tools that run the tests
-and the example notebooks. To check the installation, run `pytest` from the
-same folder (about a minute).
+With conda, replace the `venv` and `activate` lines by
+`conda create -n sparta python=3.12` and `conda activate sparta`.
 
-To install only an engine, from the clone:
+This installs SPARTA and its two correlation engines, UNICOR and TODCOR, in
+editable mode (a `git pull` updates them), together with pytest. To check the
+installation, run `pytest` in the `SPARTA` folder (a minute or two). To open
+the tutorial notebooks, also `pip install jupyterlab`.
+
+To install only an engine, from the `SPARTA` folder:
 
 ```bash
 pip install ./packages/unicor                      # UNICOR
 pip install ./packages/unicor ./packages/todcor    # TODCOR (needs UNICOR)
 ```
 
-Always give the engines in the same `pip` command as anything that needs
-them, and never run `pip install .` on its own: pip would then look for the
-engines on PyPI, where their names (`sparta-unicor`, `sparta-todcor`) are not
-registered yet. (`pip install sparta` installs an unrelated package.)
+Do not run `pip install sparta` (that is an unrelated package on PyPI) or
+`pip install .` on its own: the engines are not on PyPI yet, so pip must get
+them from the clone in the same command, as above.
 
 ## Quickstart
 
@@ -126,8 +128,8 @@ print(f"best period: GLS {1 / freq[np.argmax(power)]:.3f} d, PDC {1 / best_pdc:.
 ```
 
 ```text
-RV - truth: rms 2.5 m/s, median eRV 2.9 m/s
-chi2 of the residuals: 15.8 for 20 epochs
+RV - truth: rms 2.4 m/s, median eRV 2.8 m/s
+chi2 of the residuals: 16.2 for 20 epochs
 best period: GLS 4.301 d, PDC 4.283 d
 ```
 
