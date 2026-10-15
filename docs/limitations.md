@@ -12,16 +12,14 @@ with the details. Proposed fixes are collected in [roadmap.md](roadmap.md).
   a velocity span; `Observations.calc_bis(use_combined=False)` raises
   `AttributeError`. It is pinned, unchanged, for a later fix. Do not use it.
   ([correlation_engines.md](correlation_engines.md#bisector-span-known-to-be-incorrect))
-- **Sub-pixel peak: pixel-phase error.** The RV is the vertex of a 5-point
-  parabola, which misreads a CCF peak that is not parabolic over ±2 lags,
-  depending on where the true peak falls between two lags. On noiseless
-  synthetic line forests (60 Å, intrinsic line σ 1–2 km/s) the largest error
-  over pixel phases was 6.5–14.6 m/s at dv = 0.75 km/s and 1.9–4.3 m/s at
-  dv = 0.5 km/s for non-rotating stars at R = 100,000, 3.3–4.7 and
-  1.0–1.4 m/s at R = 50,000, and below 2 m/s at vsini = 10 km/s. It falls
-  roughly as dv³, so it is negligible at the recommended steps (0.05–0.1 km/s,
-  [instruments.md](instruments.md)) but not on coarse grids of sharp-lined
-  spectra.
+- **An undersampled CCF peak.** The RV is the maximum of a quintic spline
+  through the CCF's lags, which stands for the continuous CCF as long as the
+  peak is sampled by about 5 lags or more across its half width: on noiseless
+  R = 100,000 line forests the error over sub-lag phases is ≤ 0.12 m/s at
+  dv = 0.75 km/s (step / FWHM 0.18). Past that it degrades fast: 1.2 m/s at
+  step / FWHM 0.24, 17 m/s at 0.37. `unicor.subpixel_peak` warns when fewer
+  than 5 lags are above half maximum. (The 5-point parabola it replaced
+  misread the peak by up to 22 m/s at 0.75 km/s.)
 - **Shape changes leak into the RVs.** A CCF peak moves when the line
   shapes change, not only when the star moves. In
   [tutorial 07](../examples/tutorials/07_usurper.ipynb) a star whose temperature
@@ -31,7 +29,7 @@ with the details. Proposed fixes are collected in [roadmap.md](roadmap.md).
   partial periodograms to tell shifts from shapes
   ([periodograms.md](periodograms.md)).
 - **One template per spectrum.** A blended double-lined spectrum biases a
-  single-template CCF: −270 m/s on the primary of the tutorial 04 binary when
+  single-template CCF: −266 m/s on the primary of the tutorial 04 binary when
   the two stars are 11 km/s apart. Use TODCOR.
 
 ## TODCOR

@@ -69,17 +69,24 @@ lag.
 
 ### RV and its uncertainty
 
-- **RV:** the vertex of a least-squares parabola through the 5 lags centred
-  on the maximum of the combined CCF (`unicor.subpixel_peak`, `npts=5`; the
-  fit is done in velocities relative to the central lag). It raises — and
-  `CCF1d` reports NaN — when the maximum is within 2 lags of the scan edge
-  or the parabola is not concave. The RV comes from the CCF in both output
-  modes.
+- **RV:** the maximum of the continuous combined CCF. The CCF of adequately
+  sampled spectra is band-limited, so its lag values determine it between
+  them: an interpolating quintic spline through ±4 lags around the sampled
+  maximum stands for it, and the RV is the root of its derivative within one
+  lag (`unicor.subpixel_peak`). It does not depend on where the peak falls
+  between lags, so not on `dv`, while the peak spans ≳ 5 lags above half
+  maximum (it warns otherwise). It raises — and `CCF1d` reports NaN — when
+  the maximum is within 2 lags of the scan edge, the spline has no maximum
+  within a lag, or the peak is not concave. Combining orders first is exact:
+  Zucker's combination is monotone in the summed log-likelihood, so the
+  combined spline peak is the maximum of the orders' summed continuous
+  log-likelihoods (tested to 0.3 m/s). The RV comes from the CCF in both
+  output modes.
 - **eRV:** the maximum-likelihood error of Zucker (2003, §2.3),
 
   $$\sigma_v^2 = -\left[N\,\frac{C''(v)\,C(v)}{1 - C^2(v)}\right]^{-1}$$
 
-  at the peak, with C'' from an interpolating quartic spline and N the total
+  at the peak, with C and C'' from the same spline and N the total
   native-pixel count (`unicor.rv_uncertainty`; `CorrCombined['n_eff']`). It
   is NaN where the curvature is not negative. Per-order errors are computed
   only with `errors_per_order=True`. Because N counts native pixels, the error
@@ -237,7 +244,7 @@ re-enter at the other end; keep windows long and the taper firm
 | `output='ccf'` | `Corr['corr']` per order, `CorrCombined['corr']` = ML(v) | `Corr2d['map']` = `Corr2d['R']` (R ∈ [0, 1]) |
 | `output='loglike'` | Zucker ln L, `Corr['loglike']`, `CorrCombined['loglike']` | Gaussian ln L = −χ²/2, `Corr2d['map']` = `Corr2d['logL_profile']` |
 | Always stored | both `'corr'` and `'loglike'` | `'R'`, `'logL_profile'`, `'logL_marginal'`, `'a1'`, `'a2'`, `'chi2'` maps; the same under `'fine'` |
-| RV | 5-point parabola on the combined CCF: `CorrCombined['RV']` | stationary point of a quadratic on the fine ln L map: `Corr2d['RV1']`, `['RV2']` |
+| RV | maximum of a quintic spline through the combined CCF's lags: `CorrCombined['RV']` | stationary point of a quadratic on the fine ln L map: `Corr2d['RV1']`, `['RV2']` |
 | Error | Zucker ML error from the CCF curvature, N = native pixels: `CorrCombined['eRV']` | local Cramér–Rao bound from the ln L Hessian: `'eRV1'`, `'eRV2'`, `'rho12'`, `'cov'` |
 | Noise level | not needed (implicit in C) | `sigma` per order, estimated by default; `'sigma'`, `'chi2_red'` |
 | Peak value | `CorrCombined['peakCorr']` (CCF at the vertex) | `'R_best'` (R at the refined RVs) |

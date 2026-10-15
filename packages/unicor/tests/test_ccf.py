@@ -2,7 +2,8 @@
 
 Synthetic single-line spectra on a log-lambda grid: the CCF peak lands on the
 injected shift, identical orders combine to the single-order CCF, and the
-sub-pixel parabola is exact on a parabola. A noise-free line forest checks that
+spline peak is exact on a parabola and does not depend on the sub-lag phase. A
+noise-free line forest checks that
 the CCF has no pull toward v = 0, and noise-free injections under both velocity
 conventions check the lag -> velocity mapping. No external data.
 """
@@ -121,12 +122,6 @@ def test_subpixel_peak_is_exact_far_from_zero_velocity(v_peak):
     assert peak == pytest.approx(0.9, abs=1e-12)
 
 
-@pytest.mark.parametrize("npts", [2, 4])
-def test_subpixel_peak_rejects_bad_window(npts):
-    with pytest.raises(ValueError):
-        unicor.subpixel_peak(np.arange(9.0), np.ones(9), npts=npts)
-
-
 @pytest.mark.parametrize("n_template", [10, 12, 13])
 def test_ccf_rejects_a_template_not_extended_by_whole_lags_on_each_side(n_template):
     # Shorter, equal-length (the pre-extension contract) or odd excess: refused.
@@ -146,12 +141,15 @@ def test_subpixel_peak_refuses_a_peak_at_the_scan_edge(argmax):
         unicor.subpixel_peak(v, ccf)
 
 
-def test_subpixel_peak_refuses_a_non_concave_ccf():
-    # A spike flanked by a W: the best 5-point parabola opens upwards.
+def test_a_one_lag_spike_is_found_but_flagged_as_undersampled():
+    # A spike flanked by a W: the old 5-point parabola opened upwards and gave
+    # up. The spline puts the peak on the spike, and warns that a peak one lag
+    # wide cannot be located between lags.
     v = np.arange(-5, 6) * 1.0
     ccf = np.array([0.0, 0.0, 0.0, 0.99, 0.5, 1.0, 0.5, 0.99, 0.0, 0.0, 0.0])
-    with pytest.raises(ValueError, match="concave"):
-        unicor.subpixel_peak(v, ccf)
+    with pytest.warns(UserWarning, match="undersampled"):
+        rv, _ = unicor.subpixel_peak(v, ccf)
+    assert rv == pytest.approx(0.0, abs=1e-12)
 
 
 def test_ccf_at_refuses_velocities_outside_the_scan():
@@ -347,8 +345,8 @@ def _forest_sweep(ccf_fn, vsini, seed):
 
     The shift is a whole number ``k0`` of grid steps (observed flux at lambda
     is the template at lambda * exp(-k0 dln)), so the expected peak is exactly
-    the cz velocity of that lag, ``c (exp(k0 dln) - 1)``, and the sub-pixel
-    parabola has no pixel-phase error.
+    the cz velocity of that lag, ``c (exp(k0 dln) - 1)``, with no sub-lag
+    interpolation involved.
     """
     wave, _ = unicor.log_lambda_grid(5000.0, 5060.0, FOREST_DV)
     dln = np.log(wave[-1] / wave[0]) / (wave.size - 1)
@@ -386,11 +384,11 @@ def _same_span_ccf(t_wave, t_flux, wave, observed):
 @pytest.mark.parametrize("seed", [0, 1])
 def test_forest_rv_has_no_pull_toward_zero(vsini, seed):
     errors = _forest_sweep(_extended_template_ccf, vsini, seed)
-    # What remains is the 5-point parabola reading a CCF whose wings are not
-    # exactly symmetric about an integer-lag peak (edge content differs by j
-    # pixels at lag +-j): <~1.2 m/s, either sign. The same-span CCF erred by
-    # up to 8 m/s (sharp lines) and 370 m/s (vsini 25 km/s) on these forests.
-    np.testing.assert_array_less(np.abs(errors), 1.5)
+    # <= 0.005 m/s with the spline peak (the 5-point parabola left up to
+    # 1.2 m/s here, reading wings that are not symmetric about an integer-lag
+    # peak). The same-span CCF erred by up to 8 m/s (sharp lines) and 370 m/s
+    # (vsini 25 km/s) on these forests.
+    np.testing.assert_array_less(np.abs(errors), 0.05)
     # Sign test: the error projected on sign(v0) (negative = pulled toward 0).
     pull = np.mean(np.sign(FOREST_V0) * errors)
     assert abs(pull) < 0.5
@@ -426,8 +424,8 @@ def _velocity_of_lag(k, dln, convention):
 def _snap_to_lag(v0, dln, convention):
     """The velocity nearest ``v0`` (km/s) that shifts by a whole number of steps.
 
-    At a whole-lag shift the CCF is symmetric about its peak, so the sub-pixel
-    parabola has no pixel-phase error and any residual is the mapping's.
+    At a whole-lag shift the CCF is symmetric about its peak, so no sub-lag
+    interpolation is involved and any residual is the mapping's.
     """
     return _velocity_of_lag(round(np.log(_factor(v0, convention)) / dln), dln, convention)
 
@@ -745,3 +743,143 @@ def test_measure_rv_refuses_a_peak_it_cannot_locate(grid):
         unicor.measure_rv(v, c, 812.0)
     with pytest.raises(ValueError, match="NaN"):
         unicor.measure_rv(v, np.full_like(c, np.nan), 812.0)
+
+
+# --- the continuous CCF peak: a local quintic spline of the lag samples ------
+# The CCF of adequately sampled spectra is band-limited, so its values at the
+# lags determine it between them; the RV is the maximum of that interpolant,
+# not of a parabola. The reference is the continuous CCF itself: the Pearson
+# correlation of the observed pixels with the exact template at any shift.
+
+_FOREST_RNG = np.random.default_rng(1)
+_CENTRES = _FOREST_RNG.uniform(5005.0, 5055.0, 120)
+_DEPTHS = _FOREST_RNG.uniform(0.1, 0.7, 120)
+
+
+def _forest(wave, resolution=100_000):
+    """120 Gaussian lines at the instrumental width c/R (FWHM), no rotation."""
+    sigma = (C / resolution) / 2.3548 / C * _CENTRES                  # Angstrom
+    return 1 - np.sum(_DEPTHS * np.exp(-0.5 * ((wave[:, None] - _CENTRES) / sigma) ** 2),
+                      axis=1)
+
+
+def _forest_ccf(v_true, dv, half_width=20.0, resolution=100_000):
+    wave, _ = unicor.log_lambda_grid(5010.0, 5050.0, dv)
+    k = int(round(half_width / dv))
+    observed = _forest(wave / unicor.doppler_factor(v_true), resolution)
+    v, c = unicor.ccf_vs_velocity(_forest(unicor.extend_log_grid(wave, k), resolution),
+                                  observed, wave)
+    return wave, observed, v, c
+
+
+def _continuous_ccf(wave, observed, v, resolution=100_000):
+    """The reference: the exact template shifted by any v, correlated over the same pixels."""
+    return np.corrcoef(observed, _forest(wave / unicor.doppler_factor(v), resolution))[0, 1]
+
+
+@pytest.mark.parametrize("dv, tolerance_ms", [(0.75, 0.5), (0.5, 0.15)])
+def test_the_peak_does_not_depend_on_where_it_falls_between_lags(dv, tolerance_ms):
+    # The 5-point parabola misread this forest by up to 22 m/s at dv = 0.75 km/s
+    # and 7 m/s at 0.5, depending on the true shift's phase between two lags.
+    errors = []
+    for phase in np.linspace(0.0, 1.0, 21):
+        v_true = 3.0 + phase * dv
+        _, _, v, c = _forest_ccf(v_true, dv)
+        errors.append(unicor.subpixel_peak(v, c)[0] - v_true)
+    assert np.max(np.abs(errors)) * 1e3 < tolerance_ms
+
+
+def test_the_rv_does_not_depend_on_the_ccf_step():
+    rvs = [unicor.subpixel_peak(*_forest_ccf(3.37, dv)[2:])[0] for dv in (0.75, 0.5, 0.25)]
+    assert np.ptp(rvs) * 1e3 < 0.5                                           # m/s
+
+
+def test_the_continuous_ccf_reference_reproduces_the_lag_samples():
+    # A consistency check of the reference used below: at whole lags it is the CCF.
+    wave, observed, v, c = _forest_ccf(3.37, 0.5)
+    for i in (0, len(v) // 3, len(v) // 2, len(v) - 1):
+        assert _continuous_ccf(wave, observed, v[i]) == pytest.approx(c[i], abs=1e-10)
+
+
+def test_combined_orders_peak_where_the_summed_loglike_of_the_continuous_ccfs_does():
+    # Zucker's combination is monotone in the summed log-likelihood, so the
+    # combined CCF's spline peak must sit at the maximum of the sum of the
+    # orders' continuous log-likelihoods.
+    from scipy import optimize
+    dv, v_true = 0.5, 3.37
+    orders, n_eff = [], np.array([800.0, 1300.0])
+    for lo, hi, res in ((5010.0, 5030.0, 100_000), (5030.0, 5050.0, 60_000)):
+        wave, _ = unicor.log_lambda_grid(lo, hi, dv)
+        observed = _forest(wave / unicor.doppler_factor(v_true), res)
+        v, c = unicor.ccf_vs_velocity(_forest(unicor.extend_log_grid(wave, 40), res),
+                                      observed, wave)
+        orders.append((wave, observed, res, c))
+    combined = unicor.combine_ccfs(np.vstack([o[3] for o in orders]), n_eff)
+    rv = unicor.subpixel_peak(v, combined)[0]
+
+    def summed_loglike(x):
+        return sum(-0.5 * n * np.log(1 - _continuous_ccf(w, obs, x, res) ** 2)
+                   for (w, obs, res, _), n in zip(orders, n_eff))
+    best = optimize.minimize_scalar(lambda x: -summed_loglike(x), bounds=(rv - dv, rv + dv),
+                                    method="bounded", options=dict(xatol=1e-9)).x
+    assert abs(rv - best) * 1e3 < 0.3                                        # m/s
+
+
+def test_the_error_comes_from_the_curvature_at_the_refined_peak():
+    # On a Gaussian CCF sampled off its centre, the closed-form Zucker error
+    # holds at the spline peak, wherever the peak falls between lags.
+    A, s, n_eff = 0.8, 4.0, 2500.0
+    v = np.arange(-20.0, 20.01, 0.75)
+    ccf = A * np.exp(-0.5 * ((v - 0.31) / s) ** 2)
+    rv, _ = unicor.subpixel_peak(v, ccf)
+    expected = s * np.sqrt(1 - A ** 2) / (A * np.sqrt(n_eff))
+    assert rv == pytest.approx(0.31, abs=1e-5)
+    assert unicor.rv_uncertainty(v, ccf, rv, n_eff) == pytest.approx(expected, rel=2e-3)
+
+
+def test_an_undersampled_ccf_is_flagged():
+    # Fewer than ~5 lags across the CCF's half-maximum width: no interpolant
+    # can recover the peak to a few m/s, so the caller is told.
+    v = np.arange(-20.0, 20.01, 1.0)
+    narrow = np.exp(-0.5 * ((v - 0.3) / 1.0) ** 2)            # FWHM 2.4 lags
+    with pytest.warns(UserWarning, match="undersampled"):
+        unicor.subpixel_peak(v, narrow)
+    wide = np.exp(-0.5 * ((v - 0.3) / 4.0) ** 2)              # FWHM 9.4 lags
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        unicor.subpixel_peak(v, wide)
+
+
+def test_the_error_at_a_velocity_away_from_the_peak_is_not_extrapolated():
+    # CCF1d.extract_rv(vel=...) asks for the error at an imposed velocity: the
+    # curvature there must come from a spline around that velocity, not from
+    # the peak's spline extrapolated 7 lags away (that gave 0.48 for 0.34 km/s).
+    A, s, n_eff, v0 = 0.8, 4.0, 2500.0, 0.3
+    v = np.arange(-30.0, 30.01, 0.5)
+    ccf = A * np.exp(-0.5 * ((v - v0) / s) ** 2)
+    at = 4.0
+    c = A * np.exp(-0.5 * ((at - v0) / s) ** 2)
+    c2 = c * (((at - v0) / s ** 2) ** 2 - 1 / s ** 2)
+    expected = np.sqrt(-1.0 / (n_eff * c2 * c / (1 - c ** 2)))
+    assert unicor.rv_uncertainty(v, ccf, at, n_eff) == pytest.approx(expected, rel=1e-3)
+
+
+def test_a_scan_too_short_for_the_peak_spline_is_refused_clearly():
+    v = np.arange(-2.0, 2.01, 1.0)                     # 5 lags: n_lags = 2
+    with pytest.raises(ValueError, match="at least 6"):
+        unicor.subpixel_peak(v, np.exp(-0.5 * (v / 2.0) ** 2))
+
+
+def test_the_undersampling_warning_does_not_depend_on_the_phase():
+    # The width comes from the spline's curvature, so a peak near the limit
+    # warns (or not) at every sub-lag phase alike.
+    for sigma_lags, should_warn in ((1.5, True), (3.0, False)):
+        for phase in np.linspace(0.0, 1.0, 11):
+            v = np.arange(-20.0, 20.01, 1.0)
+            ccf = 0.9 * np.exp(-0.5 * ((v - phase) / sigma_lags) ** 2)
+            import warnings
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                unicor.subpixel_peak(v, ccf)
+            assert any("undersampled" in str(w.message) for w in caught) == should_warn

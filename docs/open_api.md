@@ -86,7 +86,7 @@ The steps of `CCF1d.cross_correlate`, which calls `lag_axis` once,
 | `combine_ccfs` | `unicor` | maximum-likelihood combination of per-order CCFs (Zucker 2003) | dimensionless | a common lag axis; orders weighted by `n_eff` |
 | `loglike_from_ccf` | `unicor` | the Zucker (2003) log-likelihood −(N/2) ln(1 − C²) | dimensionless (nats) | white noise on N independent bins; template matched up to an amplitude |
 | `measure_rv`, `RVMeasurement` | `unicor` | sub-pixel peak and its ML uncertainty | km/s | for a combined CCF pass the total `n_eff`; raises when the peak cannot be located |
-| `subpixel_peak`, `rv_uncertainty`, `ccf_at` | `unicor` | parabola peak, the curvature error (Zucker 2003 §2.3), 3-point interpolation | km/s | the error counts `n_eff` native bins and is calibrated for white native noise only |
+| `subpixel_peak`, `rv_uncertainty`, `ccf_at` | `unicor` | the continuous CCF's peak (local quintic spline of the lags), the curvature error from the same spline (Zucker 2003 §2.3), 3-point interpolation | km/s | the error counts `n_eff` native bins and is calibrated for white native noise only |
 
 ## TODCOR — two templates, one window at a time (`todcor`)
 

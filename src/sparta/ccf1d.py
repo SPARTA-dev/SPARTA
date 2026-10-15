@@ -225,6 +225,7 @@ class CCF1d:
         # combined CCF NaN anyway.
         n_eff = effective_bins(np.array([len(w) for w in spec.wv]), dv_kms, native_steps)
 
+        undersampled = []
         for I, w in enumerate(spec.wv):
             # A single-order template (e.g. a full-range library spectrum) is
             # reused for every order, as in CCF2d.
@@ -237,20 +238,35 @@ class CCF1d:
                                  "increasing, one per flux value")
             # An order the template cannot serve is NaN, with a warning,
             # instead of failing the epoch.
+            # An undersampled peak is reported once per call, naming the
+            # orders, instead of once per order from inside unicor.
             try:
-                order = ccf_order(w, spec.sp[I], t_wave, t_flux,
-                                  n_lags, dv_kms=dv_kms, native_step_kms=native_steps[I],
-                                  velocity_convention=velocity_convention,
-                                  errors=errors_per_order)
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    order = ccf_order(w, spec.sp[I], t_wave, t_flux,
+                                      n_lags, dv_kms=dv_kms, native_step_kms=native_steps[I],
+                                      velocity_convention=velocity_convention,
+                                      errors=errors_per_order)
             except ValueError as err:
                 warnings.warn(f"order {I}: {err}; its CCF is set to NaN", stacklevel=2)
                 continue
+            for record in caught:
+                if "undersampled" in str(record.message):
+                    undersampled.append(I)
+                else:
+                    warnings.warn(record.message, record.category, stacklevel=2)
             n_eff[I] = order.n_eff
             corr[I, :] = order.ccf
             loglike[I, :] = order.loglike
             RV[I] = order.rv
             eRV[I] = order.erv
             SpecCorr[I] = order.peak
+
+        if undersampled:
+            warnings.warn(f"orders {sorted(set(undersampled))}: the CCF peak spans fewer than 5 "
+                          f"lags across its width at dv = {dv_kms:g} km/s, so its position "
+                          "between lags is uncertain at the m/s level; use a finer dv",
+                          UserWarning, stacklevel=2)
 
         self.Corr = {
             'vel': V,
@@ -425,9 +441,9 @@ class CCF1d:
                 "self.Corr['n_eff'][i]")
         return float(np.sum(self.Corr['n_eff']))
 
-    def subpixel_peak(self, vels, ccf, v=None, npts=5):
+    def subpixel_peak(self, vels, ccf, v=None):
         """
-        Second-order (parabolic) estimate of the CCF around its peak.
+        The CCF's peak between lags (``unicor.subpixel_peak``), or its value at ``v``.
 
         Parameters
         ----------
@@ -438,8 +454,6 @@ class CCF1d:
         v : float, optional
             If given, return the interpolated CCF value at this velocity
             (km/s) instead of the peak.
-        npts : int
-            Odd number of points around the peak used in the fit.
 
         Returns
         -------
@@ -449,7 +463,7 @@ class CCF1d:
         if isinstance(vels, u.Quantity):
             vels = vels.value
         if v is None:
-            return unicor_ccf.subpixel_peak(vels, ccf, npts=npts)
+            return unicor_ccf.subpixel_peak(vels, ccf)
         return unicor_ccf.ccf_at(vels, ccf, v)
 
 

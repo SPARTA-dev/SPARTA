@@ -850,17 +850,16 @@ Bisector span of a single-peaked CCF (see `unicor.bisector_span`).
 ##### `CCF1d.subpixel_peak`
 
 ```python
-CCF1d.subpixel_peak(vels, ccf, v=None, npts=5)
+CCF1d.subpixel_peak(vels, ccf, v=None)
 ```
 
-Second-order (parabolic) estimate of the CCF around its peak.
+The CCF's peak between lags (`unicor.subpixel_peak`), or its value at `v`.
 
 **Parameters**
 
 - `vels` (*astropy.units.Quantity or array_like*): Velocity lags (km/s).
 - `ccf` (*array_like*): CCF values at `vels`.
 - `v` (*float, optional*): If given, return the interpolated CCF value at this velocity (km/s) instead of the peak.
-- `npts` (*int*): Odd number of points around the peak used in the fit.
 
 **Returns**
 
@@ -2601,25 +2600,24 @@ Combine per-order CCFs into one, by maximum likelihood (Zucker 2003, §3.1).
 #### `unicor.subpixel_peak`
 
 ```python
-unicor.subpixel_peak(v, ccf, npts=5)
+unicor.subpixel_peak(v, ccf)
 ```
 
-Sub-pixel CCF peak from a least-squares parabola around the maximum.
+The maximum of the continuous CCF, from a local spline of its lag samples.
 
 **Parameters**
 
 - `v` (*ndarray*): Velocity lags (km/s), increasing; need not be uniform.
 - `ccf` (*ndarray*): CCF values at `v`.
-- `npts` (*int*): Odd number (>= 3) of points around the argmax used in the fit.
 
 **Returns**
 
-- `v_peak` (*float*): Velocity of the parabola vertex (km/s).
-- `ccf_peak` (*float*): CCF value at the vertex.
+- `v_peak` (*float*): Velocity of the maximum (km/s).
+- `ccf_peak` (*float*): CCF value at the maximum.
 
 **Raises**
 
-- *ValueError*: If the maximum is within `npts // 2` lags of either end of `v` (the peak may lie outside the scan), the fitted parabola is not concave, or the CCF is not finite.
+- *ValueError*: If the maximum is within 2 lags of either end of `v` (the peak may lie outside the scan), the spline has no maximum within one lag of the sampled one, the peak is not concave, or the CCF is not finite.
 
 #### `unicor.ccf_at`
 
@@ -2655,7 +2653,7 @@ Maximum-likelihood RV uncertainty from the CCF curvature (Zucker 2003, §2.3).
 
 - `v` (*ndarray*): Velocity lags (km/s).
 - `ccf` (*ndarray*): CCF values at `v` (single-order or combined).
-- `v_peak` (*float*): Velocity of the CCF maximum (km/s).
+- `v_peak` (*float*): Velocity (km/s) at which to evaluate: normally the CCF maximum (as from `subpixel_peak`), whose spline is reused; any other velocity inside the scan uses a spline centred on its nearest lag.
 - `n_eff` (*float*): Effective number of independent spectral bins (dimensionless, > 0): native pixels, not pixels of a finer resampled grid.
 
 **Returns**
@@ -2664,7 +2662,7 @@ Maximum-likelihood RV uncertainty from the CCF curvature (Zucker 2003, §2.3).
 
 **Raises**
 
-- *ValueError*: If `ccf` is not finite or `n_eff` is not finite and positive.
+- *ValueError*: If `ccf` is not finite, its maximum is at the edge of the scan, or `n_eff` is not finite and positive.
 
 #### `unicor.bisector_span`
 
@@ -2848,7 +2846,7 @@ Radial velocity, its ML uncertainty and the peak of a CCF.
 **Raises**
 
 - *ValueError*: If the peak cannot be located (at the scan edge, not concave, or a non-finite CCF), or `n_eff` is not finite and positive.
-- *numpy.linalg.LinAlgError*: If the parabola fit around the peak fails.
+- *numpy.linalg.LinAlgError*: If the spline through the lags around the peak cannot be built.
 
 ### unicor.dsp
 

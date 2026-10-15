@@ -125,7 +125,7 @@ caller used `add_noise(-1)`, which returned the model flux unchanged.
 | `CombineCCFs()` | `combine()` |
 | `extract_RV(x, y, vel, n_ord)` | `extract_rv(x, y, vel, n_ord)` |
 | `calcBIS(x, y, bisect_val, n_ord)` | `calc_bis(x, y, bisect_val, n_ord)` |
-| `subpixel_CCF(vels, ccf, v, Npts)` | `subpixel_peak(vels, ccf, v, npts)` |
+| `subpixel_CCF(vels, ccf, v, Npts)` | `subpixel_peak(vels, ccf, v)` |
 | `plotCCFs(PlotCombined, PlotSingleOrds, ords, alpha, **kwargs)` | `plot(plot_combined, plot_orders, orders, alpha)` |
 
 `CCF2d`
@@ -186,6 +186,21 @@ Keys of `results_frequency` / `results_power`:
 
 ### Numerical changes (2026-10-15)
 
+- **The RV is the peak of the continuous CCF**, not the vertex of a 5-point
+  parabola: `unicor.subpixel_peak` maximises a quintic spline through ±4 lags
+  around the sampled maximum, and `rv_uncertainty` takes C and C″ from the
+  same spline (it used a global quartic spline). The parabola misread the
+  peak by up to 22 m/s at 0.75 km/s lags (R = 100,000, noise-free) depending
+  on where it fell between lags; the spline is within 0.12 m/s there and
+  0.01 m/s at 0.5 km/s, so the RV no longer depends on the step. With noise
+  (S/N 80) the RV scatter at 0.75 km/s lags falls from 16.3 to 3.7 m/s,
+  matching the quoted 3.4 m/s; at 0.1 km/s the two are identical. A peak
+  spanning fewer than 5 lags above half maximum raises a `UserWarning`.
+  `subpixel_peak` and `CCF1d.subpixel_peak` lose `npts`. Goldens: NRES RVs
+  (0.05 km/s lags) −0.002 to −0.003 m/s; HARPS TIRAVEL ≤ 0.03 m/s; the
+  simulated SB1 (0.1 km/s, S/N 80) up to 0.9 m/s per epoch, 0.36σ, as the two
+  estimators read the same noise differently — against the truth both give
+  rms 2.5 m/s and χ²/N 1.0.
 - **The band-pass cuts are velocity scales.** `FilterLC` / `FilterHC` (a
   multiple of 1/span and a fraction of the pixel Nyquist frequency) are now
   `continuum_scale_kms` / `noise_scale_kms`, the periods of the band edges in

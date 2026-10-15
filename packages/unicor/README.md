@@ -14,8 +14,9 @@ UNICOR. It needs only numpy and scipy.
   (`λ_obs/λ_rest = 1 + v/c`; IAU 2000, IRAF fxcor) or, on request, the
   `'relativistic'` one (`√((1 + v/c)/(1 − v/c))`), using the grid's actual
   ln λ step.
-- Reads the RV off a sub-pixel parabola fit, with the ML uncertainty from the
-  CCF curvature. (`bisector_span` is also provided, but its formula is known
+- Reads the RV off the continuous CCF (a local spline through its lags, so the
+  RV does not depend on the velocity step while the peak spans ≳ 5 lags), with
+  the ML uncertainty from its curvature. (`bisector_span` is also provided, but its formula is known
   to be incorrect and is under review; do not use it scientifically yet.)
 - Ships the shared log-λ DSP layer: grid construction, resampling, apodisation,
   Doppler shifts, rotational (Gray 2005) and Gaussian broadening.

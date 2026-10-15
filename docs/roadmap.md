@@ -15,9 +15,6 @@
   line-crowded windows (15.6 m/s at 50 Å in tutorial 04).
 - **Per-window TODCOR amplitudes** — profile (a1, a2) per order and sum the
   log-likelihood maps, for light ratios that change with wavelength.
-- **A better sub-pixel peak** — a spline or other non-parabolic peak estimate
-  for UNICOR, removing the 5-point parabola's pixel-phase error on coarse
-  grids.
 - **Fix the bisector span** — compute it from the velocities of the level
   crossings, choose and document the convention, give it an honest error and
   a working per-order path, then pin it in the golden master.

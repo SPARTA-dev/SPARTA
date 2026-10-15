@@ -56,10 +56,11 @@ relative to no correlation (C = 0). It is monotonic in ``C**2`` at fixed N, so
 both curves peak at the same lag; read the RV and its error off the CCF
 (:func:`subpixel_peak`, :func:`rv_uncertainty`) whichever curve you keep.
 """
+import warnings
 from dataclasses import dataclass
 
 import numpy as np
-from scipy import interpolate
+from scipy import interpolate, optimize
 from scipy.signal import correlate as _correlate
 
 from .dsp import C_KMS, log_grid_dln, resample, velocity_from_log_shift
@@ -344,8 +345,101 @@ def combine_ccfs(ccfs, n_eff=None, output='ccf'):
     return np.sqrt(1 - np.prod((1 - C ** 2) ** weights[:, None], axis=0))
 
 
-def subpixel_peak(v, ccf, npts=5):
-    """Sub-pixel CCF peak from a least-squares parabola around the maximum.
+# Lags on each side of the coarse maximum that the peak spline passes through,
+# and the fewest lags across the CCF's half-maximum width before the peak is
+# called undersampled. On a noise-free R = 100,000 line forest the quintic
+# spline's peak is within 0.12 m/s of the continuous CCF's at 0.75 km/s lags
+# (a 5-point parabola: 22 m/s); the error grows past ~1 m/s once the width
+# spans fewer than ~5 lags.
+_PEAK_HALF_WINDOW = 4
+_MIN_LAGS_PER_FWHM = 5
+
+
+def _peak_spline(v, ccf, centre=None):
+    """The local quintic spline of a CCF around one lag, and that lag's index.
+
+    Parameters
+    ----------
+    v : ndarray
+        Velocity lags (km/s), increasing.
+    ccf : ndarray
+        CCF values at ``v`` (correlation, or log-likelihood).
+    centre : int, optional
+        Index of the lag to centre on; default the CCF maximum.
+
+    Returns
+    -------
+    spline : scipy.interpolate.BSpline
+        Interpolating quintic spline through up to ``_PEAK_HALF_WINDOW`` lags on
+        each side of ``centre`` (fewer near the ends of the scan, at least 6).
+    x_n : int
+        Index of the centre lag.
+
+    Raises
+    ------
+    ValueError
+        If the CCF is not finite, the centre is within 2 lags of either end of
+        ``v`` (a maximum there may lie outside the scan), or fewer than 6 lags
+        are available for the spline.
+    """
+    v = np.asarray(v, float)
+    ccf = np.asarray(ccf, float)
+    if not np.all(np.isfinite(ccf)):
+        raise ValueError("CCF contains NaN/inf")
+    x_n = int(np.argmax(ccf)) if centre is None else int(centre)
+    if x_n < 2 or x_n > len(ccf) - 3:
+        raise ValueError("CCF peak is at the edge of the velocity range; "
+                         "widen the scan")
+    lo, hi = max(0, x_n - _PEAK_HALF_WINDOW), min(len(ccf), x_n + _PEAK_HALF_WINDOW + 1)
+    if hi - lo < 6:
+        raise ValueError(f"the CCF has {len(ccf)} lags; the peak spline needs at least 6 "
+                         "around the maximum (scan more lags)")
+    return interpolate.make_interp_spline(v[lo:hi], ccf[lo:hi], k=5), x_n
+
+
+def _warn_if_undersampled(spline, v_peak, dv):
+    """Warn when the CCF peak spans fewer than ``_MIN_LAGS_PER_FWHM`` lags.
+
+    The width is the Gaussian-equivalent FWHM from the spline's curvature at
+    the peak, 2.3548 * sqrt(-C / C''), which needs no baseline and does not
+    depend on where the peak falls between lags. It assumes the CCF's wings
+    are near 0 (a correlation of continuum-removed spectra, or its
+    log-likelihood); a large positive pedestal under a narrow peak widens it.
+
+    Parameters
+    ----------
+    spline : scipy.interpolate.BSpline
+        The peak spline (from ``_peak_spline``).
+    v_peak : float
+        Velocity of the maximum (km/s).
+    dv : float
+        Lag step near the peak (km/s).
+    """
+    curvature = spline.derivative(2)(v_peak)
+    value = spline(v_peak)
+    if not (value > 0 and curvature < 0):
+        return
+    fwhm_lags = 2.3548 * np.sqrt(-value / curvature) / dv
+    if fwhm_lags < _MIN_LAGS_PER_FWHM:
+        warnings.warn(
+            f"the CCF peak is undersampled: its width spans {fwhm_lags:.1f} lags "
+            f"(fewer than {_MIN_LAGS_PER_FWHM}); its position between lags is uncertain "
+            "at the m/s level. Use a finer velocity step.", UserWarning, stacklevel=3)
+
+
+def subpixel_peak(v, ccf):
+    """The maximum of the continuous CCF, from a local spline of its lag samples.
+
+    The CCF of adequately sampled spectra is band-limited, so its values at the
+    lags determine it between them. An interpolating quintic spline through
+    the lags around the maximum (``_PEAK_HALF_WINDOW`` on each side) stands
+    for the continuous CCF, and its maximum -- the root of its derivative
+    within one lag of the sampled maximum -- is the peak. Unlike a parabola it
+    does not depend on where the peak falls between two lags, so the RV does
+    not depend on the velocity step. A peak spanning fewer than
+    ``_MIN_LAGS_PER_FWHM`` lags across its width (from the spline's curvature)
+    is undersampled, and a
+    ``UserWarning`` says so.
 
     Parameters
     ----------
@@ -353,53 +447,33 @@ def subpixel_peak(v, ccf, npts=5):
         Velocity lags (km/s), increasing; need not be uniform.
     ccf : ndarray
         CCF values at ``v``.
-    npts : int
-        Odd number (>= 3) of points around the argmax used in the fit.
 
     Returns
     -------
     v_peak : float
-        Velocity of the parabola vertex (km/s).
+        Velocity of the maximum (km/s).
     ccf_peak : float
-        CCF value at the vertex.
+        CCF value at the maximum.
 
     Raises
     ------
     ValueError
-        If the maximum is within ``npts // 2`` lags of either end of ``v`` (the
-        peak may lie outside the scan), the fitted parabola is not concave, or
-        the CCF is not finite.
+        If the maximum is within 2 lags of either end of ``v`` (the peak may lie
+        outside the scan), the spline has no maximum within one lag of the
+        sampled one, the peak is not concave, or the CCF is not finite.
     """
-    if npts < 3:
-        raise ValueError("npts must be at least 3")
-    if npts % 2 != 1:
-        raise ValueError("npts must be odd, to centre the fit on the peak")
     v = np.asarray(v, float)
     ccf = np.asarray(ccf, float)
-
-    if not np.all(np.isfinite(ccf)):
-        raise ValueError("CCF contains NaN/inf")
-    x_n = int(np.argmax(ccf))
-    half = npts // 2
-    # Near the ends the window would wrap (negative indices) or overrun; the
-    # true maximum may lie outside the scanned range, so there is no peak.
-    if x_n < half or x_n > len(ccf) - 1 - half:
-        raise ValueError("CCF peak is at the edge of the velocity range; "
-                         "widen the scan")
-    # Fit about the central node: in absolute velocity the columns 1, x, x^2
-    # are nearly collinear far from v = 0 (x ~ 38 km/s on 0.05 km/s steps lost
-    # ~0.2 m/s to round-off). Any spacing works, uniform or not.
-    x0 = v[x_n]
-    dx = v[x_n - half: x_n + half + 1] - x0
-    y = ccf[x_n - half: x_n + half + 1]
-
-    design = np.column_stack([np.ones_like(dx), dx, dx ** 2])
-    pars, *_ = np.linalg.lstsq(design, y, rcond=None)
-    if not pars[2] < 0:
+    spline, x_n = _peak_spline(v, ccf)
+    slope = spline.derivative()
+    a, b = v[x_n - 1], v[x_n + 1]
+    if not slope(a) > 0 > slope(b):
+        raise ValueError("the CCF has no maximum within one lag of its sampled maximum")
+    v_peak = optimize.brentq(slope, a, b, xtol=1e-12, rtol=4 * np.finfo(float).eps)
+    if not spline.derivative(2)(v_peak) < 0:
         raise ValueError("CCF is not concave around its maximum")
-    ccf_peak = pars[0] - pars[1] * pars[1] / (4 * pars[2])
-    v_peak = x0 - pars[1] / (2 * pars[2])
-    return v_peak, ccf_peak
+    _warn_if_undersampled(spline, v_peak, 0.5 * (b - a))
+    return float(v_peak), float(spline(v_peak))
 
 
 def ccf_at(v, ccf, v0):
@@ -442,7 +516,8 @@ def rv_uncertainty(v, ccf, v_peak, n_eff):
     """Maximum-likelihood RV uncertainty from the CCF curvature (Zucker 2003, §2.3).
 
     ``sigma**2 = -[N * C''(v) C(v) / (1 - C(v)**2)]**-1`` at the peak, with
-    ``C''`` from an interpolating quartic spline. ``N`` is the number of
+    ``C`` and ``C''`` from the local quintic spline that :func:`subpixel_peak`
+    locates the peak with. ``N`` is the number of
     independent spectral bins behind ``ccf`` -- for a multi-order CCF combined
     by :func:`combine_ccfs`, the total over orders. It is a property of the
     spectrum, so the result does not depend on the velocity range scanned.
@@ -454,7 +529,9 @@ def rv_uncertainty(v, ccf, v_peak, n_eff):
     ccf : ndarray
         CCF values at ``v`` (single-order or combined).
     v_peak : float
-        Velocity of the CCF maximum (km/s).
+        Velocity (km/s) at which to evaluate: normally the CCF maximum (as
+        from :func:`subpixel_peak`), whose spline is reused; any other velocity
+        inside the scan uses a spline centred on its nearest lag.
     n_eff : float
         Effective number of independent spectral bins (dimensionless, > 0):
         native pixels, not pixels of a finer resampled grid.
@@ -468,16 +545,20 @@ def rv_uncertainty(v, ccf, v_peak, n_eff):
     Raises
     ------
     ValueError
-        If ``ccf`` is not finite or ``n_eff`` is not finite and positive.
+        If ``ccf`` is not finite, its maximum is at the edge of the scan, or
+        ``n_eff`` is not finite and positive.
     """
-    v = np.asarray(v, float)
-    if not np.all(np.isfinite(ccf)):
-        raise ValueError("CCF contains NaN/inf")
     if not (np.isfinite(n_eff) and n_eff > 0):
         raise ValueError(f"n_eff must be finite and positive, got {n_eff}")
 
-    spl = interpolate.UnivariateSpline(v, ccf, k=4, s=0)
-    spl_vv = spl.derivative(n=2)
+    v = np.asarray(v, float)
+    x_max = int(np.argmax(ccf))
+    lag = 0.5 * (v[min(x_max + 1, len(v) - 1)] - v[max(x_max - 1, 0)])
+    # The peak's own spline when v_peak is the maximum; elsewhere the spline
+    # around v_peak, never one extrapolated from the peak.
+    centre = x_max if abs(v_peak - v[x_max]) <= lag else int(np.argmin(np.abs(v - v_peak)))
+    spl, _ = _peak_spline(v, ccf, centre)
+    spl_vv = spl.derivative(2)
 
     # The variance is -1 / (ml_factor * n_eff) and is only real at a true CCF
     # maximum (ml_factor < 0); guard the degenerate cases rather than emitting
@@ -845,7 +926,7 @@ def measure_rv(v, ccf, n_eff):
         If the peak cannot be located (at the scan edge, not concave, or a
         non-finite CCF), or ``n_eff`` is not finite and positive.
     numpy.linalg.LinAlgError
-        If the parabola fit around the peak fails.
+        If the spline through the lags around the peak cannot be built.
     """
     rv, peak = subpixel_peak(v, ccf)
     return RVMeasurement(rv=rv, erv=rv_uncertainty(v, ccf, rv, n_eff), peak=peak)

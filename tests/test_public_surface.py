@@ -140,7 +140,7 @@ METHODS = {
                             "velocity_convention", "output"],
         "extract_rv": ["x", "y", "vel", "n_ord"],
         "plot": ["plot_combined", "plot_orders", "orders", "alpha"],
-        "subpixel_peak": ["vels", "ccf", "v", "npts"],
+        "subpixel_peak": ["vels", "ccf", "v"],
     },
     "CCF2d": {
         "best_fit_spectrum": ["order"],

@@ -87,9 +87,12 @@ every known limitation, with its measured size, is in
 
 - [ ] **Correlate on a uniform ln λ grid.** The engines resample when needed and
   raise on a grid that only claims to be one. → [conventions](conventions.md#the-uniform-ln-λ-grid)
-- [ ] **Use the recommended CCF step** (0.05–0.1 km/s). ⚠ The 5-point parabola
-  misreads the peak by up to 6.5–14.6 m/s at dv = 0.75 km/s on sharp-lined
-  R = 100,000 spectra; it falls as dv³. → [limitations](limitations.md#unicor)
+- [ ] **Sample the CCF peak with at least ~5 lags across its half width.** The
+  RV is read between lags from a spline of the CCF, so it does not depend on
+  the step while the peak is well sampled (0.12 m/s at 0.75 km/s on R = 100,000
+  lines); ⚠ fewer lags and it degrades fast (17 m/s at 1.5 km/s), and
+  `subpixel_peak` warns. The recommended steps (0.05–0.1 km/s) are far inside.
+  → [limitations](limitations.md#unicor)
 - [ ] **Scan wide enough, and look for NaN.** A peak at the edge of the scan
   gives NaN for that order (UNICOR) or `on_edge` and a NaN error (TODCOR),
   rather than a wrong number. → [correlation engines](correlation_engines.md#rv-and-its-uncertainty)
@@ -98,7 +101,7 @@ every known limitation, with its measured size, is in
 - [ ] **Do not use the bisector span.** ⚠ It is known to be incorrect and is
   pinned for a later fix. → [correlation engines](correlation_engines.md#bisector-span-known-to-be-incorrect)
 - [ ] **Use TODCOR for a blended double-lined spectrum.** ⚠ A single-template
-  CCF was −270 m/s off on the primary of tutorial 04's binary (stars 11 km/s
+  CCF was −266 m/s off on the primary of tutorial 04's binary (stars 11 km/s
   apart). → [limitations](limitations.md#unicor)
 
 ## Error bars
