@@ -138,8 +138,10 @@ else `ValueError`) and the single-order spectra:
 
 - **shift distance**: |v_i − v_j|;
 - **shape distance**: the USuRPER chord distance between the spectra after
-  each is shifted back to rest by its own RV (on copies; the caller's spectra
-  are not modified), so a pure Doppler shift leaves no shape distance.
+  each is shifted back to rest by its own RV, λ / (1 + v/c) exactly (on
+  copies; the caller's spectra are not modified), so a pure Doppler shift
+  leaves no shape distance. Pass `velocity_convention='relativistic'` if the
+  RVs were measured in that convention.
 
 | Call | Searched matrix a | Control matrix c | Key |
 | --- | --- | --- | --- |

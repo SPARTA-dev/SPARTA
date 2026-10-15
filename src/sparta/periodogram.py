@@ -166,7 +166,7 @@ class PeriodicityDetector:
 
     # =============================================================================
     # =============================================================================
-    def calc_partial_periodogram(self, partial_type="shift"):
+    def calc_partial_periodogram(self, partial_type="shift", velocity_convention="cz"):
         '''
         Partial periodogram of a single-order spectrum series (Binnenfeld et
         al. 2022): the periodicity of the RV shifts with the line-shape
@@ -175,13 +175,18 @@ class PeriodicityDetector:
 
         The shape distance is the USuRPER distance of the spectra shifted to
         rest by time_series.calculated_vrad_list (km/s; copies -- the caller's
-        spectra are not modified); the shift distance is |v_i - v_j|. Both are
+        spectra are not modified), lambda / doppler_factor(v), the exact
+        inverse of the shift; the shift distance is |v_i - v_j|. Both are
         recomputed on every call.
 
         Parameters
         ----------
         partial_type : {'shift', 'shape'}
             Which partial periodogram; stored as 'partial_<partial_type>'.
+        velocity_convention : {'cz', 'relativistic'}
+            Doppler convention the RVs were measured in (see
+            ``Observations.calc_rv_against_template``); the shift to rest
+            inverts it.
 
         Returns
         -------
@@ -192,8 +197,9 @@ class PeriodicityDetector:
         Raises
         ------
         ValueError
-            For an unknown ``partial_type``, a scalar series, multi-order
-            spectra, or not one RV per epoch.
+            For an unknown ``partial_type`` or ``velocity_convention``, a
+            scalar series, multi-order spectra, or not one finite RV per
+            epoch.
         '''
         if partial_type not in ("shift", "shape"):
             raise ValueError(f"partial_type must be 'shift' or 'shape', not {partial_type!r}.")
@@ -206,7 +212,16 @@ class PeriodicityDetector:
             raise ValueError(
                 f"The partial periodogram needs one RV (km/s) per epoch in "
                 f"time_series.calculated_vrad_list; got {len(vrads)} for {len(waves)} epochs.")
-        rest_waves = [dsp.doppler_shift_wave(w, -v) for w, v in zip(waves, vrads)]
+        vrads = np.asarray(vrads, float)
+        bad = np.flatnonzero(~np.isfinite(vrads))
+        if bad.size:
+            raise ValueError(f"The partial periodogram needs a finite RV for every epoch; "
+                             f"epochs {bad.tolist()} have none (drop them, e.g. with "
+                             "Observations.clean_time_series).")
+        # Divide by the Doppler factor: shifting by -v instead, lambda * (1 - v/c),
+        # would leave a residual shift of ~v**2/c in every spectrum.
+        rest_waves = [np.asarray(w, float) / dsp.doppler_factor(v, velocity_convention)
+                      for w, v in zip(waves, vrads)]
         shift = pdc.scalar_distance_matrix(vrads)
         shape = pdc.spectral_distance_matrix(rest_waves, fluxes)
 

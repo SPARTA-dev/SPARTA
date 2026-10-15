@@ -177,7 +177,7 @@ METHODS = {
     "TiravelResult": {},
     "PeriodicityDetector": {
         "calc_gls": [],
-        "calc_partial_periodogram": ["partial_type"],
+        "calc_partial_periodogram": ["partial_type", "velocity_convention"],
         "calc_pdc": ["calc_biased_flag", "calc_unbiased_flag", "errors"],
         "calc_pdc_pval": ["values", "inverse_sf"],
         "calc_usurper": ["calc_biased_flag", "calc_unbiased_flag"],

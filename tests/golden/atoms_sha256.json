@@ -1065,12 +1065,12 @@
    "sum": -0.38106736104265565
   },
   "periodogram.spectral.partial_shape": {
-   "sha256": "14fc1758769a8f48ff92e30044f5b81493a48276a52a66332c2de5aa02029e04",
-   "sum": 0.5169600286634677
+   "sha256": "5bd443b4d93e0083046072c220cce1b2e8ff6ebc448c5c309b8cd326433e3864",
+   "sum": 0.5157474531618498
   },
   "periodogram.spectral.partial_shift": {
-   "sha256": "95bd9348db84987448b379208d367237de65f0c00602a9542c5886ab1003c9ed",
-   "sum": -0.13580354208172887
+   "sha256": "ce8b4bb886b39908aa1dbbb4132e5dfee87483c1844962f8908d2fb0af4d297f",
+   "sum": -0.13581566181374632
   },
   "sim.ingest.0.native": {
    "sha256": "77014a159d465ed67ced37079254a0eb37e774f2ed7188269ca017064bbc03dd",
@@ -1265,16 +1265,16 @@
    "sum": 0.25
   },
   "spectrum.interp.linear_quantity.native": {
-   "sha256": "da32affeb48fdb03b743ea447e44b4bca9b4c1c2378dcb0adf42d347ac35403b",
-   "sum": 3.498617679436288
+   "sha256": "1d4a616bb85a3b1143713f53df134f7c551eb11cb9763e13fc4f1393d82508a6",
+   "sum": 43.84213687902715
   },
   "spectrum.interp.linear_quantity.sp": {
-   "sha256": "6406e1ccb1efb466ed816d94576d2da5dc0cb65ee63a3e2d93f70638e168d490",
-   "sum": 32347094.882522
+   "sha256": "c8ffef72ac51aa971d8aae0ba68255d422108efc27b2b20e89e7e19d44f40df2",
+   "sum": 648575.2217389524
   },
   "spectrum.interp.linear_quantity.wv": {
-   "sha256": "130ae6e5a3a6e53353f50173f2e698ae061134a6a93ccfa4deebe7b952765c8c",
-   "sum": 179835045.80321527
+   "sha256": "160d2b60f8e4c62694ea4a984aadbd9a284b5ac6748d50d47244abefc171b0bb",
+   "sum": 3572007.715643798
   },
   "spectrum.interp.linear_then_log.grid_delta": {
    "sha256": "b3fbb820fb37410966e299eddf0dbfa77ba6e3d150081e11641c5cbbeacf8e43",

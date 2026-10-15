@@ -155,7 +155,7 @@ Resample every order onto an evenly spaced wavelength grid, in place.
 
 **Parameters**
 
-- `delta` (*float or astropy.units.Quantity, optional*): For `method='linear'`: the step, in units of each order's *median* wavelength step (dimensionless; default 0.5). For `method='log'`: the velocity step (km/s if a plain number; default 0.1 km/s); the ln(lambda) step is ln(1 + delta/c).
+- `delta` (*float or astropy.units.Quantity, optional*): For `method='linear'`: a plain number (or a dimensionless Quantity) is the step in units of each order's *median* wavelength step (default 0.5); a length Quantity is the step itself (`0.25 * u.AA`), the same in every order. `Info` records it as given, with 'GridUnits' 'median step' or 'wavelength'. For `method='log'`: the velocity step (km/s if a plain number; default 0.1 km/s); the ln(lambda) step is ln(1 + delta/c).
 - `method` (*{'linear', 'log'}*): Evenly spaced in wavelength, or in ln(lambda) (velocity-even, as the CCF requires).
 
 **Returns**
@@ -164,7 +164,7 @@ Resample every order onto an evenly spaced wavelength grid, in place.
 
 **Raises**
 
-- *ValueError*: For an unknown `method`.
+- *ValueError*: For an unknown `method`, or a `method='linear'` step that is not a single positive, finite number or length.
 
 ##### `Spectrum.trim`
 
@@ -477,7 +477,7 @@ Sub-pixel phase of each native pixel on a log analysis grid.
 
 Template: a reference spectrum for the correlation engines.
 
-Constants in `sparta.template`: `TEMPLATE_FILES_PATH` (str), `PHOENIX_URL` (str), `PHOENIX_WAVE_FILE` (str).
+Constants in `sparta.template`: `TEMPLATE_FILES_PATH` (str), `PHOENIX_URL` (str), `PHOENIX_WAVE_FILE` (str), `BUNDLED_PHOENIX_FILES` (frozenset).
 
 #### `sparta.Template`
 
@@ -1487,7 +1487,10 @@ USuRPER periodogram of a single-order spectrum series.
 ##### `PeriodicityDetector.calc_partial_periodogram`
 
 ```python
-PeriodicityDetector.calc_partial_periodogram(partial_type='shift')
+PeriodicityDetector.calc_partial_periodogram(
+    partial_type='shift',
+    velocity_convention='cz',
+)
 ```
 
 Partial periodogram of a single-order spectrum series (Binnenfeld et al. 2022): the periodicity of the RV shifts with the line-shape changes partialled out ('shift'), or of the shape changes with the RV shifts partialled out ('shape').
@@ -1495,6 +1498,7 @@ Partial periodogram of a single-order spectrum series (Binnenfeld et al. 2022): 
 **Parameters**
 
 - `partial_type` (*{'shift', 'shape'}*): Which partial periodogram; stored as 'partial_\<partial_type>'.
+- `velocity_convention` (*{'cz', 'relativistic'}*): Doppler convention the RVs were measured in (see `Observations.calc_rv_against_template`); the shift to rest inverts it.
 
 **Returns**
 
@@ -1502,7 +1506,7 @@ Partial periodogram of a single-order spectrum series (Binnenfeld et al. 2022): 
 
 **Raises**
 
-- *ValueError*: For an unknown `partial_type`, a scalar series, multi-order spectra, or not one RV per epoch.
+- *ValueError*: For an unknown `partial_type` or `velocity_convention`, a scalar series, multi-order spectra, or not one finite RV per epoch.
 
 ##### `PeriodicityDetector.calc_gls`
 

@@ -3,8 +3,9 @@
 A ``Template`` wraps a ``Spectrum`` in ``self.model``. Build it from a ready
 ``Spectrum`` (``Template(spectrum)``), from wavelength and flux arrays
 (``Template.from_arrays``), from a PHOENIX-ACES synthetic spectrum read from
-the local cache in ``template_files/`` (``Template.from_phoenix``; fetched from
-the Goettingen server only on explicit opt-in, ``allow_download=True``), or
+the bundled ``template_files/`` or the user cache (``Template.from_phoenix``;
+fetched from the Goettingen server into the user cache only on explicit
+opt-in, ``allow_download=True``), or
 from a line mask (``Template.from_mask``). Its methods broaden (rotational,
 instrumental), Doppler-shift, rebin and cut the model to the orders of an
 observation. ``phoenix_spectrum`` returns the PHOENIX model as plain arrays.
@@ -35,6 +36,15 @@ TEMPLATE_FILES_PATH = os.path.join(
 )
 PHOENIX_URL = "https://phoenix.astro.physik.uni-goettingen.de/data/"
 PHOENIX_WAVE_FILE = 'WAVE_PHOENIX-ACES-AGSS-COND-2011.fits'
+# The files SPARTA ships in TEMPLATE_FILES_PATH. Only these are read there:
+# anything else in that directory (e.g. left by a version that downloaded
+# into it) is not a shipped model, and is looked up in the user cache instead.
+BUNDLED_PHOENIX_FILES = frozenset({
+    PHOENIX_WAVE_FILE,
+    'lte04900-4.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits',
+    'lte05500-4.50-0.0.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits',
+    'lte05800-3.50+0.5.PHOENIX-ACES-AGSS-COND-2011-HiRes.fits',
+})
 _PHOENIX_WAVE_SUB_PATH = 'HiResFITS/'
 
 
@@ -197,11 +207,13 @@ class Template:
         A single-order PHOENIX-ACES-AGSS-COND-2011 HiRes model (Husser et al.
         2013) over a wavelength range: ``phoenix_spectrum`` as a Template.
 
-        The model is read from the local cache, TEMPLATE_FILES_PATH (the
-        package's ``template_files/``). SPARTA ships three models there --
-        (teff, logg, feh) = (4900, 4.5, 0.0), (5500, 4.5, 0.0) and
-        (5800, 3.5, +0.5) -- and the wavelength grid. Any other model needs
-        ``allow_download=True`` once.
+        SPARTA ships three models in the package (TEMPLATE_FILES_PATH,
+        ``template_files/``) -- (teff, logg, feh) = (4900, 4.5, 0.0),
+        (5500, 4.5, 0.0) and (5800, 3.5, +0.5) -- and the wavelength grid.
+        Any other model is read from the user cache
+        (``$SPARTA_CACHE_DIR/phoenix``, else ``$XDG_CACHE_HOME/sparta/phoenix``
+        or ``~/.cache/sparta/phoenix``) and needs ``allow_download=True``
+        once to get there.
 
         The flux is not continuum-normalized, and the model is not broadened:
         see ``broaden_rotational`` and ``broaden_instrumental``.
@@ -543,11 +555,12 @@ def phoenix_spectrum(teff, logg, feh=0.0, alpha=0.0, *, wave_range, air=False,
     A PHOENIX-ACES-AGSS-COND-2011 HiRes model (Husser et al. 2013) over a
     wavelength range, as plain arrays.
 
-    The model is read from the local cache, TEMPLATE_FILES_PATH (the
-    package's ``template_files/``), which ships (teff, logg, feh) =
-    (4900, 4.5, 0.0), (5500, 4.5, 0.0) and (5800, 3.5, +0.5) and the
-    wavelength grid. Any other model needs ``allow_download=True`` once. The
-    flux is neither continuum-normalized nor broadened.
+    SPARTA ships (teff, logg, feh) = (4900, 4.5, 0.0), (5500, 4.5, 0.0) and
+    (5800, 3.5, +0.5) and the wavelength grid in the package
+    (TEMPLATE_FILES_PATH). Any other model is read from the user cache
+    (``$SPARTA_CACHE_DIR/phoenix``, else ``$XDG_CACHE_HOME/sparta/phoenix``
+    or ``~/.cache/sparta/phoenix``) and needs ``allow_download=True`` once
+    to get there. The flux is neither continuum-normalized nor broadened.
 
     Parameters
     ----------
@@ -664,9 +677,43 @@ def _phoenix_url(sub_path, filename):
     return PHOENIX_URL + sub_path.strip('/') + '/' + filename
 
 
-def _cache_path(filename):
+def _user_cache_dir():
     '''
-    Path of a PHOENIX file directly inside TEMPLATE_FILES_PATH.
+    The directory downloaded PHOENIX files go to, outside the package.
+
+    ``$SPARTA_CACHE_DIR/phoenix`` if that variable is set, else
+    ``$XDG_CACHE_HOME/sparta/phoenix``, else ``~/.cache/sparta/phoenix``
+    (``~`` is expanded). The path is only computed here, never created: a
+    lookup must leave no trace, and the directory is made when a file is
+    first downloaded.
+
+    Returns
+    -------
+    str
+        The user cache directory for PHOENIX files (absolute).
+
+    Raises
+    ------
+    ValueError
+        If ``SPARTA_CACHE_DIR`` is a relative path: the cache would then
+        depend on the working directory. A relative ``XDG_CACHE_HOME`` is
+        ignored, as the XDG Base Directory specification requires.
+    '''
+    root = os.path.expanduser(os.environ.get('SPARTA_CACHE_DIR', ''))
+    if root:
+        if not os.path.isabs(root):
+            raise ValueError(f"SPARTA_CACHE_DIR must be an absolute path, got {root!r}")
+    else:
+        xdg = os.path.expanduser(os.environ.get('XDG_CACHE_HOME', ''))
+        if not os.path.isabs(xdg):
+            xdg = os.path.join(os.path.expanduser('~'), '.cache')
+        root = os.path.join(xdg, 'sparta')
+    return os.path.join(root, 'phoenix')
+
+
+def _cache_path(directory, filename):
+    '''
+    Path of a PHOENIX file directly inside ``directory``.
 
     Only the directory is resolved (``os.path.realpath``): a cached file may
     be a symlink to a shared model store, and ``os.replace`` onto it replaces
@@ -674,20 +721,23 @@ def _cache_path(filename):
 
     Parameters
     ----------
+    directory : str
+        TEMPLATE_FILES_PATH (the bundled models) or the user cache
+        (``_user_cache_dir``).
     filename : str
         A bare file name, as from ``_phoenix_filename``.
 
     Returns
     -------
     str
-        The path in the resolved TEMPLATE_FILES_PATH.
+        The path in the resolved ``directory``.
 
     Raises
     ------
     ValueError
-        If the path would not lie directly inside TEMPLATE_FILES_PATH.
+        If the path would not lie directly inside ``directory``.
     '''
-    root = os.path.realpath(TEMPLATE_FILES_PATH)
+    root = os.path.realpath(directory)
     path = os.path.join(root, filename)
     if (os.path.realpath(os.path.dirname(path)) != root
             or os.path.basename(path) in ('', os.curdir, os.pardir)):
@@ -725,33 +775,45 @@ def _cached_phoenix_file(sub_path, filename, allow_download):
     '''
     Local path of a PHOENIX file, downloading it only if allowed.
 
-    A cached file that does not open as FITS with data (e.g. truncated) is
-    treated as missing: re-downloaded and replaced if allowed, otherwise
-    reported -- never deleted.
+    The shipped models (``BUNDLED_PHOENIX_FILES`` in TEMPLATE_FILES_PATH,
+    inside the package) are read in place and never written; a corrupt one
+    is reported. Any other model is
+    looked up in the user cache (``_user_cache_dir``), where a file that does
+    not open as FITS with data (e.g. truncated) counts as missing:
+    re-downloaded and replaced if allowed, otherwise reported -- never
+    deleted. Downloads go to the user cache only.
 
     Parameters
     ----------
     sub_path, filename : str
         See ``_phoenix_filename``.
     allow_download : bool
-        When False, a file missing from (or corrupt in) TEMPLATE_FILES_PATH
+        When False, a model in neither place (or corrupt in the user cache)
         raises.
 
     Returns
     -------
     str
-        The path in TEMPLATE_FILES_PATH.
+        The path of the file, bundled or in the user cache.
 
     Raises
     ------
     FileNotFoundError
-        If the file is missing and downloads are disabled.
+        If the file is in neither place and downloads are disabled.
     OSError
-        If the cached file is corrupt and downloads are disabled.
+        If the bundled file is corrupt, or the cached one is and downloads
+        are disabled.
     ValueError
-        If ``filename`` does not resolve to a file inside TEMPLATE_FILES_PATH.
+        If ``filename`` does not resolve to a file directly inside either
+        directory.
     '''
-    path = _cache_path(filename)
+    bundled = _cache_path(TEMPLATE_FILES_PATH, filename)
+    if filename in BUNDLED_PHOENIX_FILES:
+        if not _is_readable_fits(bundled):
+            raise OSError(f"the bundled PHOENIX file {bundled} is missing, corrupt or "
+                          "truncated (it does not open as FITS with data); reinstall SPARTA")
+        return bundled
+    path = _cache_path(_user_cache_dir(), filename)
     if os.path.exists(path):
         if _is_readable_fits(path):
             return path
@@ -761,22 +823,24 @@ def _cached_phoenix_file(sub_path, filename, allow_download):
                 "with data). Delete it, or pass allow_download=True to replace it.")
     elif not allow_download:
         raise FileNotFoundError(
-            f"PHOENIX file '{filename}' is not in {TEMPLATE_FILES_PATH} "
-            "and downloads are disabled (allow_download=False); pass "
-            "allow_download=True to fetch it.")
-    return _download_phoenix_file(sub_path, filename)
+            f"PHOENIX file '{filename}' is not one of the models bundled in "
+            f"{os.path.dirname(bundled)} and not in the user cache ({os.path.dirname(path)}), "
+            "and downloads are disabled (allow_download=False); pass allow_download=True to "
+            "fetch it.")
+    return _download_phoenix_file(sub_path, filename, path)
 
 
-def _download_phoenix_file(sub_path, filename, timeout=120):
+def _download_phoenix_file(sub_path, filename, target, timeout=120):
     '''
-    Download one PHOENIX file from the Goettingen server into
-    TEMPLATE_FILES_PATH, over HTTPS with astropy's default TLS verification.
+    Download one PHOENIX file from the Goettingen server into the user cache
+    (``_user_cache_dir``), over HTTPS with astropy's default TLS verification.
 
     astropy.utils.data.download_file fetches into a system temporary file
     (possibly on another filesystem). Its content is copied into a temporary
-    file in TEMPLATE_FILES_PATH, fsynced, checked to open as FITS with data,
-    and only then renamed onto the final name with ``os.replace`` (atomic on
-    one filesystem). An interrupted or failed run therefore leaves the final
+    file in the user cache, fsynced, checked to open as FITS with data, made
+    readable by every user (0644: a cache may be shared), and only then
+    renamed onto the final name with ``os.replace`` (atomic on one
+    filesystem). An interrupted or failed run therefore leaves the final
     path untouched: absent, or the previous file. Both temporary files are
     removed in every case. Any download error propagates to the caller.
 
@@ -786,6 +850,8 @@ def _download_phoenix_file(sub_path, filename, timeout=120):
         Server sub-path (see ``_phoenix_filename``).
     filename : str
         File name to fetch.
+    target : str
+        Its path in the user cache (from ``_cache_path``).
     timeout : float
         Per-request timeout (s).
 
@@ -798,10 +864,7 @@ def _download_phoenix_file(sub_path, filename, timeout=120):
     ------
     OSError
         If the downloaded content does not open as FITS with data.
-    ValueError
-        If ``filename`` does not resolve to a file inside TEMPLATE_FILES_PATH.
     '''
-    target = _cache_path(filename)
     cache_dir = os.path.dirname(target)
     os.makedirs(cache_dir, exist_ok=True)
 
@@ -819,6 +882,8 @@ def _download_phoenix_file(sub_path, filename, timeout=120):
         if not _is_readable_fits(partial):
             raise OSError(f"the file downloaded from {url} does not open as FITS with data; "
                           "nothing was written to the cache")
+        # NamedTemporaryFile creates 0600; the models are public data.
+        os.chmod(partial, 0o644)
         os.replace(partial, target)
         partial = None
     finally:

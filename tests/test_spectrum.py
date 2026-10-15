@@ -234,3 +234,54 @@ def test_interpolate_refuses_an_empty_order():
     spec = Spectrum(wv=[np.array([5000.0])], sp=[np.array([1.0])])
     with pytest.raises(ValueError, match="cannot be resampled"):
         spec.interpolate()
+
+
+# --- interpolate(method='linear'): a number is a multiple of the median step,
+# a length is an absolute step, anything else is refused.
+
+def test_linear_interpolate_reads_a_number_as_a_multiple_of_the_median_step():
+    sp = _native_log_spec()
+    step = np.median(np.diff(sp.wv[0]))                      # Angstrom
+    sp.interpolate(delta=0.5)
+    np.testing.assert_allclose(np.diff(sp.wv[0]), 0.5 * step, rtol=1e-9)
+    assert sp.Info["GridDelta"] == 0.5 and sp.Info["GridUnits"] == "median step"
+
+
+def test_linear_interpolate_default_is_half_the_median_step():
+    sp = _native_log_spec()
+    step = np.median(np.diff(sp.wv[0]))
+    sp.interpolate()
+    np.testing.assert_allclose(np.diff(sp.wv[0]), 0.5 * step, rtol=1e-9)
+
+
+@pytest.mark.parametrize("delta", [0.25 * u.AA, 25.0 * u.pm, 0.025 * u.nm])
+def test_linear_interpolate_takes_a_length_as_an_absolute_step(delta):
+    # 0.25 Angstrom used to be read as 0.25 x the median step, silently.
+    sp = _native_log_spec()
+    sp.interpolate(delta=delta)
+    np.testing.assert_allclose(np.diff(sp.wv[0]), 0.25, rtol=1e-9)
+    assert sp.Info["GridUnits"] == "wavelength"
+    assert u.isclose(sp.Info["GridDelta"], 0.25 * u.AA)
+
+
+def test_linear_interpolate_takes_a_dimensionless_quantity_as_a_multiple():
+    sp = _native_log_spec()
+    step = np.median(np.diff(sp.wv[0]))
+    sp.interpolate(delta=2.0 * u.dimensionless_unscaled)
+    np.testing.assert_allclose(np.diff(sp.wv[0]), 2.0 * step, rtol=1e-9)
+
+
+@pytest.mark.parametrize("delta, match", [(1.0 * u.km / u.s, "method='log'"),
+                                          (3.0 * u.s, "length")])
+def test_linear_interpolate_refuses_a_step_that_is_not_a_length(delta, match):
+    sp = _native_log_spec()
+    with pytest.raises(ValueError, match=match):
+        sp.interpolate(delta=delta)
+
+
+@pytest.mark.parametrize("delta", [0.0, -0.5, np.nan, 0.0 * u.AA, -0.25 * u.AA,
+                                   np.array([0.25, 0.5]) * u.AA, [0.5, 1.0]])
+def test_linear_interpolate_refuses_a_step_that_is_not_one_positive_finite_value(delta):
+    sp = _native_log_spec()
+    with pytest.raises(ValueError, match="positive, finite step"):
+        sp.interpolate(delta=delta)

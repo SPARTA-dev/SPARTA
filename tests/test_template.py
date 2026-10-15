@@ -2,6 +2,7 @@
 (no network required), and the model operations."""
 import io
 import os
+import stat
 
 import numpy as np
 import pytest
@@ -114,10 +115,19 @@ def _fits_bytes():
 
 
 @pytest.fixture
-def cache(tmp_path, monkeypatch):
-    root = tmp_path / "cache"          # not created: the download must create it
+def bundled(tmp_path, monkeypatch):
+    """The package's own models: an empty, existing directory."""
+    root = tmp_path / "bundled"
+    root.mkdir()
     monkeypatch.setattr(template_module, "TEMPLATE_FILES_PATH", str(root))
     return root
+
+
+@pytest.fixture
+def cache(tmp_path, monkeypatch, bundled):
+    """The user cache, under SPARTA_CACHE_DIR; not created: the download must create it."""
+    monkeypatch.setenv("SPARTA_CACHE_DIR", str(tmp_path / "user"))
+    return tmp_path / "user" / "phoenix"
 
 
 @pytest.fixture
@@ -161,7 +171,7 @@ def test_an_interrupted_copy_never_reaches_the_final_path(cache, fake_download, 
                                                           previous):
     final = cache / _MODEL[1]
     if previous is not None:
-        cache.mkdir()
+        cache.mkdir(parents=True)
         final.write_bytes(previous)
 
     def copy_half_then_interrupt(src, dst):
@@ -192,7 +202,7 @@ def test_a_download_that_is_not_fits_is_not_installed(cache, fake_download):
 @pytest.mark.parametrize("corrupt", [b"", b"not a FITS file", _fits_bytes()[:2880]],
                          ids=["empty", "foreign", "truncated"])
 def test_a_corrupt_cached_file_is_reported_not_trusted(cache, fake_download, corrupt):
-    cache.mkdir()
+    cache.mkdir(parents=True)
     final = cache / _MODEL[1]
     final.write_bytes(corrupt)
 
@@ -444,3 +454,104 @@ def test_broadening_refuses_a_grid_blown_up_by_one_close_pixel_pair():
     wave = np.insert(wave, 501, wave[500] + 1e-4)
     with pytest.raises(ValueError, match="finest"):
         Template.from_arrays(wave, np.ones_like(wave)).broaden_instrumental(resolution=50_000)
+
+
+# --- where the models live: bundled models are read in place, downloads go
+# to the user cache, never into the package
+
+def test_downloads_go_to_the_user_cache_not_the_package(cache, bundled, fake_download):
+    path = template_module._cached_phoenix_file(*_MODEL, allow_download=True)
+    assert os.path.dirname(path) == os.path.realpath(cache)
+    assert os.listdir(bundled) == []
+
+
+def test_a_bundled_model_is_read_without_touching_the_user_cache(bundled, monkeypatch):
+    (bundled / _MODEL[1]).write_bytes(_fits_bytes())
+    monkeypatch.setattr(template_module, "BUNDLED_PHOENIX_FILES", frozenset({_MODEL[1]}))
+
+    def no_user_cache():
+        raise AssertionError("user cache consulted for a bundled model")
+
+    monkeypatch.setattr(template_module, "_user_cache_dir", no_user_cache)
+    path = template_module._cached_phoenix_file(*_MODEL, allow_download=False)
+    assert path == os.path.join(os.path.realpath(bundled), _MODEL[1])
+
+
+def test_a_model_in_the_user_cache_is_found_offline(cache, fake_download):
+    cache.mkdir(parents=True)
+    (cache / _MODEL[1]).write_bytes(_fits_bytes())
+    path = template_module._cached_phoenix_file(*_MODEL, allow_download=False)
+    assert path == os.path.join(os.path.realpath(cache), _MODEL[1])
+    assert fake_download["calls"] == []
+
+
+def test_a_missing_model_names_both_places_and_creates_nothing(cache, bundled):
+    with pytest.raises(FileNotFoundError) as info:
+        template_module._cached_phoenix_file(*_MODEL, allow_download=False)
+    message = str(info.value)
+    assert str(bundled) in message and str(cache) in message
+    assert "allow_download=True" in message
+    assert not cache.parent.exists()                         # a lookup creates no directory
+
+
+def test_a_corrupt_bundled_model_is_reported_and_never_replaced(bundled, cache, fake_download,
+                                                                monkeypatch):
+    (bundled / _MODEL[1]).write_bytes(b"not a FITS file")
+    monkeypatch.setattr(template_module, "BUNDLED_PHOENIX_FILES", frozenset({_MODEL[1]}))
+    with pytest.raises(OSError, match="bundled"):
+        template_module._cached_phoenix_file(*_MODEL, allow_download=True)
+    assert (bundled / _MODEL[1]).read_bytes() == b"not a FITS file"
+    assert fake_download["calls"] == []
+
+
+def test_the_user_cache_follows_sparta_cache_dir_then_xdg_then_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("SPARTA_CACHE_DIR", str(tmp_path / "s"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "x"))
+    assert template_module._user_cache_dir() == str(tmp_path / "s" / "phoenix")
+    monkeypatch.delenv("SPARTA_CACHE_DIR")
+    assert template_module._user_cache_dir() == str(tmp_path / "x" / "sparta" / "phoenix")
+    monkeypatch.delenv("XDG_CACHE_HOME")
+    assert template_module._user_cache_dir() == os.path.expanduser(
+        os.path.join("~", ".cache", "sparta", "phoenix"))
+    assert not (tmp_path / "s").exists() and not (tmp_path / "x").exists()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
+def test_a_downloaded_model_is_readable_by_every_user(cache, fake_download):
+    # A shared cache must not hold files only their downloader can read
+    # (the temporary file is created 0600).
+    path = template_module._cached_phoenix_file(*_MODEL, allow_download=True)
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o644
+
+
+def test_a_file_left_in_the_package_by_an_older_version_is_not_read(bundled, cache,
+                                                                   fake_download):
+    # Versions before 0.3.0 downloaded into template_files/; only the shipped
+    # models are read there now, so a stray (here truncated) file is ignored.
+    (bundled / _MODEL[1]).write_bytes(_fits_bytes()[:2880])
+    with pytest.raises(FileNotFoundError, match="not one of the models bundled"):
+        template_module._cached_phoenix_file(*_MODEL, allow_download=False)
+    path = template_module._cached_phoenix_file(*_MODEL, allow_download=True)
+    assert os.path.dirname(path) == os.path.realpath(cache)
+
+
+def test_the_shipped_models_are_exactly_the_bundled_set():
+    shipped = {f for f in os.listdir(template_module.TEMPLATE_FILES_PATH) if f.endswith(".fits")}
+    assert shipped == set(template_module.BUNDLED_PHOENIX_FILES)
+
+
+def test_the_user_cache_expands_home_and_refuses_a_relative_sparta_cache_dir(monkeypatch):
+    monkeypatch.setenv("SPARTA_CACHE_DIR", "~/models")
+    assert template_module._user_cache_dir() == os.path.join(
+        os.path.expanduser("~"), "models", "phoenix")
+    monkeypatch.setenv("SPARTA_CACHE_DIR", "models")
+    with pytest.raises(ValueError, match="absolute"):
+        template_module._user_cache_dir()
+
+
+@pytest.mark.parametrize("xdg", ["", "relative/cache"])
+def test_an_empty_or_relative_xdg_cache_home_is_ignored(monkeypatch, xdg):
+    monkeypatch.delenv("SPARTA_CACHE_DIR", raising=False)
+    monkeypatch.setenv("XDG_CACHE_HOME", xdg)
+    assert template_module._user_cache_dir() == os.path.join(
+        os.path.expanduser("~"), ".cache", "sparta", "phoenix")

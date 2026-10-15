@@ -76,20 +76,19 @@ def test_zero_lag_and_normalize():
 # --- input validation and partial-periodogram purity (audited bug fixes) -----
 
 # First-call shift/shape partial periodograms, captured 2026-10-14 before the
-# in-place wavelength mutation was removed: the fix must leave these unchanged.
-GOLDEN_SHIFT = np.array([
-    -0.236595548786, -0.274103449129, -0.054241104738, -0.271579752874,
-    -0.11600031873, 0.692773586682, 0.674448731687, -0.227845559285,
-    -0.061452377936, -0.170206489286, -0.251746235987, -0.218864896597,
-    0.129640278, -0.185947595114, -0.270080863928, 0.049667558497,
-    -0.350276766428, 0.625301315036, 0.79369598832,
+# in-place wavelength mutation was removed; re-blessed 2026-10-15 for the exact
+# shift to rest, lambda / (1 + v/c) instead of lambda * (1 - v/c).
+GOLDEN_SHIFT = np.array([-0.238213350007, -0.278300015605, -0.051830271299, -0.271295567571,
+    -0.114516819893, 0.692136783685, 0.674247310939, -0.229188954418,
+    -0.060332612932, -0.166785783427, -0.249338399728, -0.220732854592,
+    0.12682665642, -0.190099710461, -0.267692813893, 0.049847126092,
+    -0.350919169489, 0.623686543626, 0.793442334662,
 ])
-GOLDEN_SHAPE = np.array([
-    -0.159874821791, -0.051405776858, 0.022280581774, 0.069173322256,
-    -0.061893425622, -0.125880491952, 0.031243117311, -0.225023433041,
-    0.135581338745, 0.4858111466, 0.24296085895, 0.028768299842,
-    -0.074752196309, -0.090863815946, -0.055156229176, 0.137577140206,
-    -0.267697071988, -0.011293675649, -0.044850387649,
+GOLDEN_SHAPE = np.array([-0.164579027238, -0.074902551857, 0.034598661318, 0.066760320077,
+    -0.052617709663, -0.124510476593, 0.032610698995, -0.226390278085,
+    0.136983363077, 0.486622848435, 0.250311762724, 0.015127698725,
+    -0.088076602616, -0.110778366716, -0.041389658279, 0.134477335384,
+    -0.266113165045, -0.026005682369, -0.040635046976,
 ])
 
 
@@ -170,3 +169,67 @@ def test_partial_periodogram_rejects_an_unknown_type():
                     calculated_vrad_list=[0.0] * len(TIMES))
     with pytest.raises(ValueError, match="partial_type"):
         det.calc_partial_periodogram(partial_type="width")
+
+
+@pytest.mark.parametrize("convention", ["cz", "relativistic"])
+def test_partial_periodogram_shifts_each_spectrum_exactly_to_rest(monkeypatch, convention):
+    # The shape distance compares the spectra at rest: lambda / doppler_factor(v),
+    # the exact inverse of the shift the RV measures -- not lambda * (1 - v/c),
+    # which leaves a residual shift of ~v**2/c (33 m/s at 100 km/s).
+    import sparta.pdc as pdc
+    seen = {}
+    spectral_distance_matrix = pdc.spectral_distance_matrix
+
+    def spy(waves, fluxes):
+        seen["waves"] = [np.array(w) for w in waves]
+        return spectral_distance_matrix(waves, fluxes)
+
+    monkeypatch.setattr(pdc, "spectral_distance_matrix", spy)
+    vr = [150.0 * np.sin(2 * np.pi * t / P) for t in TIMES]          # km/s
+    det = _detector([_spectrum(t) for t in TIMES], calculated_vrad_list=vr)
+    det.calc_partial_periodogram(partial_type="shape", velocity_convention=convention)
+    assert len(seen["waves"]) == len(TIMES)
+    for w, v in zip(seen["waves"], vr):
+        np.testing.assert_array_equal(w, WV / so.doppler_factor(v, convention))
+
+
+def test_partial_periodogram_rejects_an_unknown_convention():
+    vr = [K * np.sin(2 * np.pi * t / P) for t in TIMES]
+    det = _detector([_spectrum(t) for t in TIMES], calculated_vrad_list=vr)
+    with pytest.raises(ValueError, match="convention"):
+        det.calc_partial_periodogram(partial_type="shape", velocity_convention="classical")
+
+
+def test_spectra_shifted_to_rest_by_their_rvs_have_no_shape_distance(monkeypatch):
+    # The physics behind the exact shift: pure Doppler copies of one spectrum,
+    # sampled finely enough for a v**2/c residual to show, are identical at
+    # rest. The old lambda * (1 - v/c) left a shape distance of ~0.012 here.
+    import sparta.pdc as pdc
+    k = 150.0                                                    # km/s
+    wv = np.linspace(5490.0, 5510.0, 20000)
+    vr = [k * np.sin(2 * np.pi * t / P) for t in TIMES]
+
+    def spectrum(v):
+        lam = 5500.0 * (1 + v / C)
+        return SimpleNamespace(wv=[wv.copy()],
+                               sp=[1.0 - 0.6 * np.exp(-0.5 * ((wv - lam) / 0.08) ** 2)])
+
+    seen = {}
+    spectral_distance_matrix = pdc.spectral_distance_matrix
+
+    def spy(waves, fluxes):
+        seen["d"] = spectral_distance_matrix(waves, fluxes)
+        return seen["d"]
+
+    monkeypatch.setattr(pdc, "spectral_distance_matrix", spy)
+    det = _detector([spectrum(v) for v in vr], calculated_vrad_list=vr)
+    det.calc_partial_periodogram(partial_type="shape")
+    assert np.max(np.abs(seen["d"])) < 2e-3
+
+
+def test_partial_periodogram_names_the_epochs_without_an_rv():
+    vr = [K * np.sin(2 * np.pi * t / P) for t in TIMES]
+    vr[2] = np.nan
+    det = _detector([_spectrum(t) for t in TIMES], calculated_vrad_list=vr)
+    with pytest.raises(ValueError, match=r"epochs \[2\]"):
+        det.calc_partial_periodogram(partial_type="shape")

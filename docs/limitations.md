@@ -113,10 +113,6 @@ The calibration of UNICOR's and TODCOR's errors is summarised in
   pdCor of 0 does not mean conditional independence, nor a non-zero one a
   dependence beyond the control. Signals at the same period cannot be
   separated.
-- **Approximate rest frame in the shape distance.** The partial periodograms
-  shift each spectrum to rest by λ·(1 − v/c) rather than λ/(1 + v/c), which
-  leaves a residual shift of ≈ v²/c: 33 m/s at v = 100 km/s, negligible for
-  small RV amplitudes.
 - **GLS is unweighted.** `calc_gls` does not pass the errors to astropy's
   `LombScargle`.
 - **Small samples.** The unbiased statistics raise for n ≤ 3; the biased ones
@@ -165,13 +161,6 @@ The calibration of UNICOR's and TODCOR's errors is summarised in
   −18 m/s (≲ 1σ); the band-pass cut is the likely main cause, but the
   effect has not been isolated from the other pixel-unit steps. Preprocess
   template and data on comparable pixel scales.
-- **`Spectrum.interpolate(method='linear')` reads `delta` as a multiple of
-  the median step, even as a Quantity:** `delta=0.25 * u.AA` gives a step of
-  0.25 × the order's median step, not 0.25 Å.
-- **Downloaded PHOENIX models go into the package directory**
-  (`sparta.template.TEMPLATE_FILES_PATH`, the installed `template_files/`),
-  which may be read-only or replaced on upgrade. Downloads happen only with
-  `allow_download=True`.
 - **`Template.integrate_spec`** bins only the first order, drops the trailing
   pixels and the last complete group, and sums (rather than averages) each
   group.

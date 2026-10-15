@@ -185,8 +185,10 @@ periodograms.
   them (Morton 2000). Match the template to the data: a frame mismatch is a
   ~80 km/s shift at 5000 Å. `Observations` refuses a directory that mixes
   frames or time systems.
-- **Downloads are opt-in.** PHOENIX models come from the local cache; fetching
-  another needs `allow_download=True`.
+- **Downloads are opt-in.** Three PHOENIX models ship with SPARTA; any other
+  is fetched only with `allow_download=True`, into a user cache outside the
+  package (`$SPARTA_CACHE_DIR/phoenix`, else `$XDG_CACHE_HOME/sparta/phoenix`
+  or `~/.cache/sparta/phoenix`).
 - **Bisector span.** The BIS (`CCF1d.calc_bis`, `Observations.calc_bis`) is
   known to be incorrect and is under review; do not use it yet.
 

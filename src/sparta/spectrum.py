@@ -286,10 +286,14 @@ class Spectrum:
         Parameters
         ----------
         delta : float or astropy.units.Quantity, optional
-            For ``method='linear'``: the step, in units of each order's
-            *median* wavelength step (dimensionless; default 0.5). For
-            ``method='log'``: the velocity step (km/s if a plain number;
-            default 0.1 km/s); the ln(lambda) step is ln(1 + delta/c).
+            For ``method='linear'``: a plain number (or a dimensionless
+            Quantity) is the step in units of each order's *median*
+            wavelength step (default 0.5); a length Quantity is the step
+            itself (``0.25 * u.AA``), the same in every order. ``Info``
+            records it as given, with 'GridUnits' 'median step' or
+            'wavelength'. For ``method='log'``: the velocity step (km/s if a
+            plain number; default 0.1 km/s); the ln(lambda) step is
+            ln(1 + delta/c).
         method : {'linear', 'log'}
             Evenly spaced in wavelength, or in ln(lambda) (velocity-even, as
             the CCF requires).
@@ -302,7 +306,8 @@ class Spectrum:
         Raises
         ------
         ValueError
-            For an unknown ``method``.
+            For an unknown ``method``, or a ``method='linear'`` step that is
+            not a single positive, finite number or length.
         '''
         if method not in ('linear', 'log'):
             raise ValueError(f"method must be 'linear' or 'log', not {method!r}")
@@ -321,12 +326,31 @@ class Spectrum:
 
         if method == 'linear':
             if delta is None:
-                delta = 0.5 * wnt
-            elif type(delta) is not u.quantity.Quantity:
-                delta = float(delta) * wnt
-            deltawv = ((delta/wnt).decompose()).value
-            resampled = [resample_to_linear_grid(w, s, deltawv)
-                         for w, s in zip(self.wv, self.sp)]
+                delta = 0.5
+            if not (np.ndim(delta) == 0 and np.isfinite(u.Quantity(delta).value)
+                    and u.Quantity(delta).value > 0):
+                raise ValueError(f"method='linear' needs one positive, finite step, not {delta!r}")
+            if isinstance(delta, u.Quantity) and delta.unit.is_equivalent(u.AA):
+                # An absolute step: the atom takes it as a multiple of each
+                # order's own median step.
+                step = delta.to_value(wnt)
+                resampled = [resample_to_linear_grid(w, s, step / np.median(np.diff(w)))
+                             for w, s in zip(self.wv, self.sp)]
+                grid_units = 'wavelength'
+            else:
+                if isinstance(delta, u.Quantity):
+                    if delta.unit.physical_type == 'speed':
+                        raise ValueError(f"a velocity step ({delta}) belongs to method='log'; "
+                                         "method='linear' takes a number (a multiple of each "
+                                         "order's median step) or a length")
+                    if not delta.unit.is_equivalent(u.dimensionless_unscaled):
+                        raise ValueError(f"method='linear' takes a number or a length as its "
+                                         f"step, not {delta}")
+                    delta = delta.to_value(u.dimensionless_unscaled)
+                delta = float(delta)
+                resampled = [resample_to_linear_grid(w, s, delta)
+                             for w, s in zip(self.wv, self.sp)]
+                grid_units = 'median step'
         else:
             if delta is None:
                 delta = 0.1 * u.kilometer / u.second
@@ -349,7 +373,7 @@ class Spectrum:
         if method == 'log':
             self.Info['GridType'], self.Info['GridDelta'], self.Info['GridUnits'] = 'log', delta, 'velocity'
         else:
-            self.Info['GridType'], self.Info['GridDelta'], self.Info['GridUnits'] = 'linear', delta, 'wavelength'
+            self.Info['GridType'], self.Info['GridDelta'], self.Info['GridUnits'] = 'linear', delta, grid_units
 
         return self
 

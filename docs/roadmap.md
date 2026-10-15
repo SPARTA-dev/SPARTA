@@ -42,7 +42,10 @@
 - **Significance for the partial periodograms** — a built-in permutation test
   (as in tutorial 08), since the χ² p-value is not established there; a global
   false-alarm estimate for all PDC-type periodograms.
-- **Exact rest-frame shift** in the shape distance, λ/(1 + v/c).
+- **Record the velocity convention with the RVs**, so that
+  `calc_partial_periodogram` inverts the one they were measured in by
+  default; today it assumes 'cz' unless told (`velocity_convention=`), and
+  relativistic RVs shifted as 'cz' keep ≈ v²/2c (37 m/s at 150 km/s).
 - **Error-weighted GLS** — pass the RV errors to `LombScargle`.
 
 ## Instruments and data
@@ -56,9 +59,6 @@
 - **Migrate `Spectrum` to specutils** — `Spectrum1D` / `SpectrumCollection`
   with units on the spectral axis as the working store, replacing the `Info`
   dict.
-- **A user cache for PHOENIX downloads** outside the package directory.
-- **Shared installs**: downloaded PHOENIX files are readable only by the user
-  who fetched them (mode 0600 from the temporary file); set 0644.
 - **PHOENIX alpha with [M/H] > 0**: the file-name builder silently ignores
   `alpha` when `feh > 0` (the grid has no such models); raise instead.
 
@@ -74,7 +74,7 @@ with a few lines of its own):
   (`lag_axis` → `ccf_order` → `combine_ccfs` → `measure_rv`); the tutorials
   repeat a short loop.
 - **The partial periodograms' shift and shape distances** as an atom; the
-  composition (shift to rest by λ(1 − v/c), then the chord distance) lives only
+  composition (shift to rest by λ / doppler_factor(v), then the chord distance) lives only
   in `PeriodicityDetector.calc_partial_periodogram`.
 - **The cut of `Template.cut_multiorder_like`** (the template range around
   each order, with a velocity margin) as an atom.

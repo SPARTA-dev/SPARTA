@@ -64,9 +64,11 @@ every known limitation, with its measured size, is in
   pixels the same settings are a different filter; changing the template's
   pixels moved the NRES RVs by −12 and −18 m/s.
   → [limitations](limitations.md#spectra-and-templates)
-- [ ] **Download templates only on purpose.** Models come from the local
-  cache; fetching another needs `allow_download=True`, and the file lands in the
-  package directory. → [limitations](limitations.md#spectra-and-templates)
+- [ ] **Download templates only on purpose.** Three models ship with SPARTA;
+  fetching another needs `allow_download=True` and puts it in the user cache
+  (`$SPARTA_CACHE_DIR/phoenix`, else `$XDG_CACHE_HOME/sparta/phoenix` or
+  `~/.cache/sparta/phoenix`). `SPARTA_CACHE_DIR` (an absolute path) can point
+  several users at one cache; whoever downloads needs write access to it.
 
 ## Preprocessing
 
@@ -77,9 +79,9 @@ every known limitation, with its measured size, is in
   band-pass over the jump from padding to continuum makes a spurious edge step;
   removing the NRES margins first lowered the TOI-677 RV scatter from 82 to
   75 m/s. → [conventions](conventions.md#preprocessing-order)
-- [ ] **Give `Spectrum.interpolate(method='linear')` a number, not a length.**
-  ⚠ A Quantity `delta` is read as a multiple of the median step: `0.25*u.AA`
-  is not 0.25 Å. → [limitations](limitations.md#spectra-and-templates)
+- [ ] **Know what `Spectrum.interpolate(method='linear')` reads.** A number is
+  a multiple of each order's median step; a length (`0.25*u.AA`) is the step
+  itself; a velocity raises (it belongs to `method='log'`).
 
 ## Radial velocities
 

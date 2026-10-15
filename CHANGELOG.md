@@ -8,9 +8,10 @@ periodogram frequencies in 1/day.
 The public API of the object layer is now snake_case, the package layout is
 flat, and `Observations` is the only time-series driver. **There are no
 aliases or shims**: every old name below is gone and raises `ImportError`,
-`AttributeError` or `TypeError`. Numerical results are unchanged; the golden
-master (UNICOR, TODCOR, TIRAVEL, periodograms, instrument readers) passes
-bit-for-bit or at 1e-9 relative. The `unicor` and `todcor` engine APIs changed
+`AttributeError` or `TypeError`. Numerical results are unchanged except where
+"Numerical changes" below says otherwise, with how far the golden master
+moved; otherwise it (UNICOR, TODCOR, TIRAVEL, periodograms, instrument
+readers) passes bit-for-bit or at 1e-9 relative. The `unicor` and `todcor` engine APIs changed
 only additively: the `output` modes and the per-order / per-window atoms (see
 "Other changes").
 
@@ -183,8 +184,34 @@ Keys of `results_frequency` / `results_power`:
 | `'USURPER_biased'` | `'USURPER_biased'` |
 | `'shift_periodogram'`, `'shape_periodogram'` | `'partial_shift'`, `'partial_shape'` |
 
+### Numerical changes (2026-10-15)
+
+- **The partial periodograms shift each spectrum exactly to rest**,
+  λ / (1 + v/c), instead of λ·(1 − v/c), which left a residual shift of
+  ≈ v²/c (33 m/s at 100 km/s) that the shape periodogram partly detected.
+  `calc_partial_periodogram` takes `velocity_convention` ('cz' default) to
+  invert the convention the RVs were measured in. The golden partial
+  periodograms moved by up to 3.1e-4 (shape) and 4.2e-5 (shift) in power; a
+  pure-Doppler test with K = 30 km/s, where the shape distance should vanish,
+  moved by up to 0.023.
+- **`Spectrum.interpolate(method='linear')` takes a length as a length.**
+  `delta=0.25 * u.AA` is a 0.25 Å step (it was 0.25 × the median step); a
+  plain number is still a multiple of the median step; a velocity or another
+  unit raises `ValueError`. `Info['GridUnits']` is `'median step'` or
+  `'wavelength'` accordingly.
+
 ### Other changes
 
+- **Downloaded PHOENIX models go to a user cache**, not into the package:
+  `$SPARTA_CACHE_DIR/phoenix`, else `$XDG_CACHE_HOME/sparta/phoenix`, else
+  `~/.cache/sparta/phoenix` (`SPARTA_CACHE_DIR` must be absolute). The four
+  shipped files are read in place and never written (a corrupt one raises);
+  a lookup creates no directory; downloaded files are 0644. Models an earlier
+  version downloaded into `template_files/` are no longer read there: move
+  them to the user cache, or download them again.
+- `calc_partial_periodogram` raises `ValueError` naming the epochs whose RV is
+  not finite (a NaN used to reach the distance matrices); a `method='linear'`
+  step that is zero, negative, non-finite or an array raises `ValueError`.
 - One `vel_bound` default, 150 km/s, in `CCF1d.cross_correlate` (was 100),
   `CCF2d.cross_correlate` and both `Observations` RV drivers. It equals the
   default margin of `Template.cut_multiorder_like`, so a template cut with the
