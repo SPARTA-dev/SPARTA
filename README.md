@@ -57,12 +57,12 @@ spectra themselves. It is under active development; comments are welcome.
 ## Installation
 
 SPARTA is installed from a clone of this repository (it is not on PyPI). It
-needs Python 3.10 or later.
+needs Python 3.10 or later; it is tested on 3.10, 3.12 and 3.13.
 
 ```bash
 git clone https://github.com/SPARTA-dev/SPARTA.git
 cd SPARTA
-python -m venv .venv            # or: conda create -n sparta python=3.10
+python -m venv .venv            # or: conda create -n sparta python=3.12
 source .venv/bin/activate       #     conda activate sparta
 pip install -r requirements.txt
 ```

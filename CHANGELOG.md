@@ -337,6 +337,11 @@ Keys of `results_frequency` / `results_power`:
   strictly increasing, flux finite, and a finest step that does not blow the
   ln λ grid up past 4x the order's pixels (a near-duplicate wavelength in a
   stitched spectrum); each raises a clear `ValueError`.
+- Tested on Python 3.10 (numpy 2.2, scipy 1.15, astropy 6.1, specutils 2.1)
+  and on 3.12 and 3.13 with the then-latest releases (numpy 2.5, scipy 1.18,
+  astropy 8.0, specutils 2.4, matplotlib 3.11): every suite and notebook
+  passes. The byte-identity baselines skip, by design, outside the
+  environment that recorded them.
 - `SPARTA` requires `sparta-unicor>=0.2` and `sparta-todcor>=0.2` (it uses
   their per-order and per-window atoms); `>=0.1` let pip keep an older engine.
 - **Security hardening of the PHOENIX download** (the former FTP connection;

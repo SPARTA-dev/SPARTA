@@ -223,9 +223,10 @@ def test_weighted_combination_matches_the_summed_log_likelihood(grid):
     ccfs = _three_order_ccfs(grid)
     n_eff = np.array([100.0, 400.0, 1500.0])
     ml = unicor.combine_ccfs(ccfs, n_eff=n_eff)
-    np.testing.assert_allclose(n_eff.sum() * np.log(1 - ml ** 2),
-                               (n_eff[:, None] * np.log(1 - ccfs ** 2)).sum(axis=0),
-                               rtol=1e-10, atol=1e-12)
+    log_l = (n_eff[:, None] * np.log(1 - ccfs ** 2)).sum(axis=0)
+    # Compared as ML, not as log(1 - ML^2): near the peak 1 - ML^2 ~ 3e-8, and
+    # recovering it from ML would cancel away ~eps/3e-8 of its precision.
+    np.testing.assert_allclose(ml, np.sqrt(-np.expm1(log_l / n_eff.sum())), rtol=1e-12)
 
 
 @pytest.mark.parametrize("bad", [[100.0, 100.0], [100.0, 0.0, 100.0], [100.0, np.nan, 1.0]])
