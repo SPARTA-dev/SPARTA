@@ -1,11 +1,16 @@
 # SPARTA documentation
 
+- [good_practices.md](good_practices.md) — a checklist for an analysis, in
+  the order the work is done: what to do, what goes wrong if you don't, and
+  where it is explained.
 - [conventions.md](conventions.md) — units, the ln λ grid, velocity
   conventions, air/vacuum, times, native sampling, preprocessing order, and
   when the error bars are calibrated.
 - [correlation_engines.md](correlation_engines.md) — UNICOR and TODCOR: the
   CCF and the 2-D fit, their correlation and log-likelihood outputs, RVs,
   errors and result keys, side by side.
+- [tiravel.md](tiravel.md) — TIRAVEL: what is implemented, how to read ρ
+  and the weights, and the plan for the velocity optimiser.
 - [periodograms.md](periodograms.md) — GLS, PDC, error-aware PDC, USuRPER and
   the shift/shape partial periodograms; result keys and p-values.
 - [instruments.md](instruments.md) — every survey key: frames, time systems,
