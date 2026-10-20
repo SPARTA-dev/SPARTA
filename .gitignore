@@ -31,3 +31,6 @@ CLAUDE.md
 PROJECT_LOG.md
 KNOWN_TRAPS.md
 MEMORY.md
+
+# Local scratch data and validation notebooks (not for the public repo)
+examples/data/tmp/

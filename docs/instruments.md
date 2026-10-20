@@ -233,10 +233,10 @@ IRAF echelle image, one order per line, with a multispec WCS (WAT2 cards); the o
 
 ### `UVES` (unverified)
 
-ESO Phase-3 SDP 1-D echelle spectrum (ADP.*.fits): one-row binary table in HDU1 with WAVE and FLUX (or FLUX_REDUCED) columns.
+ESO Phase-3 SDP 1-D echelle spectrum (ADP.*.fits, PRODCATG SCIENCE.SPECTRUM): one-row binary table in HDU1 with WAVE and FLUX (or FLUX_REDUCED) columns. The window must lie within one CCD chip; no-data pixels (zero flux, non-positive error) are trimmed from the chip ends, and a window with such pixels inside a chip is refused. Errors are in extras['err']. The ancillary 2-D images (ANCILLARY.2DSPECTRUM) are not read.
 
 - Loader: `sparta.instruments.uves.load_sdp`
-- Grid: 1-D merged spectrum as delivered by the ESO pipeline (resampled by the archive pipeline)
+- Grid: 1-D merged spectrum as delivered by the ESO pipeline, linear in wavelength per CCD chip (resampled by the archive pipeline)
 - Orders returned: one
 - Wavelength frame: air; SPECSYS: TOPOCENT; time: MJD-UTC
 - Recommended settings: none yet
